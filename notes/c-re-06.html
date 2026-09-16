@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWITCH · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+* { cursor:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">SWITCH</h1>
+<div class="meta"><span class="cat">C 逆向</span></div>
+<article>
+<h2>SWITCH：</h2>
+<h2>直接分支：</h2>
+<pre><code>
+switch (argc) {
+case 1:printf(&quot;case 1&quot;);break;
+case 2:printf(&quot;case 2&quot;);break;
+case 3:printf(&quot;case 3&quot;);break;
+}
+</code></pre>
+<h2>做一个表：</h2>
+<pre><code>
+switch (argc) {
+case 1:printf(&quot;case 1&quot;);break;
+case 2:printf(&quot;case 2&quot;);break;
+case 3:printf(&quot;case 3&quot;);break;
+case 4:printf(&quot;case 4&quot;);break;
+}
+</code></pre>
+<h2>做两个表（case值最大间隔小于255）：</h2>
+<pre><code>
+switch (argc) {
+case 100:printf(&quot;case 1&quot;);break;
+case 101:printf(&quot;case 2&quot;);break;
+case 102:printf(&quot;case 3&quot;);break;
+case 104:printf(&quot;case 4&quot;);break;
+default:printf(&quot;default&quot;);break;
+}
+</code></pre>
+<h2>二分法（case值间隔超过255）</h2>
+<pre><code>
+switch (argc) {
+case 100:printf(&quot;case 100&quot;);break;
+case 200:printf(&quot;case 200&quot;);break;
+case 300:printf(&quot;case 300&quot;);break;
+case 400:printf(&quot;case 400&quot;);break;
+case 500:printf(&quot;case 500&quot;);break;
+case 600:printf(&quot;case 600&quot;);break;
+default:printf(&quot;default&quot;);break;
+}
+</code></pre>
+<h2>循环：</h2>
+<h2>do-while:</h2>
+<pre><code>
+条件跳转在后面：
+int i = 0;
+do {
+    printf(&quot;%d&quot;, i);
+    i++;
+}
+while(i &lt; 10);
+
+.text:00401040                 push    esi
+.text:00401041                 xor     esi, esi
+.text:00401043
+.text:00401043 loc_401043:                                ; CODE XREF:
+.text:00401043                 push    esi
+.text:00401044                 push    offset _Format  ; &quot;%d&quot;
+.text:00401049                 call    _printf
+.text:0040104E                 inc     esi
+.text:0040104F                 add     esp, 8
+.text:00401052                 cmp     esi, 0Ah
+.text:00401055                 jl      short loc_401043
+.text:00401057                 pop     esi
+.text:00401058                 xor     eax, eax
+.text:0040105A                 retn
+.text:0040105A _main          endp
+</code></pre>
+<h2>while与for:</h2>
+<pre><code>
+在release里面被优化成 if判断加do-while结构：
+int i = 0;
+while (i &lt; 10) {
+    printf(&quot;%d&quot;, i);
+    i++;
+} ;
+等价于：
+if (i &lt; 10) {
+    do {
+        printf(&quot;%d&quot;, i);
+        i++;
+    }
+    while (i &lt; 10);
+}
+</code></pre>
+<h2>continue：</h2>
+<pre><code>
+汇编表现为跳回循环的判断位置
+for (int i = argc; i &lt; 10; i++) {
+    if (i == 3) {
+        continue;
+    }
+
+loc_401050:
+			cmp     esi, 3
+			jz      short loc_401063
+			push    esi
+			push    offset _Format  ; &quot;%d&quot;
+			call    _printf
+			add     esp, 8
+
+loc_401063:
+			inc     esi
+			cmp     esi, 0Ah
+			jl      short loc_401050
+</code></pre>
+<h2>Break：</h2>
+<pre><code>
+汇编表现为跳出整个循环范围
+for (int i = argc; i &lt; 10; i++) {
+    if (i == 3) {
+        Break;
+    }
+
+.text:00401050 loc_401050:
+.text:00401050                 cmp     esi, 3
+.text:00401053                 jz      short loc_401069
+.text:00401055                 push    esi
+.text:00401056                 push    offset _Format  ; &quot;%d&quot;
+.text:0040105B                 call    _printf
+.text:00401060                 inc     esi
+.text:00401061                 add     esp, 8
+.text:00401064                 cmp     esi, 0Ah
+.text:00401067                 jl      short loc_401050
+.text:00401069
+.text:00401069 loc_401069:
+.text:00401069
+.text:00401069                 xor     eax, eax
+.text:0040106B                 pop     esi
+.text:0040106C                 pop     ebp
+.text:0040106D                 retn
+.text:0040106D _main          endp
+</code></pre>
+<h2>循环优化：</h2>
+<pre><code>
+
+代码外提：
+先计算argc / 7 后面就不用重复计算了
+int n = 0;
+for (int i = 0;i &lt; argc / 7;i++) {
+    printf(&quot;%d&quot;, argc + n);
+    n++;
+}
+
+强度削弱：
+用高效的加法运算替代低效的乘法运算
+//强度削弱
+int n = 0;
+int sum = 1;
+for (int i = 0; i &lt; argc; i++) {
+    sum += argc; //sum = argc + argc + argc
+}
+printf(&quot;%d&quot;, sum);
+
+循环展开：
+将多次循环体合并为一次执行
+for (int i = 0; i &lt; 3; i++) {
+    printf(&quot;hello world\n&quot;);
+}
+直接转化为3次printf
+</code></pre>
+</article>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

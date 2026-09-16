@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>位操作 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+* { cursor:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">位操作</h1>
+<div class="meta"><span class="cat">C 逆向</span></div>
+<article>
+<h2>位操作：</h2>
+<p>|                 |                                 |                          | | --------------- | ------------------------------- | ------------------------ | | <code>x & -x</code>        | 取最低位的 1                         | <code>neg</code> + <code>and</code>            | | <code>x & (x-1)</code>     | <strong>清掉</strong>最低位的 1（判 2 的幂：<code>==0</code> 即 2ⁿ） | <code>lea/dec</code> + <code>and</code>        | | <code>x \| (x-1)</code>    | 低位填 1                           | <code>lea/dec</code> + <code>or</code>         | | <code>~(x \| (x-1))</code> | 低位 1 及以上掩码                      | <code>lea/dec</code> + <code>or</code> + <code>not</code> | | <code>x ^ x</code>         | 清零（编译器产生 0 的惯用法）                | <code>xor reg, reg</code>           |</p>
+<h2>函数优化：</h2>
+<pre><code>
+EBP寻址：保留帧指针，参数通过[ebp+8]、[ebp+C]等固定偏移访问，可读性好但占用一个寄存器。
+ESP寻址：省略帧指针以优化性能，但栈指针随压栈/出栈动态变化，导致参数偏移不固定，增加逆向难度。
+</code></pre>
+<pre><code>
+
+如何判断有几个参数 和返回值：
+
+cdecl
+调用方平栈  观察函数push了几个参数 然后进入函数内部观察用了几个arg
+
+stdcall
+被调方平栈 看函数结尾的时候return了多少位 判断出几个参数
+
+fastcall
+第一个参数 ecx 第二个参数 edx 多了从右往左入栈  进函数里面看用了ecx和edx没有 如果还有压栈的
+就是return的参数+2
+
+总结：逆向的时候判断函数内有没有return平栈，如果有排除cdecl ，然后观察是否使用ecx判断是不是fastcall
+</code></pre>
+<pre><code>
+
+在ida中快捷键K就是Convert to stack variable（把操作数转换成栈变量）。
+
+如何识别参数类型：
+看汇编怎么用它 执行整数加减则为整型，涉及浮点寄存器操作则为浮点型。
+
+如何判断返回值类型：
+整形返回值：32位结果存于EAX，64位结果高位存于EDX、低位存于EAX。
+浮点返回值：无论float还是double，结果均存放在协处理器栈顶ST0寄存器中
+
+</code></pre>
+<h2>常用字符串函数内联特征：</h2>
+<pre><code>
+如果调用了c库的字符串函数强制内联：
+strlen：
+高版本：
+	mov eax, [ebp+argv]
+	mov eax, [eax]
+	lea edx, [eax+1]
+loc_401050:
+	mov cl, [eax]
+	inc eax
+	test cl, cl
+	jnz short loc_401050
+	sub eax, edx
+	push eax
+低版本：
+	mov eax, [esp+argv]
+	or ecx, 0FFFFFFFFh
+	mov edi, [eax]
+	xor eax, eax
+	repne scasb
+	not ecx
+	dec ecx
+	push ecx
+strcpy：
+高版本：
+	mov eax, [ebp+argv]
+	lea edx, [ebp+s1]
+	mov ecx, [eax]
+loc_401028:
+	mov al, [ecx]
+	lea ecx, [ecx+1]
+	mov [edx], al
+	lea edx, [edx+1]
+	test al, al
+	jnz short loc_401028
+	lea eax, [ebp+s1]
+	push eax ; Buffer
+低版本：
+	mov     eax, [esp+argv]
+	sub     esp, 64h
+	or      ecx, 0FFFFFFFFh
+	lea     edx, [esp+64h+Buffer]
+	push    esi
+	push    edi
+	mov     edi, [eax]
+	xor     eax, eax
+	repne scasb
+	not     ecx             ; ecx = strlen() + 1
+	sub     edi, ecx
+	mov     eax, ecx
+	mov     esi, edi
+	mov     edi, edx
+	shr     ecx, 2
+	rep movsd
+	mov     ecx, eax
+	and     ecx, 3
+	rep movsb
+	lea     ecx, [esp+6Ch+Buffer]
+	push    ecx             ; Buffer
+strcmp：
+高版本：
+	mov eax, [ebp+argv]
+	mov ecx, offset aHello ; &quot;hello&quot;
+	mov eax, [eax]
+	lea ecx, [ecx+0]
+loc_401010:
+	mov dl, [eax]
+	cmp dl, [ecx]
+	jnz short loc_401030
+	test dl, dl
+	jz short loc_40102C
+	mov dl, [eax+1]
+	cmp dl, [ecx+1]
+	jnz short loc_401030
+	add eax, 2
+	add ecx, 2
+	test dl, dl
+	jnz short loc_401010
+loc_40102C:
+	xor eax, eax
+	pop ebp
+	retn
+loc_401030:
+	sbb eax, eax
+	or eax, 1
+	pop ebp
+	retn
+低版本：
+	同上
+
+
+</code></pre>
+<pre><code>
+vs开启全程序优化后，编译器可能跨模块改变调用约定（如将cdecl转为更快的fastcall），并进行常量传播，直接将常量值代入函数内部而非通过栈传递。
+- 逆向此类代码时，需观察函数内部的栈平衡指令（如<code>ret 0xC</code>）来反推原始参数个数，即使部分参数在调用处未被显式压栈。
+</article>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

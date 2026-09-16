@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>除法的基本定义 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+* { cursor:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">除法的基本定义</h1>
+<div class="meta"><span class="cat">C 逆向</span></div>
+<article>
+<h2>除法的基本定义</h2>
+<h3>除法是什么</h3>
+<ul>
+<li>已知两个因数的积与其中一个因数，求另一个因数的运算，叫做除法。</li>
+<li>在整数除法中，存在整除和不能整除两种情况。</li>
+<li>不能整除时，需要用余数描述没有被除数整除的部分。</li>
+</ul>
+<h3>四个基本量</h3>
+<p>设：</p>
+<pre><code>
+a：被除数
+b：除数
+q：商
+r：余数
+</code></pre>
+<p>必须满足：</p>
+<pre><code>
+b != 0
+</code></pre>
+<p>基本关系：</p>
+<pre><code>
+a=bq+r
+</code></pre>
+<p>余数范围：</p>
+<pre><code>
+|r|&lt;|b|
+</code></pre>
+<h3>基本关系的变形</h3>
+<p>由：</p>
+<pre><code>
+a=bq+r
+</code></pre>
+<p>可以得到：</p>
+<pre><code>
+r=a-bq
+q=(a-r)/b
+</code></pre>
+<p>当 q≠0 时，还可以得到：</p>
+<pre><code>
+b=(a-r)/q
+</code></pre>
+<h3>C 语言中的有符号整数除法</h3>
+<p>现代 C 语言的有符号整数除法采用向 <code>0</code> 截断：</p>
+<pre><code>
+-7 / 2 = -3
+</code></pre>
+<p>根据 r=a-bq：</p>
+<pre><code>
+r = -7 - 2 * (-3)
+r = -1
+</code></pre>
+<p>所以 C 语言采用的表示是：</p>
+<pre><code>
+-7 = 2 * (-3) + (-1)
+</code></pre>
+<h3>余数符号</h3>
+<p>在 C 的向 <code>0</code> 截断规则下：</p>
+<ul>
+<li>余数为零，或者余数符号与被除数相同。</li>
+<li>“余数符号跟第一个数有关”中的“第一个数”应准确写成“被除数”。</li>
+<li>余数符号不是由除数决定的。</li>
+</ul>
+<p>例如：</p>
+<pre><code>
+ 7 除以  2：商  3，余数  1
+-7 除以  2：商 -3，余数 -1
+ 7 除以 -2：商 -3，余数  1
+-7 除以 -2：商  3，余数 -1
+</code></pre>
+<h2>有符号与无符号除法</h2>
+<h3>同类型运算</h3>
+<p>在常见的 32 位 <code>int</code>、<code>unsigned int</code> 环境中：</p>
+<p>| 被除数 | 除数 | 运算采用的类型 | 商的类型 | |---|---|---|---| | 有符号 | 有符号 | 有符号 | 有符号 | | 无符号 | 无符号 | 无符号 | 无符号 |</p>
+<h3>混合类型运算</h3>
+<p>当同级别的 <code>int</code> 和 <code>unsigned int</code> 混合时，通常会先把 <code>int</code> 转换为 <code>unsigned int</code>：</p>
+<p>| 被除数                | 除数                 | 常见转换结果     | 商的类型 | | ------------------ | ------------------ | ---------- | ---- | | 有符号 <code>int</code>          | 无符号 <code>unsigned int</code> | 有符号数转为无符号数 | 无符号  | | 无符号 <code>unsigned int</code> | 有符号 <code>int</code>          | 有符号数转为无符号数 | 无符号  |</p>
+<p>例如：</p>
+<pre><code>
+-7 / 2u
+</code></pre>
+<p>这里的 <code>-7</code> 通常先转换成一个很大的无符号数，因此结果不再是 <code>-3</code>。</p>
+<h2>向下取整与向上取整</h2>
+<h3>符号与函数名</h3>
+<pre><code>
+floor(x) = ⌊x⌋：向下取整，也叫地板取整
+ceil(x)  = ⌈x⌉：向上取整，也叫天花板取整
+</code></pre>
+<h3>向下取整</h3>
+<p>⌊x⌋ 表示不大于 x 的最大整数。</p>
+<p>例如：</p>
+<pre><code>
+⌊3.7⌋  = 3
+⌊-3.7⌋ = -4
+</code></pre>
+<h3>向上取整</h3>
+<p>⌈x⌉ 表示不小于 x 的最小整数。</p>
+<p>例如：</p>
+<pre><code>
+⌈3.7⌉  = 4
+⌈-3.7⌉ = -3
+</code></pre>
+<h2>取整定理与推导</h2>
+<h3>定理 1：基本范围</h3>
+<p>若 x 为实数：</p>
+<pre><code>
+⌊x⌋≤ x
+
+⌈x⌉≥ x
+</code></pre>
+<h3>推导 1：完整范围</h3>
+<pre><code>
+x-1 &lt; ⌊x⌋ ≤ x ≤ ⌈x⌉ &lt; x+1
+</code></pre>
+<h3>推导 2</h3>
+<p>由 x-1<⌊x⌋，两边加 <code>1</code>：</p>
+<pre><code>
+x&lt;⌊x⌋+1
+</code></pre>
+<h3>推导 3：非整数时上下取整相差 1</h3>
+<p>当 x 不是整数时：</p>
+<pre><code>
+⌈x⌉=⌊x⌋+1
+</code></pre>
+<p>只有在 x 不是整数时才能直接加 <code>1</code>。</p>
+<h3>定理 2：整数的上下取整</h3>
+<p>若 x 是整数：</p>
+<pre><code>
+⌊x⌋=x
+
+⌈x⌉=x
+</code></pre>
+<p>因此当 x 是整数时，上下取整相等，而不是相差 <code>1</code>。</p>
+<h3>定理 3：正负对称关系</h3>
+<pre><code>
+-⌊x⌋=⌈-x⌉
+
+-⌈x⌉=⌊-x⌋
+</code></pre>
+<h3>推导 4：对称关系的等价写法</h3>
+<pre><code>
+⌊x⌋=-⌈-x⌉
+
+⌈x⌉=-⌊-x⌋
+</code></pre>
+<h3>定理 4：加整数后的平移</h3>
+<p>若 x 为实数，n 为整数：</p>
+<pre><code>
+⌊x+n⌋=⌊x⌋+n
+
+⌈x+n⌉=⌈x⌉+n
+</code></pre>
+<p>这里必须要求 n 是整数。</p>
+<h3>推导 5：与整数边界比较</h3>
+<p>若 n 是整数：</p>
+<pre><code>
+⌊x⌋ &lt; n ⇔ x &lt; n
+</code></pre>
+<p>正向证明：</p>
+<ul>
+<li>因为 ⌊x⌋≤ x。</li>
+<li>若 x<n，则 ⌊x⌋<n。</li>
+</ul>
+<p>反向证明：</p>
+<ul>
+<li>若 ⌊x⌋<n，由于两边都是整数，所以 ⌊x⌋+1≤ n。</li>
+<li>又因为 x<⌊x⌋+1。</li>
+<li>因此 x<n。</li>
+</ul>
+<h3>推导 6：加一个很小的数不跨过整数边界</h3>
+<p>设 a、b 为整数，b≠0，x 为实数。</p>
+<p>若：</p>
+<pre><code>
+0≤ x&lt; 1/b
+</code></pre>
+<p>则：</p>
+<pre><code>
+⌊a/b+x⌋ = ⌊a/b⌋
+</code></pre>
+<p>若：</p>
+<pre><code>
+-1/b &lt; x ≤ 0
+</code></pre>
+<p>则：</p>
+<pre><code>
+⌈a/b+x⌉ = ⌈a/b⌉
+</code></pre>
+<p>原因：</p>
+<ul>
+<li>a/b 的小数部分只能按照 1/|b| 的整数倍变化。</li>
+<li>增加或减少一个绝对值小于 1/|b| 的量，不足以跨过下一个整数边界。</li>
+</ul>
+<h2>推导 7：上下取整公式的互换</h2>
+<h3>当 <code>b > 0</code> 时的正确结论</h3>
+<pre><code>
+⌊a/b⌋ = ⌈(a-b+1)/b⌉
+
+⌈a/b⌉ = ⌊(a+b-1)/b⌋
+</code></pre>
+<h3>从推导第一个公式</h3>
+<pre><code>
+设：
+
+a = qb+r
+
+因为 b&gt;0，可以取：
+
+0≤ r ≤ b-1
+
+所以：
+
+⌊a/b⌋ = q
+
+由余数范围：
+
+0≤ r≤ b-1
+
+两边减去 b-1：
+
+-(b-1) ≤ r-b+1 ≤ 0
+
+因为 b&gt;0，两边除以 b：
+
+-1 &lt; (r-b+1)/b ≤ 0
+
+两边加上整数 q：
+
+q-1 &lt; q+(r-b+1)/b ≤ q
+
+位于区间 (q-1,q] 内的数向上取整等于 q：
+
+q = ⌈q+(r-b+1)/b⌉
+
+代入 a=qb+r：
+
+q+(r-b+1)/b = (qb+r-b+1)/b = (a-b+1)/b
+
+最终得到：
+
+⌊a/b⌋=⌈(a-b+1)/b⌉
+</code></pre>
+<h3>从推导第二个公式</h3>
+<pre><code>
+仍然设：
+
+a=qb+r， 0≤ r≤ b-1
+
+当 r=0 时：
+
+⌈a/b⌉=q
+
+当 r&gt;0 时：
+
+⌈a/b⌉=q+1
+
+观察：
+
+(a+b-1)/b = q+(r+b-1)/b
+
+当 r=0 时：
+
+0≤(b-1)/b&lt;1
+
+向下取整得到 q。
+
+当 r&gt;0 时，因为余数是整数：
+
+1≤ r≤ b-1
+
+所以：
+
+1≤(r+b-1)/b&lt;2
+
+向下取整得到 q+1。
+
+因此：
+
+⌈a/b⌉ = ⌊(a+b-1)/b⌋
+</code></pre>
+<h3>当 <code>b < 0</code> 时</h3>
+<p>令：</p>
+<pre><code>
+c = -b
+</code></pre>
+<p>因为 b<0，所以 c>0，并且：</p>
+<pre><code>
+a/b = -a/c
+</code></pre>
+<p>利用：</p>
+<pre><code>
+⌊-x⌋ = -⌈x⌉
+
+⌈-x⌉ = -⌊x⌋
+</code></pre>
+<p>可以得到：</p>
+<pre><code>
+⌊a/b⌋ = ⌈(a-b-1)/b⌉
+
+⌈a/b⌉ = ⌊(a+b+1)/b⌋
+</code></pre>
+<h2>无符号数除以正的 <code>2^n</code></h2>
+<p>若 <code>x</code> 是无符号整数：</p>
+<pre><code>
+x/(2^n) = x &gt;&gt; n
+</code></pre>
+<p>例如：</p>
+<pre><code>
+13 / 8 = 1
+13 &gt;&gt; 3 = 1
+</code></pre>
+<p>因为：</p>
+<pre><code>
+8 = 2^3
+</code></pre>
+<p>所以除以 <code>8</code> 对应右移 <code>3</code> 位。</p>
+<h2>有符号数除以正的 <code>2^n</code></h2>
+<h3>最终公式</h3>
+<pre><code>
+x/(2^n) = (x + ((x &gt;&gt; 31) &amp; (2^n - 1))) &gt;&gt; n
+</code></pre>
+<h3>除以 <code>2</code> 的情况</h3>
+<p>令 n=1：</p>
+<pre><code>
+2^1-1=1
+</code></pre>
+<p>因此：</p>
+<pre><code>
+(x + ((x &gt;&gt; 31) &amp; 1)) &gt;&gt; 1
+</code></pre>
+<p>以 <code>x=-7</code> 为例：</p>
+<pre><code>
+x &gt;&gt; 31 = -1
+-1 &amp; 1 = 1
+(-7 + 1) &gt;&gt; 1
+= -6 &gt;&gt; 1
+= -3
+</code></pre>
+<p>结果与 C 的 <code>-7 / 2</code> 相同。</p>
+<h3>除以 <code>8</code> 的情况</h3>
+<p>令 n=3：</p>
+<pre><code>
+2^3-1=7
+</code></pre>
+<p>因此：</p>
+<pre><code>
+(x + ((x &gt;&gt; 31) &amp; 7)) &gt;&gt; 3
+</code></pre>
+<p>例如 <code>x=-9</code>：</p>
+<pre><code>
+x &gt;&gt; 31 = -1
+
+-1 &amp; 7 = 7
+
+(-9 + 7) &gt;&gt; 3 = -2 &gt;&gt; 3 = -1
+</code></pre>
+<p>结果与 C 的 <code>-9 / 8</code> 相同。</p>
+<h2>有符号数除以负的 <code>2^n</code></h2>
+<h3>最终公式</h3>
+<pre><code>
+x/(-2^n) = -((x + ((x &gt;&gt; 31) &amp; (2^n - 1))) &gt;&gt; n)
+</code></pre>
+<p>先计算：</p>
+<pre><code>
+trunc(x/(2^n))
+</code></pre>
+<p>再对商取负：</p>
+<pre><code>
+trunc(x/(-2^n))=-trunc(x/(2^n))
+</code></pre>
+<p>除以 <code>-8</code> 时：</p>
+<pre><code>
+-((x + ((x &gt;&gt; 31) &amp; 7)) &gt;&gt; 3)
+</code></pre>
+<p>例如 <code>x=-9</code>：</p>
+<pre><code>
+-9 / -8 = 1
+-((-9 + 7) &gt;&gt; 3)
+= -(-2 &gt;&gt; 3)
+= -(-1)
+= 1
+</code></pre>
+</article>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

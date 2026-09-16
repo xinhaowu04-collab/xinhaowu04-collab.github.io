@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>取模 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+* { cursor:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">取模</h1>
+<div class="meta"><span class="cat">C 逆向</span></div>
+<article>
+<h2><strong>取模</strong></h2>
+<p><strong>1. 2的幂</strong></p>
+<ul>
+<li>$x \ge 0$</li>
+</ul>
+<div class="math">$$
+
+- $x < 0$
+
+$$</div>
+<ul>
+<li>$x \ge 0$</li>
+</ul>
+<div class="math">$$
+
+- $x < 0$
+
+$$</div>
+<p><strong>对应汇编指令（以模 4 为例）：</strong></p>
+<p>代码段</p>
+<pre><code>
+cdq
+and edx, 3
+add eax, edx
+and eax, 3
+sub eax, edx
+</code></pre>
+<p><strong>2. 非 2 的幂</strong></p>
+<div class="math">$$
+给你一份实战速查表，按"看到什么 → 是什么 → 怎么还原"组织：
+
+# 取模逆向速查表
+
+## 一、模 2 的幂（看掩码识 n）
+
+| 场景 | 汇编指纹 | 说明 |
+|---|---|---|
+| <strong>无符号</strong> | <code>and reg, 2ⁿ−1</code>（就一条） | 没有任何符号处理 |
+| <strong>有符号·形态A</strong>（cdq 流，你笔记 04.md 那种） | <code>cdq</code> → <code>and edx, 2ⁿ−1</code> → <code>add eax, edx</code> → <code>and eax, 2ⁿ−1</code> → <code>sub eax, edx</code> | 加符号掩码补偿后再减回去 |
+| <strong>有符号·形态B</strong>（分支流，你在靶程序遇到的） | <code>and reg, 0x80000000+(2ⁿ−1)</code> → <code>jns</code> → <code>dec</code> → <code>or reg, ~(2ⁿ−1)</code> → <code>inc</code> | <code>jns</code> 是算法内部符号分支，<strong>源码无 if</strong> |
+
+<strong>掩码对照</strong>（背这几个就够）：
+
+| 见到的常量 | 身份 | 结论 |
+|---|---|---|
+| <code>3</code> / <code>80000003h</code> | <code>2²−1</code> / 符号位+掩码 | 模 <strong>4</strong> |
+| <code>7</code> / <code>80000007h</code> | <code>2³−1</code> | 模 <strong>8</strong> |
+| <code>0Fh</code>、<code>1Fh</code>、<code>0FFh</code> | <code>2ⁿ−1</code> | 模 16、32、256 |
+| <code>0FFFFFFFCh</code> | <code>~3</code> | 模 4 的负数修正步 |
+| <code>0FFFFFFF8h</code> | <code>~7</code> | 模 8 的负数修正步 |
+
+规律：<strong>低位连续 1 → 是 <code>2ⁿ−1</code>（掩码）；高位连续 1 → 是 <code>~(2ⁿ−1)</code>（修正用）</strong>。
+
+## 二、模非 2 的幂（公式：<code>x%c = x − (x/c)·c</code>）
+
+指纹三步曲，按顺序出现：
+
+<pre><code>
+① 魔数除法序列        → 先用 03.md 的表认出 x/c
+② 商乘回 c            → imul reg, reg, c   或   lea 组合（×7: lea r,[r*8] 再 sub r）
+③ 被除数 − 乘回值     → sub
+</code></pre>
+
+<strong>关键捷径</strong>：<code>c</code> 在②里以<strong>普通立即数</strong>原样出现——模非 2 的幂时<strong>不用解魔数</strong>，直接看乘回来那个数就是除数！
+
+你靶程序里的实例（<code>pay % 7</code>）：
+
+<pre><code>
+imul / 92492493h / add / sar     ; ① pay/7 的魔数
+lea  eax, ds:0[ecx*8]
+sub  eax, ecx                    ; ② 商×7（8q−q 的 lea 玩法）
+sub  edi, eax                    ; ③ pay − q×7 = pay%7
+</code></pre>
+
+## 三、判别口诀
+
+1. <strong>见小掩码（3/7/F/FF…）→ 模 2 的幂</strong>；光杆 <code>and</code> 是无符号，带 <code>cdq</code> 尾巴或 <code>8000_000x</code>+<code>dec/or/inc</code> 尾巴是有符号
+2. <strong>见魔数别急着喊除法</strong>——往后看三条指令：有"乘回+减"→ 是取模；直接存结果 → 是纯除法
+3. <strong>乘回的立即数 = 除数</strong>，白送
+4. 余数符号跟被除数走（C 向零取整），所以符号修正永远在被除数为负的路径上
+
+
+</article>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

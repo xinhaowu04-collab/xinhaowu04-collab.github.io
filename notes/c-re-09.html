@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>变量 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+* { cursor:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">变量</h1>
+<div class="meta"><span class="cat">C 逆向</span></div>
+<article>
+<h1>变量：</h1>
+<h3>栈帧与局部变量识别：</h3>
+<pre><code>
+  EBP 寻址：[ebp-X]=局部  [ebp+X]=参数，偏移稳定最好读
+  ESP 寻址：FPO 省掉帧指针，esp 一动偏移就变
+            → 必须靠 IDA 栈模拟才能命名（无所谓用哪种）
+  IDA 操作：K = 裸偏移转栈变量；双击 var_X 进栈帧窗口
+
+  栈帧窗口布局（上→下）：
+    局部变量(负偏移,最深的 var 在最上) → s(存ebp) → r(返回地址) → 参数
+  cookie：开 /GS 时在 [ebp-4]，即局部区最末一个（var_4）
+          函数尾有 __security_check_cookie 实锤
+</code></pre>
+<h2>全局变量识别：</h2>
+<pre><code>
+  已初始化      → .data
+  未初始化      → .bss（文件不占空间，加载清零；
+                  有的编译器并入 .data 补 0，两种都对）
+
+  static 与否   → 无法还原（链接性信息编译后丢失）
+  static 局部   → 启发式还原：
+                  a) 常量初始化：.data 里的值，仅被一个函数引用
+                  b) 运行期初始化：if(!flag) 守卫内写一次
+
+</code></pre>
+<h3>线程安全静态初始化（magic statics）</h3>
+<pre><code>
+C++11 要求运行期初始化的 static 局部线程安全
+（static int s = n; 需要；static int s = 5; 不需要）
+
+【VS高版本】每个变量一个 $TSS 标志（三态: 0/-1/正数）
+	  ; ---- 快速路径：初始化完成后每次都走，无锁 ----
+	  mov     eax, large fs:2Ch      ; TEB.ThreadLocalStoragePointer
+	  mov     ecx, [eax]             ; CRT 每线程数据结构
+	  mov     edx, $TSS0
+	  cmp     edx, [ecx+4]           ; 完成纪元 vs 本线程已见纪元
+	  jle     short loc_4010D4       ; 已初始化且可见 → 跳过整段
+	  ; ---- 慢路径：只发生一次 ----
+	  push    offset $TSS0
+	  call    __Init_thread_header
+	  add     esp, 4
+	  cmp     $TSS0, 0FFFFFFFFh      ; -1 = 我抢到了初始化权
+	  jnz     short loc_4010D4       ; 没抢到 → 跳过
+	  mov     eax, [ebp+n]
+	  mov     s_num2, eax            ; ← 真正的初始化语句
+	  push    offset $TSS0
+	  call    __Init_thread_footer   ; 发布完成、唤醒等待者
+	  add     esp, 4
+
+【__Init_thread_header】全局 SRW 锁，所有 static 共用一把
+	  push    ebp
+	  mov     ebp, esp
+	  push    esi
+	  push    offset g_tss_srw
+	  call    ds:AcquireSRWLockExclusive
+	  mov     esi, [ebp+ptrOnce]     ; esi = &amp;$TSS0
+	  mov     eax, [esi]
+	  test    eax, eax
+	  jnz     short loc_4011CC       ; 非0: 已完成/别人在做 → 去等
+	  mov     dword ptr [esi], 0FFFFFFFFh  ; 是0: 占坑置-1
+	  push    offset g_tss_srw
+	  call    ds:ReleaseSRWLockExclusive
+	  pop     esi / pop ebp / retn
+
+【VC6 】一个 byte 按位分配，第0位=第1个变量，无任何同步
+	  xor     eax, eax
+	  mov     al, s_flag
+	  and     eax, 1                 ; 测第0位
+	  test    eax, eax
+	  jnz     short loc_401029       ; 已初始化 → 跳过
+	  mov     cl, s_flag
+	  or      cl, 1
+	  mov     s_flag, cl             ; 置位（读改写，非原子）
+	  mov     edx, [ebp+arg_0]
+	  mov     s_num2, edx            ; ← 初始化语句
+	  ; 第二个变量 → and 2 / or 2，同构再来一遍
+
+识别：
+  fs:2Ch + header/footer 成对 + 某dollarTSS被写-1 → VS2015+
+  byte标志 + and/or 1、and/or 2 位操作对 → VC6
+  两个位就有两个变量；竞态：双重初始化+半构造可见(UB)
+  VC6更快但不安全；高版本无锁快路径+有锁慢路径，代价只付一次
+</code></pre>
+<h1>栈变量、数组：</h1>
+<h3>堆变量：</h3>
+<pre><code>
+识别：追 malloc/new/HeapAlloc
+</code></pre>
+<h2>一维数组：</h2>
+<pre><code>
+  特征：连续等距访问 ary + sizeof(type)*index
+        [ebp+ary] / [ebp+ary+4] / [ebp+ary+8]... 步长=元素大小
+  大小三证据（交叉验证）：
+    1) 循环次数（cmp/jl 的常量）
+    2) 初始化覆盖的最大偏移
+    3) 栈分配量 sub esp, N（数组再大装不下）
+</code></pre>
+<h3>IDA 定义数组：</h3>
+<pre><code>
+  栈帧/数据窗口首地址上：D 切到目标尺寸（连按循环 db/dw/dd）
+  然后 * 弹数组对话框填个数
+</code></pre>
+<h3>多维数组：</h3>
+<pre><code>
+  公式：元素下标 = i×列数 + j
+  铁律：初始化序列看不出维度（int a[6] 和 int[2][3] 编译结果一样）
+        维度信息只在带变量的寻址表达式里
+
+</code></pre>
+<h1>结构体：</h1>
+<h3>全局变量初始化为函数返回值：</h3>
+<pre><code>
+  源码: int g = foo();
+  无法静态初始化 → 编译器生成隐藏的&quot;动态初始化函数&quot;
+  内容: call foo / mov g, eax
+  函数指针被链接器收集进 .CRT$XCU 表段
+  CRT 入口(mainCRTStartup→__scrt_common_main_seh)在 main 前
+  遍历执行全部初始化函数
+
+  入口处调用形态：
+      push    offset ___xi_z      ; Last
+      push    offset ___xi_a      ; First
+      call    __initterm_e
+  成对关系：
+    __xi_a~__xi_z + _initterm_e ：C 初始化器，返回非0=启动失败
+    __xc_a~__xc_z + _initterm  ：C++ 构造/动态初始化，无返回值
+  initterm 逻辑: 遍历 [First,Last) 函数指针数组，逐个 call
+
+  逆向定位两条路：
+    1. 入口点顺 call 找到 _initterm，看表里的函数指针
+    2. 全局变量 Ctrl+X → 写它的初始化函数 → 再 Ctrl+X
+       → 落在 CRT 表区 → 被 initterm 遍历
+  特征指纹：main 之前执行的、给全局变量赋值的小函数
+</code></pre>
+<h3>结构体 vs 数组判别：</h3>
+<pre><code>
+  汇编特征：&quot;基地址 + 尺寸不一的偏移&quot;
+      mov  eax, [esi]      ; +0  int
+      mov  eax, [esi+4]    ; +4  int
+      mov  cx,  [esi+8]    ; +8  short ← 大小混杂 → 结构体
+  数组特征：等步长 + 同类型重复
+  结构体数组 = 两者叠加：寻址带 scale 步长
+    且内部有固定小偏移 → [eax*8 + 结构体成员]
+</code></pre>
+<h3>IDA 还原结构体工作流：</h3>
+<pre><code>
+  1. Local Types(Shift+F1)：INS 或右键 add type，直接写 C 声明
+     （老办法：光标放 } 前按 D 加成员，连按 D 换尺寸，N 改名，
+       多个成员就重复多次）
+  2. 栈帧窗口：结构体首地址的变量上按 Alt+Q（新版直接 Y）
+     选刚定义的结构体 → 建立关联
+  3. F5 伪代码自动变成 结构体.成员名，可读性起飞
+  4. 指针参数：操作数上按 T 做字段转换
+  5. 结构体地址只在寄存器、没有局部变量时：
+     光标放寄存器上按 T 选结构体
+     （新版也可在 F5 里对变量按 Y 设类型，殊途同归）
+</code></pre>
+<h3>对齐公式：</h3>
+<pre><code>
+  成员: offset % min(a, sizeof(type)) == 0     a = pack，默认8
+  整体: B = min(a, max(成员对齐值))
+        sizeof(struct) % B == 0（尾部补齐，为数组步长保平安）
+</code></pre>
+<h3>标准结构体导入：</h3>
+<pre><code>
+  Local Types(Shift+F1) → add type → Import standard structure
+  → 搜 POINT 之类的名字 → 添加
+  → 之后直接 Alt+Q 关联使用
+  背景：这些类型来自 IDA 自带的类型库(.til，Shift+F10 管理)，
+        PE 文件默认已加载 windows 类型库，很多 SDK 结构体
+        其实开箱即用
+
+第三方/开源库结构体：
+  File → Load file → Parse C header file...
+  加载 .h → IDA 解析并批量导入所有定义
+  注意：解析器对复杂头文件会翻车（宏、include 链），
+        实用技巧是把 .h 裁剪到只留需要的结构体再导入
+
+PDB 符号增强：
+  PDB = 完整调试信息（函数名/全局变量名/全部结构体定义）
+  微软系统 DLL：加载时选&quot;下载符号&quot;，IDA 走符号服务器自动拉 PDB
+  效果：盲猜 → 清晰阅读，效率质变
+  逆向自家/商业程序：有 PDB 就先找 PDB
+</code></pre>
+<h3>结构体寻址公式：</h3>
+<pre><code>
+  [reg + imm]        寄存器存结构体指针 + 成员偏移（最常见）
+  [imm + imm]        全局结构体实例：固定地址 + 成员偏移
+  [reg + reg*scale + imm]  结构体数组：基址+下标×sizeof+成员偏移
+</code></pre>
+<h3>结构体传参（cdecl 32位）：</h3>
+<pre><code>
+  全部按值传，拷到栈上：
+    小结构体：直接 push（8字节=两个push）
+    大结构体：编译器生成 memcpy/rep movs 拷到栈参区
+  （memset 是清零初始化，不是传参）
+</code></pre>
+<h3>结构体返回值（cdecl 32位，按尺寸分档）：</h3>
+<pre><code>
+  1/2/4 字节 → EAX
+  8 字节    → EDX:EAX（低4在EAX）
+  其他尺寸  → 隐藏指针：
+    调用方分配临时空间，地址作为第一个参数压栈
+    被调方填充该地址，并顺带把指针放 EAX 返回
+  识别特征：
+    call 前有 sub esp,N + lea reg,[esp+tmp] + push reg
+    且这个 push 在所有正常参数之前
+</code></pre>
+</article>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

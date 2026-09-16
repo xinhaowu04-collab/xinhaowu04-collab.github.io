@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>日常 · 0xL</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css">
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"LXGW WenKai","PingFang SC","Microsoft YaHei",sans-serif; cursor:none; }
+.wrap { max-width:700px; margin:0 auto; padding:0 24px; }
+nav { position:sticky; top:14px; z-index:100; max-width:640px; margin:14px auto 0;
+  background:rgba(255,255,255,.75); backdrop-filter:blur(14px);
+  border:1px solid var(--border); border-radius:999px; box-shadow:var(--shadow);
+  display:flex; align-items:center; justify-content:space-between; padding:8px 10px 8px 14px; }
+.nav-avatar { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; }
+.nav-avatar img { width:34px; height:34px; border-radius:50%; object-fit:cover; border:2px solid rgba(240,143,183,.4); filter:brightness(1.3); }
+nav .links a { color:var(--dim); text-decoration:none; font-size:14px; padding:8px 12px; border-radius:999px; transition:all .2s; }
+nav .links a:hover { color:var(--pink-deep); background:rgba(240,143,183,.1); }
+nav .links a.on { color:var(--pink-deep); background:rgba(240,143,183,.12); }
+h1.page { font-size:26px; margin:42px 0 8px; }
+.sub { color:var(--dim); font-size:14px; margin-bottom:34px; }
+
+/* 时间线 */
+.tl { position:relative; padding-left:26px; }
+.tl::before { content:""; position:absolute; left:7px; top:6px; bottom:6px; width:2px; background:linear-gradient(var(--pink), rgba(240,143,183,.1)); border-radius:2px; }
+.day { position:relative; margin-bottom:26px; }
+.day::before { content:""; position:absolute; left:-25px; top:7px; width:12px; height:12px; border-radius:50%; background:#fff; border:3px solid var(--pink); }
+.day .when { font-size:12px; color:var(--dim); font-family:Consolas,monospace; margin-bottom:6px; }
+.day .what { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:14px 18px; box-shadow:var(--shadow); font-size:15px; line-height:1.8; transition:all .25s; }
+.day .what:hover { transform:translateX(4px); border-color:rgba(240,143,183,.4); }
+.day .what em { font-style:normal; color:var(--pink-deep); }
+footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13px; }
+
+/* 自定义鼠标 */
+* { cursor:none !important; }
+#cursor-ring { display:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none;
+  background:url("penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot svg { display:none; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot,#cursor-ring { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-ring"></div><div id="cursor-dot"></div>
+<div class="wrap">
+<nav>
+  <div class="nav-avatar"><img src="avatar.png" alt="头像">0xL</div>
+  <div class="links"><a href="index.html">首页</a><a href="notes.html">笔记</a><a href="shizhan.html">实战</a><a href="projects.html">项目</a><a href="daily.html" class="on">日常</a></div>
+</nav>
+
+<h1 class="page">日常</h1>
+<div class="sub">不成文的碎片记录：今天做了什么、想了什么。</div>
+
+<div class="tl">
+  <div class="day"><div class="when">2026-09-16 · 晚</div><div class="what">个人站上线雏形。选了樱花主题，把 C 逆向 10 篇笔记搬了上来。折腾一天，值了。</div></div>
+  <div class="day"><div class="when">2026-09-16 · 傍晚</div><div class="what">桌面上多了个"网云通讯客户端"，查了下是 <em>RAT</em>，而且我还运行过……亲手完成了一次完整应急响应。教训：UAC 弹窗别乱点。</div></div>
+  <div class="day"><div class="when">2026-09-16 · 下午</div><div class="what">「猫窝」v2 发布：签到 + 猫猫旅行 + 连登兑换抽奖全自动。22 个号首跑零失败，薅了 2700+ 领养积分。</div></div>
+  <div class="day"><div class="when">2026-09-16 · 中午</div><div class="what">逆向了三款 CodeBuddy 生态工具的认证流程，发现 refreshToken 的秘密藏在 JWT 的 <em>iss 签发入口</em>里。假设被打脸再修正的过程，比直接看答案有意思。</div></div>
+</div>
+
+<footer>© 2026 0xL · Stay curious, stay reverse.</footer>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), ring = document.getElementById('cursor-ring');
+var mx = -100, my = -100, rx = -100, ry = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() {
+  rx += (mx - rx) * 0.16; ry += (my - ry) * 0.16;
+  dot.style.left = mx + 'px'; dot.style.top = my + 'px';
+  ring.style.left = rx + 'px'; ring.style.top = ry + 'px';
+  requestAnimationFrame(loop);
+})();
+document.querySelectorAll('a, button, summary, input').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

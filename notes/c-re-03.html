@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>无符号除为非 2 的幂常量 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+* { cursor:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">无符号除为非 2 的幂常量</h1>
+<div class="meta"><span class="cat">C 逆向</span></div>
+<article>
+<h2>无符号除为非 2 的幂常量：</h2>
+<pre><code>
+c = 2^n / M
+</code></pre>
+<p>设 <code>x</code> 为被除数变量，<code>c</code> 为某一常量，则有：</p>
+<div class="math">$$
+\begin{aligned}
+\frac{x}{c}
+&= x \times \frac{1}{c} \\
+&= x \times \frac{1 \times 2^n}{c \times 2^n} \\
+&= x \times \frac{2^n}{c} \times \frac{1}{2^n}
+\end{aligned}
+$$</div>
+<p>由于 <code>c</code> 为常量，且 <code>2</code> 的取值由编译器选择，所以 $2^n/c$ 的值在编译期间可以计算出来。<code>n</code> 的取值在 32 位除法中通常都会大于等于 32，在 64 位除法中通常都会大于等于 64。这样就可以直接调整使用乘法结果的高位了。</p>
+<p>如此一来，$2^n/c$ 也就是一个编译期间先行计算出来的常量值了，这个值常被称为 Magic Number（魔数、幻数），我们先用 <code>M</code> 来代替这个 Magic 常量，于是又有：</p>
+<div class="math">$$
+\begin{aligned}
+x \times \frac{2^n}{c} \times \frac{1}{2^n}
+&= xM \times \frac{1}{2^n} \\
+&= \frac{xM}{2^n} \\
+&= xM \gg n
+\end{aligned}
+$$</div>
+<h2>无符号除为非 2 的幂常量：（<code>M</code> 超过 32 位）：</h2>
+<pre><code>
+c = 2 ^ n / (2^32 + M)
+
+x / c = ((x - ((x * M) &gt;&gt; 32)) &gt;&gt; 1) + ((x * M) &gt;&gt; 32) &gt;&gt; 2
+</code></pre>
+<div class="math">$$
+c = \frac{2^n}{2^{32}} + M
+$$</div>
+<div class="math">$$
+\begin{aligned}
+\frac{
+\frac{ecx-\frac{ecx \times M}{2^{32}}}{2}
++\frac{ecx \times M}{2^{32}}
+}{2^2}
+&= \frac{
+\frac{2^{32}ecx-ecx \times M}{2^{33}}
++\frac{ecx \times M}{2^{32}}
+}{2^2} \\
+&= \frac{
+2^{32}ecx-ecx \times M+2 \times ecx \times M
+}{2^{35}} \\
+&= \frac{2^{32}ecx+ecx \times M}{2^{35}} \\
+&= \frac{ecx \times (2^{32}+M)}{2^{35}} \\
+&= ecx \times \frac{2^{32}+M}{2^{35}}
+\end{aligned}
+$$</div>
+<p>至此，我们可以看出除法优化的原型，是带进位值的 MagicNumber。编译器作者在实现除法优化的过程中，计算得到的 MagicNumber 超过了 4 字节整数范围，为了避免大数运算的开销，对此做了数学转换，于是得到最开始的表达式，规避了 8 字节的大数计算问题。</p>
+<h2>有符号除 非 2 的幂常量：</h2>
+<pre><code>
+x &gt;= 0
+    x / c = (x * M &gt;&gt; n) + 0
+
+x &lt; 0
+    x / c = (x * M &gt;&gt; n) + 1
+</code></pre>
+<h2>有符号除非 2 的幂常量（<code>M</code> 为负数）：</h2>
+<pre><code>
+c ≈ 2^n / (m + 2^32)
+</code></pre>
+<pre><code>
+x &gt;= 0
+    x / c = ((x * M &gt;&gt; 32) + x) &gt;&gt; n - 32 + 0
+
+x &lt; 0
+    x / c = ((x * M &gt;&gt; 32) + x) &gt;&gt; (n - 32) + 1
+</code></pre>
+<p>编译器在计算 MagicNumber 时是作为无符号处理的，而代入到除法转换乘法的代码里又是作为有符号乘数处理的。因为有符号数的最高位不是数值，而是符号位，所以，对应的有符号乘法指令是不会让最高位参与数值计算的，这样会导致乘数的数学意义和 MagicNumber 不一致。</p>
+<p>于是，在有符号乘法中，如果 <code>M</code> 的取值大于 <code>0x80000000</code>（最高位为 1，补码形式为负数）时，实际参与乘法计算的是个负数，其值应等价于：</p>
+<div class="math">$$
+\begin{aligned} \frac{x}{c} &= x \times \frac{2^n}{c} \times \frac{1}{2^n} \\ &= x \times \left( \left(\frac{2^n}{c}-2^{32}\right)+2^{32} \right) \times\frac{1}{2^n} \\ &= \left( x\left(\frac{2^n}{c}-2^{32}\right) +x2^{32} \right) \times\frac{1}{2^n} \\ &= \left( \frac{x\left(\frac{2^n}{c}-2^{32}\right)}{2^{32}} +x \right) \times\frac{1}{2^{n-32}} \\ &= \left( \frac{xM}{2^{32}}+x \right) \times\frac{1}{2^{n-32}} \\ &\approx \left( (xM\gg32)+x \right) \gg(n-32) \end{aligned}
+$$</div>
+<h2>有符号除负非 2 的幂常量：</h2>
+<pre><code>
+x &gt;= 0
+    x / -c = (x * -M &gt;&gt; n) + 0
+x &lt; 0
+    x / -c = (x * -M &gt;&gt; n) + 1
+
+c = 2^n / (2^32 - M)
+</code></pre>
+<h2>有符号除负非 2 的幂常量（M本来是负数）：</h2>
+<pre><code>
+
+x &gt;= 0
+    x / c = ((x * M &gt;&gt; 32) - x) &gt;&gt; n - 32   + 0
+x &lt; 0
+    x / c = ((x * M &gt;&gt; 32) - x) &gt;&gt; (n - 32)  + 1
+
+c = 2^n / (2^32 - M)
+</code></pre>
+<div class="math">$$
+
+$$</div>
+<div class="math">$$
+
+令 $M = 2^{32} - \frac{2^n}{\vert{}c\vert{}}$（即汇编代码里出现的立即数），原式化简为：
+
+$$</div>
+<p>将分母 $2^n$ 拆成 $2^{32} \times 2^{n - 32}$：</p>
+<div class="math">$$
+
+$$</div>
+<p>带回总式子得到：</p>
+<div class="math">$$
+
+
+### 总结
+
+<strong>一、除数为 2 的幂（Power of 2）</strong>
+
+
+
+- <strong>无符号数 / 有符号正数（$x \ge 0$）</strong>：
+
+
+
+$$</div>
+<ul>
+<li><strong>有符号负数（$x < 0$）</strong>（加移位掩码补偿向零取整）：</li>
+</ul>
+<div class="math">$$
+
+
+<strong>二、除数为非 2 的幂（基础乘法优化）</strong>
+
+
+
+- <strong>基本形式</strong>：
+
+
+- $x \ge 0$ 时：
+
+
+
+$$</div>
+<ul>
+<li>$x < 0$ 时：</li>
+</ul>
+<div class="math">$$
+
+- <strong>符号判定</strong>：
+
+
+- $M \ge 0$（最高位为 0） $\implies$ <strong>除数为正数</strong>
+
+
+
+- $M < 0$（最高位为 1，呈现为负数补码） $\implies$ <strong>除数为负数</strong>
+
+
+
+
+<strong>三、除数为非 2 的幂（带加减补偿与溢出调整）</strong>
+
+
+
+- <strong>1. 有加法调整（$M < 0 \implies$ 除数为正数）</strong>
+
+
+- $x \ge 0$ 时：
+
+
+
+$$</div>
+<ul>
+<li>$x < 0$ 时：</li>
+</ul>
+<div class="math">$$
+
+- <strong>2. 有减法调整（$M \ge 0 \implies$ 除数为负数）</strong>
+
+
+- $x \ge 0$ 时：
+
+
+
+$$</div>
+<ul>
+<li>$x < 0$ 时：</li>
+</ul>
+<div class="math">$$
+
+- <strong>3. 无符号数除法 $M$ 溢出调整</strong>
+
+
+
+$$</div>
+<p><strong>四、逆向还原除数 $c$ 汇总公式</strong></p>
+<p>| 乘法指令   | M 符号（看立即数最高位） | 调整指令                              | 除数    | 还原公式                          | | ------ | ------------- | --------------------------------- | ----- | ----------------------------- | | <code>imul</code> | M ≥ 0         | 无                                 | <strong>正</strong> | <code>c = 2ⁿ / M</code>                  | | <code>imul</code> | M < 0         | <code>add edx, x</code>                      | <strong>正</strong> | <code>c = 2ⁿ / (2³² + M)</code>，M 按有符号代入 | | <code>imul</code> | M ≥ 0         | <code>sub edx, x</code>                      | <strong>负</strong> | <code>c = − 2ⁿ / (2³² − M)</code>        | | <code>mul</code>  | —             | 无                                 | 正     | <code>c = 2ⁿ / M</code>                  | | <code>mul</code>  | —             | 先 <code>sub</code> 后 <code>add</code>（溢出调整）             | 正     | <code>c = 2ⁿ / (2³² + M)</code>          | | 无乘法    | —             | <code>cdq/and/add/sar</code> 或 <code>cdq/sub/sar</code> | 2 的幂  | <code>c = 2^sar位数</code>，符号修正看被除数        |</p>
+<blockquote><strong>注</strong>：公式中的 $n$ 为总移位位数（基础 $32$ 位 + 后续 <code>sar/shr</code> 移位位数）；计算出的 $c$ 为除数绝对值，符号根据特征判定。</blockquote>
+</article>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

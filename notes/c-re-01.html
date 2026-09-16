@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手动寻找 main 的三种课堂方法 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+* { cursor:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">手动寻找 main 的三种课堂方法</h1>
+<div class="meta"><span class="cat">C 逆向</span></div>
+<article>
+<h3>手动寻找 <code>main</code> 的三种课堂方法</h3>
+<h4>方法一：从上往下找</h4>
+<ul>
+<li>从 CRT 入口或启动函数开始向下分析</li>
+</ul>
+<ul>
+<li>寻找准备三个参数后调用某个函数的位置</li>
+</ul>
+<ul>
+<li>重点关注 <code>argc</code>、<code>argv</code>、<code>envp</code> 的来源</li>
+</ul>
+<ul>
+<li>不能只按 <code>push</code> 数量判断</li>
+</ul>
+<h4>方法二：从 <code>exit</code> 向上找</h4>
+<ul>
+<li>找 <code>exit</code> 或相关退出函数</li>
+</ul>
+<ul>
+<li>查看交叉引用</li>
+</ul>
+<ul>
+<li>向上追踪传给退出函数的返回值</li>
+</ul>
+<ul>
+<li>常见逻辑：</li>
+</ul>
+<pre><code>
+
+exit(main(argc, argv, envp));
+
+</code></pre>
+<ul>
+<li>返回值产生位置附近可能出现 <code>main</code> 调用</li>
+</ul>
+<ul>
+<li>中间可能存在 CRT 包装、异常处理或清理函数</li>
+</ul>
+<h4>方法三：从 <code>argc</code> 相关运行库函数反查</h4>
+<ul>
+<li>在导入表或函数列表中查找运行库相关名称</li>
+</ul>
+<ul>
+<li>可能出现：<code>__getmainargs</code>、<code>__p___argc</code> 等</li>
+</ul>
+<ul>
+<li>对这些函数查看交叉引用</li>
+</ul>
+<ul>
+<li>先定位 CRT 启动函数，再寻找对 <code>main</code> 的调用</li>
+</ul>
+<ul>
+<li>准确说法：不是“导入表中有 argc”，而是有获取/准备 <code>argc</code> 的运行库函数</li>
+</ul>
+<ul>
+<li>不同 CRT 版本函数名可能不同</li>
+</ul>
+<h3><code>main</code> 定位的验证标准</h3>
+<ul>
+<li>调用参数是否对应 <code>argc</code>、<code>argv</code>、<code>envp</code></li>
+</ul>
+<ul>
+<li>被调用函数的返回值是否进入退出流程</li>
+</ul>
+<ul>
+<li>是否处于 CRT 启动函数的合理控制流位置</li>
+</ul>
+<ul>
+<li>是否有其他包装函数介入</li>
+</ul>
+<ul>
+<li>伪代码和汇编是否互相印证</li>
+</ul>
+<h2>库函数识别</h2>
+<h3>动态库函数（DLL 导入）</h3>
+<ul>
+<li>函数代码位于外部 DLL</li>
+</ul>
+<ul>
+<li>PE 导入表中保存导入信息</li>
+</ul>
+<ul>
+<li>可能有函数名、序号或 IAT 项</li>
+</ul>
+<ul>
+<li>IDA 通常可以识别常见导入函数</li>
+</ul>
+<ul>
+<li>常见例子：<code>printf</code>、<code>MessageBoxA</code></li>
+</ul>
+<ul>
+<li>按序号导入、动态解析或 <code>GetProcAddress</code> 可能没有直接函数名</li>
+</ul>
+<ul>
+<li>导入表有符号不代表所有调用都能自动识别</li>
+</ul>
+<h3>静态库函数</h3>
+<ul>
+<li><code>.lib</code> 中的目标代码在链接时复制到 EXE</li>
+</ul>
+<ul>
+<li>函数本身通常不会出现在 DLL 导入表</li>
+</ul>
+<ul>
+<li>整个程序仍然可能有其他 DLL 导入</li>
+</ul>
+<ul>
+<li>函数可能被链接器或编译器内联，导致原函数边界消失</li>
+</ul>
+<ul>
+<li><code>/GL</code>、<code>/LTCG</code> 会增加跨文件优化和内联机会</li>
+</ul>
+<ul>
+<li>静态库函数可能显示为 <code>sub_xxxxx</code></li>
+</ul>
+<h2><code>iob</code>、标准流与 CRT</h2>
+<h3>标准流下标</h3>
+<p>传统或现代 MSVC CRT 中可能看到：</p>
+<pre><code>
+
+__iob_func(0)       // 旧式 CRT 相关形式
+
+__acrt_iob_func(0)  // 较新的 UCRT 形式
+
+</code></pre>
+<ul>
+<li>下标 <code>0</code>：<code>stdin</code>，标准输入</li>
+</ul>
+<ul>
+<li>下标 <code>1</code>：<code>stdout</code>，标准输出</li>
+</ul>
+<ul>
+<li>下标 <code>2</code>：<code>stderr</code>，标准错误</li>
+</ul>
+<h3>不能直接这样判断</h3>
+<ul>
+<li>下标 <code>0</code> 不等于一定是 <code>scanf</code></li>
+</ul>
+<ul>
+<li>下标 <code>1</code> 不等于一定是 <code>printf</code></li>
+</ul>
+<ul>
+<li>还要看后续对 <code>FILE *</code> 的操作、格式字符串和参数</li>
+</ul>
+<h3>可能的语义</h3>
+<ul>
+<li><code>stdin</code>：<code>scanf</code>、<code>fscanf</code>、<code>fgets</code>、<code>fread</code></li>
+</ul>
+<ul>
+<li><code>stdout</code>：<code>printf</code>、<code>fprintf</code>、<code>fputs</code>、<code>fwrite</code></li>
+</ul>
+<ul>
+<li><code>stderr</code>：错误输出、日志输出</li>
+</ul>
+<ul>
+<li>只能根据完整调用链重命名，不能只看 <code>iob</code> 下标</li>
+</ul>
+<h3>版本差异</h3>
+<ul>
+<li>旧 CRT 可能出现 <code>__iob_func</code></li>
+</ul>
+<ul>
+<li>新 CRT/UCRT 可能出现 <code>__acrt_iob_func</code></li>
+</ul>
+<h2>FLIRT、<code>.pat</code> 与 <code>.sig</code></h2>
+<ul>
+<li>FLIRT 用于识别已知库函数</li>
+</ul>
+<ul>
+<li>重点场景：静态链接进程序的库函数</li>
+</ul>
+<ul>
+<li><code>.pat</code>：函数特征提取阶段的模式文件</li>
+</ul>
+<ul>
+<li><code>.sig</code>：供 IDA 加载使用的签名文件</li>
+</ul>
+<ul>
+<li>常见流程：</li>
+</ul>
+<pre><code>
+
+库目标文件/样本
+
+→ 提取函数特征
+
+→ 生成 .pat
+
+→ 使用 sigmake 等工具转换
+
+→ 得到 .sig
+
+→ 在 IDA 中加载
+
+</code></pre>
+<ul>
+<li><code>.sig</code> 用于库函数识别，不等于表达式优化指令的固定签名</li>
+</ul>
+<h2>加法优化特征</h2>
+<h3><code>x + 1</code></h3>
+<ul>
+<li>可能使用：<code>add</code>、<code>inc</code>、<code>lea</code></li>
+</ul>
+<ul>
+<li>可能形式：</li>
+</ul>
+<pre><code>
+
+add eax, 1
+
+inc eax
+
+lea eax, [eax+1]
+
+</code></pre>
+<h3><code>x + 2</code>、<code>x + 100</code></h3>
+<ul>
+<li>常见：<code>add reg, imm</code></li>
+</ul>
+<ul>
+<li>也可能用 <code>lea</code></li>
+</ul>
+<ul>
+<li>不能因为出现立即数就认定没有优化</li>
+</ul>
+<h3><code>x + x</code></h3>
+<ul>
+<li>等价于 <code>x * 2</code></li>
+</ul>
+<ul>
+<li>可能使用：<code>add x,x</code>、<code>shl x,1</code>、<code>lea x,[x+x]</code></li>
+</ul>
+<h2>减法优化特征</h2>
+<h3><code>x - 1</code></h3>
+<ul>
+<li>可能使用：<code>sub</code>、<code>dec</code>、<code>lea</code></li>
+</ul>
+<h3><code>x - x</code></h3>
+<ul>
+<li>结果通常直接变成零</li>
+</ul>
+<ul>
+<li>可能使用：<code>xor reg,reg</code>、<code>sub reg,reg</code>、<code>mov reg,0</code></li>
+</ul>
+<ul>
+<li>如果涉及 <code>volatile</code>、内存访问或副作用，不能机械化简</li>
+</ul>
+<h3>标志位注意事项</h3>
+<ul>
+<li><code>inc</code> 不修改 <code>CF</code></li>
+</ul>
+<ul>
+<li><code>dec</code> 不修改 <code>CF</code></li>
+</ul>
+<ul>
+<li><code>add</code>、<code>sub</code> 会修改 <code>CF</code></li>
+</ul>
+<ul>
+<li><code>lea</code> 不修改算术标志位</li>
+</ul>
+<ul>
+<li>如果后面使用 <code>adc</code>、<code>sbb</code>、<code>jb</code> 等，必须结合标志位分析</li>
+</ul>
+<h2>乘法优化特征</h2>
+<h3>乘以 2 的幂</h3>
+<pre><code>
+
+x * 2^k = x &lt;&lt; k
+
+</code></pre>
+<ul>
+<li><code>x * 2</code>：可能是 <code>add</code>、<code>shl 1</code>、<code>lea</code></li>
+</ul>
+<ul>
+<li><code>x * 4</code>：可能是 <code>shl 2</code>、<code>lea</code></li>
+</ul>
+<ul>
+<li><code>x * 8</code>：可能是 <code>shl 3</code>、<code>lea</code></li>
+</ul>
+<ul>
+<li>这里的 <code>k</code> 是移位位数，不是被乘数本身</li>
+</ul>
+<h3><code>x * 6</code></h3>
+<pre><code>
+
+x * 6 = x * 3 * 2
+
+x * 3 = x + x * 2
+
+</code></pre>
+<ul>
+<li>可能是 <code>lea</code> 先算 <code>3x</code>，再加倍</li>
+</ul>
+<ul>
+<li>也可能直接使用 <code>imul 6</code></li>
+</ul>
+<h3><code>x * 63</code></h3>
+<pre><code>
+
+x * 63 = x * 64 - x
+
+       = (x &lt;&lt; 6) - x
+
+</code></pre>
+<ul>
+<li>可能出现 <code>shl</code> 加 <code>sub</code></li>
+</ul>
+<ul>
+<li>分析时要确认原始 <code>x</code> 是否被保留</li>
+</ul>
+<h3><code>x * 53</code></h3>
+<p>可进行多种代数拆分：</p>
+<pre><code>
+
+53 = 32 + 16 + 4 + 1
+
+53 = 3 * 9 * 2 - 1
+
+</code></pre>
+<ul>
+<li>编译器不一定按课堂推导的拆分生成</li>
+</ul>
+<ul>
+<li>可能使用多条 <code>lea</code>、<code>shl</code>、<code>add</code>、<code>sub</code></li>
+</ul>
+<ul>
+<li>也可能直接使用 <code>imul 53</code></li>
+</ul>
+<h3><code>x * x</code></h3>
+<ul>
+<li>两个操作数都是运行时变量</li>
+</ul>
+<ul>
+<li>通常使用 <code>imul</code></li>
+</ul>
+<ul>
+<li>不能按乘以常量的方式直接换成固定移位</li>
+</ul>
+<h3><code>LEA</code> 的整数运算</h3>
+<ul>
+<li><code>lea</code> 不一定是取地址</li>
+</ul>
+<ul>
+<li>常见比例因子：<code>1</code>、<code>2</code>、<code>4</code>、<code>8</code></li>
+</ul>
+<ul>
+<li>例如：</li>
+</ul>
+<pre><code>
+
+lea eax, [ecx+ecx*4]
+
+</code></pre>
+<ul>
+<li>语义：<code>eax = ecx * 5</code></li>
+</ul>
+<ul>
+<li>判断依据：操作数、数据流和后续用途，不是指令名字本身</li>
+</ul>
+<h2>常量折叠与 <code>argc</code> 实验</h2>
+<h3>常量表达式</h3>
+<pre><code>
+
+printf(&quot;%d\n&quot;, 1 + 2);
+
+printf(&quot;%d\n&quot;, 3 * 6);
+
+</code></pre>
+<ul>
+<li><code>1 + 2</code> 可能编译期直接变成 <code>3</code></li>
+</ul>
+<ul>
+<li><code>3 * 6</code> 可能编译期直接变成 <code>18</code></li>
+</ul>
+<ul>
+<li><code>printf</code> 调用本身仍可能保留，因为输出有副作用</li>
+</ul>
+<h3><code>argc</code> 表达式</h3>
+<pre><code>
+
+argc + 1
+
+argc + 2
+
+argc + 100
+
+argc + argc
+
+argc - 1
+
+argc - 2
+
+argc - 100
+
+argc - argc
+
+argc * 4
+
+argc * 6
+
+argc * 63
+
+argc * 53
+
+argc * argc
+
+</code></pre>
+<ul>
+<li><code>argc</code> 是运行时参数，不能像常量 <code>1 + 2</code> 一样直接折叠成固定结果</li>
+</ul>
+<ul>
+<li><code>argc + argc</code> 可能优化为乘以 2 的形态</li>
+</ul>
+<ul>
+<li><code>argc - argc</code> 通常可直接化为零</li>
+</ul>
+<ul>
+<li>乘以常量可能使用移位、<code>lea</code>、加减或 <code>imul</code></li>
+</ul>
+<ul>
+<li>变量乘变量通常保留 <code>imul</code></li>
+</ul>
+<ul>
+<li>源码中的格式字符串标签要和实际表达式一致</li>
+</ul>
+</article>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

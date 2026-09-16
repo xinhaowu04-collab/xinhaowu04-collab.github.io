@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>浮点与SIMD · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+* { cursor:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">浮点与SIMD</h1>
+<div class="meta"><span class="cat">C 逆向</span></div>
+<article>
+<h1>浮点与SIMD：</h1>
+<h3>x87 协处理器：</h3>
+<pre><code>
+  IEEE754 float：1符号 + 8指数(偏移127) + 23尾数(隐含1)
+  8086 + 8087 外挂浮点协处理器 → 后来片内集成
+  8 个 80 位寄存器 ST(0)~ST(7)，栈结构，必须保持栈平衡
+  逆向前缀特征：指令以 F 开头
+
+  常用指令：
+    FLD  IN      浮点压栈  IN=m32/64/80
+    FILD IN      整数转浮点压栈
+    FLDZ/FLD1    压 0.0 / 1.0
+    FST  OUT     存栈顶到内存（不出栈）OUT=m32/64
+    FSTP OUT     存 + 出栈
+    FIST/FISTP   转整数存出
+    FCOM IN      IN 与 ST(0) 比较，设 x87 条件码
+    FTST         ST(0) 与 0.0 比较
+    FADD IN      IN + ST(0) → ST(0)
+    FADDP ST(N),ST  先出栈再相加，结果入 ST(0)
+
+  典型计算序列：
+    fild n1 / fadd f1 / fstp f1
+</code></pre>
+<h3>x87 比较机制：</h3>
+<pre><code>
+  FCOM 不碰 EFLAGS，只更新 x87 状态字的条件码 C0/C1/C2/C3
+
+  FSTSW AX 把状态字存入 AX 后：
+    C0 = bit8(AH第0位)   C1 = bit9   C2 = bit10   C3 = bit14
+  位号彩蛋：C0/C2/C3 对齐 EFLAGS 的 CF/PF/ZF 位置
+    → 经典套路 FSTSW AX / SAHF 直接搬进标志位
+
+  比较结果表（C3 C2 C0）：
+    0 0 0 → ST(0) &gt; src
+    0 0 1 → ST(0) &lt; src
+    1 0 0 → 相等
+    1 1 1 → 无序（NaN 参与）
+  P6 后有 FCOMI 系列直接设 EFLAGS，逆向更常见
+</code></pre>
+<h3>MMX（1997，Pentium MMX）：</h3>
+<pre><code>
+  8×64 位寄存器 MM0~MM7 = x87 ST 的尾数位别名映射
+    → 和浮点互斥，用完必须 EMMS 复位
+
+  64 位按元素宽度拆：
+    paddb  = 8×8位并行加      paddw = 4×16位并行加
+    paddd  = 2×32位并行加
+
+  后缀规律：
+    b/w/d  = 元素宽度 byte/word/dword
+    s      = 饱和(saturation)，溢出钳到边界（图像防色值越界）
+    us     = 无符号饱和
+    无后缀 = 环绕(wrap-around)，普通进位丢弃
+  movd = 32位搬运   movq = 64位搬运
+  VS 内联：mmintrin.h，__m64 类型，_m_paddb 等内部函数
+</code></pre>
+<h3>3DNow! 与 SSE 竞争：</h3>
+<pre><code>
+  AMD 3DNow!：MMX 基础上加浮点并行
+  Intel SSE（P3,1999）：不兼容 3DNow!，独立 128 位 XMM0~7
+    单精度浮点并行，逐渐取代 x87
+    无栈结构、比较直接设 EFLAGS → 好写好读
+  AMD 放弃 SSE5 转投 AVX 阵营
+</code></pre>
+<h3>SSE1（只有单精度浮点！）：</h3>
+<pre><code>
+  8×128 位独立寄存器 XMM0~XMM7（32位系统）
+  后缀：ss标量单精度 ps打包单精度
+    MOVSS / ADDSS = SSE1
+    MOVSD / ADDSD / MOVAPD / CVTSS2SD = SSE2（别记成 SSE1）
+  命名速查：MM=64位MMX寄存器  XMM=XMM寄存器  m128=128位内存
+  头文件：
+    xmmintrin.h SSE   emmintrin.h SSE2
+    pmmintrin.h SSE3   smmintrin.h SSE4
+  整数并行 SSE1 没有：MMX 还在管，SSE2 才把整数搬进 XMM
+</code></pre>
+<h3>AVX / AVX2：</h3>
+<pre><code>
+  AVX1：256 位 YMM0~YMM15，VEX 编码，v 前缀
+    三操作数：vaddps ymm0, ymm1, ymm2 目标独立不覆盖
+    但整数并行仍然只有 128 位
+  AVX2（Haswell）：256 位整数并行上车（vpaddd ymm...）
+    高性能计算、加密破解主力
+  命名分解：v + 操作 + 打包方式(s标量/p打包) + 类型
+    (s单精度/d双精度/b,w,d,q整数宽度)
+</code></pre>
+<h3>逆向识别速查：</h3>
+<pre><code>
+  F 前缀 + ST(0)      → x87
+  mm 寄存器 + padd系   → MMX（记得找 EMMS）
+  xmm + ss/ps         → SSE1
+  xmm + sd/pd/整后缀  → SSE2+
+  ymm / v 前缀        → AVX；v+整数256位 → AVX2
+  现代编译器默认出 SSE/AVX 代码
+  兼容老 CPU：编译选项 /arch:IA32 强制 x87
+  Intrinsics(_mm_add_ps) → 编译器自动内联+处理对齐
+</code></pre>
+</article>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

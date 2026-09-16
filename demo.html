@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>企鹅指针预览</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css">
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"LXGW WenKai","PingFang SC",sans-serif; padding:40px 20px; }
+* { cursor:none !important; }
+a, button { cursor:none; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15)); animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none }
+.wrap { max-width:640px; margin:0 auto; text-align:center; }
+h1 { font-size:24px; margin-bottom:8px; }
+.sub { color:var(--dim); font-size:13px; margin-bottom:30px; }
+.playground { background:var(--card); border:1.5px dashed rgba(240,143,183,.4); border-radius:18px; padding:50px 24px; box-shadow:var(--shadow); }
+.playground p { color:var(--dim); font-size:14px; margin-bottom:18px; }
+.playground a { color:var(--pink-deep); font-size:15px; text-decoration:none; padding:6px 14px; display:inline-block; }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<h1>咕咕嘎嘎企鹅指针</h1>
+<div class="sub">全站已统一为此样式</div>
+<div class="playground">
+  <p>晃晃鼠标，小企鹅会左右摇摆跟着你；悬停链接时它会加速摇摆</p>
+  <a href="#">示例链接甲</a><a href="#">示例链接乙</a><a href="index.html">回首页 →</a>
+</div>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot');
+var mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a,button').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>病毒分析 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+* { cursor:none !important; }
+#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+  animation:penguin-wob 2.2s ease-in-out infinite; }
+#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
+@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
+@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
+</style>
+</head>
+<body>
+<div id="cursor-dot"></div>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">病毒分析</h1>
+<div class="meta"><span class="cat">C 逆向</span></div>
+<article>
+<h1>病毒分析：</h1>
+<h2>依附的媒体类型分类</h2>
+<ul>
+<li><strong>网络病毒</strong>  ：通过计算机网络感染可执行文件的计算机病毒。</li>
+</ul>
+<ul>
+<li><strong>文件病毒</strong>  ：主攻计算机内文件的病毒。</li>
+</ul>
+<ul>
+<li><strong>引导型病毒</strong> ：一种主攻感染驱动扇区和硬盘系统引导扇区的病毒。</li>
+</ul>
+<h2><strong>计算机特定算法分类</strong></h2>
+<ul>
+<li><strong>附带型病毒</strong> ：通常附带于一个EXE文件上，其名称与EXE文件名相同，但扩展是不同的，一般不会破坏更改文件本身，但在DOS读取时首先激活的就是这类病毒。</li>
+</ul>
+<ul>
+<li><strong>蠕虫病毒</strong>  ：它不会损害计算机文件和数据，它的破坏性主要取决于计算机网络的部署，可以使用计算机网络从一个计算机存储切换到另一个计算机存储来计算网络地址来感染病毒。</li>
+</ul>
+<ul>
+<li><strong>可变病毒</strong> ：可变病毒：可以自行应用复杂的算法，很难发现，因为在另一个地方表现的内容和长度是不同的。</li>
+</ul>
+<h2>家族</h2>
+<ul>
+<li><strong>宏病毒</strong>：是一种寄存在文档或模板的宏中的计算机病毒。一旦打开这样的文档，其中的宏就会被执行，于是宏病毒就会被激活，转移到计算机上，并驻留在Normal模板上。从此以后，所有自动保存的文档都会“感染”上这种宏病毒，而且如果其他用户打开了感染病毒的文档，宏病毒又会转移到他的计算机上。</li>
+</ul>
+<ul>
+<li><strong>CIH病毒</strong>：CIH 是台湾大学生陈盈豪 1998 年用约 1KB 手写汇编编写的 Windows 95/98 病毒，以作者姓名缩写命名，因触发日 4 月 26 日恰逢切尔诺贝利事故纪念日又被称为“切尔诺贝利病毒”。它的传奇在于三点：感染 PE 文件时把自身切片塞进节与节之间的对齐缝隙，文件大小分毫不变，极难察觉；利用 Windows 9x 设计缺陷，用 <code>sidt</code> 拿到 IDT 后改写中断门直接陷阱进 Ring-0，再挂钩文件系统驱动实现无文件的内核级驻留，任何程序打开 PE 文件即被感染；payload 更是直接向 Flash BIOS 和硬盘起始扇区灌垃圾数据，让中毒机器开机都开不了。它在 1999 年 4 月 26 日全球爆发，感染数十万台机器、损失以亿美元计，是首个大规模“毁硬件”的病毒；对逆向学习者而言，它至今仍是 PE 结构、RVA/文件偏移映射与 x86 特权级机制的最佳实战教材。</li>
+</ul>
+<ul>
+<li><strong>蠕虫病毒</strong>：是一种常见的计算机病毒，是无须计算机使用者干预即可运行的独立程序，它通过不停的获得网络中存在漏洞的计算机上的部分或全部控制权来进行传播。计算机病毒是指编制或者在计算机程序中插入的破坏计算机功能或者破坏数据和恶意篡改系统，影响计算机使用并且能够自我复制的一组计算机指令或者程序代码。</li>
+</ul>
+<ul>
+<li><strong>木马病毒</strong>：原理是把一个远程控制程序的服务端伪装成正常软件骗用户亲手运行，它随即自我复制到系统目录、写入自启动实现开机驻留，然后主动反向连接攻击者的控制端（C2）上线，驻留在进程或内存里接收并执行键盘记录、屏幕窃取、文件回传等命令，并借助加壳、进程注入、无文件等技术躲避查杀——一句话概括：不靠感染靠欺骗，不靠破坏靠控制。</li>
+</ul>
+<h2>病毒分析全流程：从静态到动态</h2>
+<pre><code>
+病毒样本用 MD5 而不是原文件名命名，是因为文件名是攻击者随便起的伪装话术，而哈希由文件内容唯一决定——改名一万次哈希不变、改一个字节哈希就变，既能给海量样本去重索引、又能验证“这就是报告里说的那个样本”，等于一个攻击者无法伪造的统一身份证号。
+</code></pre>
+<pre><code>
+
+一、两种分析方法
+  静态分析：不运行。IDA 反汇编、看字符串、看导入表
+  动态分析：跑起来，观察实际行为（释放文件、联网、改系统）
+  规律：看代码慢但能看到逻辑，跑起来快但只能看到现象
+
+二、分析环境（保命）
+  虚拟机（VMware/VBox）或在线沙箱（微步云、Any.Run）
+  铁律：分析前拍快照，分析后回滚
+  作用：病毒改了什么一键清零，不用重装系统
+
+三、标准流程（成本从低到高）
+  1. 算样本 MD5
+  2. 拿 MD5 查 VirusTotal / 沙箱历史记录
+     → 已知样本：直接得结论（家族名、行为、危害），收工
+  3. 查无此毒 → 动态分析
+  4. 要搞懂内部逻辑（加密、注册算法）→ 静态 IDA 拆解
+
+四、动态监控三件套
+  文件/注册表：Process Monitor
+  API 调用：API Monitor / 沙箱内置 hook
+  网络：Wireshark / TCPView
+  产出：行为报告 = 释放了什么 + 怎么自启 + 连了哪个 C2
+
+核心思想：triage（分诊）——先用最小成本判断新旧，
+能白嫖情报就不重复分析，行为看不清才上静态。
+</code></pre>
+<p><strong>实战流程</strong></p>
+<pre><code>
+拿到样本 → DIE 查壳/看熵 → 看导入表红旗
+→ 确认是加载器 → 虚拟机里调试
+→ 断点 CreateFile / LoadLibrary → 抓释放/加载动作
+→ dump 出真货 DLL/EXE → 修复成可分析 PE
+→ IDA 静态分析 → 按 API 指纹归纳功能 → 出报告
+</code></pre>
+<pre><code>
+加载器分析与模块提取
+
+一、背景：两层结构
+  外层 = 加载器（dropper）：解密+释放+加载，不含完整恶意代码
+  内层 = 恶意模块（DLL/EXE）：真功能所在，静态扫不到
+
+二、静态摸底
+  查壳：DIE/PEiD，节名异常 + 熵值≈8 = 加密/压缩
+  导入表红旗：
+    LoadLibrary+GetProcAddress 极简表 → 运行时动态加载
+    CreateFile/WriteFile → 释放文件
+    VirtualAlloc/WriteProcessMemory/SetThreadContext → 进程注入
+
+三、动态抓真货
+  bp CreateFileW → 拿释放文件路径
+  bp LoadLibrary → 拿加载的模块
+  内存 dump（已解密）→ Scylla 修复导入表 → 可分析 PE
+  原则：不破解密，等它自己解密完再取
+
+四、功能画像（按 API 指纹）
+  CreateProcess → 起进程    SetWindowsHookEx → 键盘记录
+  BitBlt/GetDC → 截屏       socket/HttpSendRequest → C2
+</code></pre>
+</article>
+</div>
+<script>
+var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>
