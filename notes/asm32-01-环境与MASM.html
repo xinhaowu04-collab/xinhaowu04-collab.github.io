@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>环境与 MASM · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">环境与 MASM</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>环境与 MASM</h1>
+<p>MASM（Microsoft Macro Assembler）是微软的 x86 汇编工具链，包含汇编器 <code>ml.exe</code> 和链接器 <code>link.exe</code>，整个工具链位于 <code>D:\masm32\</code> 目录，是经典的 Win32 汇编开发环境。</p>
+<ul>
+<li><strong>汇编</strong>（Assembly）：把助记符指令（如 <code>mov eax, 1</code>）转成机器码，输出 COFF 格式的 <code>.obj</code> 文件</li>
+<li><strong>链接</strong>（Linking）：合并一个或多个 <code>.obj</code> 与 <code>.lib</code> 库，解析外部符号引用（如 <code>MessageBoxA</code> 的地址），生成最终 <code>.exe</code></li>
+</ul>
+<p><code>/coff</code> 标志让 <code>ml.exe</code> 输出 COFF 格式（Common Object File Format，Windows 标准目标文件格式，替代 16 位时代的 OMF）。不用 <code>/coff</code> 会输出 OMF，与 32 位链接器不兼容。</p>
+<h2>编译链接流程</h2>
+<pre><code>
+D:\masm32\bin\ml /c /coff hello.asm
+D:\masm32\bin\link /subsystem:windows /libpath:D:\masm32\lib hello.obj
+</code></pre>
+<ul>
+<li><code>/c</code>：只编译不链接；省略则 <code>ml</code> 会直接调 <code>link</code> 完成完整构建</li>
+<li><code>/coff</code>：输出 COFF 目标文件，32 位 Windows 必须使用</li>
+<li><code>/subsystem:windows</code>：GUI 子系统，启动后不分配控制台窗口；误用 <code>/subsystem:console</code> 会让 GUI 程序多弹一个黑框</li>
+<li><code>/libpath</code>：库文件搜索路径，<code>link</code> 在此目录找 <code>kernel32.lib</code>、<code>user32.lib</code> 等导入库</li>
+<li>多个 <code>.obj</code> 或 <code>.lib</code> 以空格分隔依次列出</li>
+</ul>
+<p>整体流程：<code>hello.asm</code> →（ml /c /coff）→ <code>hello.obj</code>（COFF）→（link + 导入库）→ <code>hello.exe</code>（PE）。</p>
+<h2>段（Segment）</h2>
+<p>程序在逻辑上划分为不同的段，每个段有独立的内存权限：</p>
+<p>| 段 | 存放内容 | 内存权限 | 磁盘占用 | C 等价 | |----|----------|----------|----------|--------| | <code>.code</code>（或 <code>.text</code>） | 可执行指令 | 可读 + 可执行（RX） | 占 | 函数体 | | <code>.data</code> | 已初始化全局变量、字符串常量 | 可读 + 可写（RW） | 占 | <code>int x = 42;</code> | | <code>.data?</code>（或 <code>.bss</code>） | 未初始化全局变量 | 可读 + 可写（RW） | <strong>不占</strong> | <code>int x;</code>（全局） | | <code>.const</code>（或 <code>.rdata</code>） | 只读常量 | 只读（R） | 占 | <code>const int x = 42;</code> |</p>
+<p>段的划分源于内存保护和程序组织两大需求：</p>
+<p>1. <strong>权限分离</strong>：代码不应被意外修改，数据不应被执行。CPU 通过段页式内存管理为不同区域设权限位，写 <code>.code</code> 段会触发 #GP（通用保护故障），OS 随即终止进程。 2. <strong>DEP / NX（W^X 策略）</strong>：同一页内存要么可写要么可执行，不能同时具备。攻击者把 shellcode 写进 <code>.data</code> 段后，因数据页不可执行，跳转会直接崩溃。 3. <strong>磁盘与内存优化</strong>：<code>.data?</code> 段在 PE 文件中 <code>PointerToRawData</code> 和 <code>SizeOfRawData</code> 都设为 0，只占 <code>VirtualSize</code>。加载器检测到该节无原始数据，就在内存按 <code>VirtualSize</code> 分配并填零——这种机制叫<strong>零初始化节</strong>，所有未显式初始化的全局变量都归入此处，从而缩减 exe 体积。</p>
+<h2>段定义</h2>
+<pre><code>
+.386                     ; 目标 CPU
+.model flat, stdcall     ; 内存模型 + 调用约定
+
+.data
+szMsg    db &quot;Hello, World!&quot;, 0
+count    dd 42
+
+.data?
+buffer   db 1024 dup(?)   ; 1KB 缓冲区，不占 exe 空间
+
+.const
+MAX_SIZE equ 100          ; 常量
+
+.code
+start:
+    ; 程序代码从这里开始
+    ret
+end start
+</code></pre>
+<ul>
+<li><code>flat</code>：平坦内存模型，所有段在同一个 4GB 地址空间中，CS/DS/SS/ES 都指向同一基址，32 位 Windows 的标准模型</li>
+<li><code>stdcall</code>：默认调用约定为 stdcall（被调用者清栈），与 Windows API 一致</li>
+</ul>
+<h2>CPU 伪指令</h2>
+<p>伪指令声明目标 CPU 型号，在编译期做指令集验证：<code>.386</code> 下使用 <code>cmov</code> 会报 <code>error A2070: invalid instruction operands</code>。这相当于编译期静态断言，让汇编器不实际运行就能静态保证机器码在目标 CPU 上可执行，避免二进制分发后因 CPU 不兼容崩溃。</p>
+<p>| 伪指令 | 对应 CPU | 年代 | 新增关键指令 | |--------|----------|------|-------------| | <code>.386</code> | 80386 | 1985 | 32 位寄存器（eax/ebx/ecx/edx/esi/edi/ebp/esp）、保护模式、平坦内存模型 | | <code>.486</code> | 80486 | 1989 | <code>bswap</code>（字节序反转）、<code>xadd</code>（交换并加） | | <code>.586</code> | Pentium | 1993 | <code>cpuid</code>（CPU 信息查询）、<code>rdtsc</code>（读时间戳计数器） | | <code>.686</code> | Pentium Pro | 1995 | <code>cmov</code>（条件传送）、为 SSE 奠定基础 | | <code>.K3D</code> | AMD 3DNow! | 1998 | AMD 专有的 SIMD 浮点指令 | | <code>.MMX</code> | Pentium MMX | 1997 | MMX 整数 SIMD（mm0~mm7 寄存器） | | <code>.XMM</code> | Pentium III | 1999 | SSE 浮点 SIMD（xmm0~xmm7 寄存器） |</p>
+<p>Win32 窗口程序用 <code>.386</code> 即可覆盖所有基础 32 位指令。选择依据是程序实际使用的最"新"指令：</p>
+<pre><code>
+.386     ; 仅 32 位基础指令：mov/push/pop/call/ret
+.586     ; 需要 cpuid 或 rdtsc
+.686     ; 需要条件传送 cmovne
+.XMM     ; 需要 SSE 浮点指令 movss/addss
+</code></pre>
+<h2>数据类型</h2>
+<p>| 完整名称 | 缩写（步长） | 大小 | C 语言对应 | |----------|-------------|------|-----------| | <code>BYTE</code> | <code>db</code>（define byte） | 1 字节 | <code>char</code> | | <code>WORD</code> | <code>dw</code>（define word） | 2 字节 | <code>short</code> | | <code>DWORD</code> | <code>dd</code>（define double word） | 4 字节 | <code>int</code>、指针、<code>HWND</code> 等句柄 | | <code>QWORD</code> | <code>dq</code>（define quad word） | 8 字节 | <code>long long</code>、<code>double</code> |</p>
+<p><code>db</code>/<code>dw</code>/<code>dd</code>/<code>dq</code> 本质是<strong>步长声明</strong>：告诉汇编器每个元素占多少字节，连续排列时按此步长递增地址。</p>
+<pre><code>
+; 字符串（必须以 0 结尾才能被 Windows API 识别）
+szTitle  db &quot;My Window&quot;, 0
+szHello  db &quot;Hello, World!&quot;, 0      ; MessageBox 等 API 要求 \0 结尾
+
+; 整数变量
+counter  dd 0                       ; 32 位整数，初始化为 0
+hwnd     dd ?                       ; 句柄变量，未初始化（运行时赋值）
+
+; 缓冲区（dup 操作符批量分配）
+buf      db 256 dup(0)              ; 256 字节全部初始化为 0
+temp     db 128 dup(?)              ; 128 字节临时缓冲区，不初始化
+
+; 数组（等价于 C: int arr[] = {1, 2, 3, 4, 5};）
+arr      dd 1, 2, 3, 4, 5           ; 5 个 DWORD，共 20 字节
+</code></pre>
+<h2>小端序</h2>
+<p>x86 用<strong>小端序</strong>存储多字节数据：<strong>低位字节存在低地址，高位字节存在高地址</strong>。8086 时代低字节在低地址的设计使 8 位和 16 位访存可复用地址线，简化硬件实现，后续 32/64 位扩展保持向后兼容。</p>
+<pre><code>
+.data
+val dd 12345678h
+; 内存里实际排列（低地址 → 高地址）：78 56 34 12
+</code></pre>
+<p>注意：调试器内存窗口看到 <code>78 56 34 12</code>，读成 DWORD 要反向拼成 <code>0x12345678</code>；调试器按 DWORD/WORD 显示时会自动处理好，但看原始字节流务必反向读。新手最常犯的错是把 <code>78 56 34 12</code> 误读成 <code>0x78563412</code>。</p>
+<h2>内存无类型</h2>
+<p>汇编中内存<strong>没有类型概念</strong>，只是一排连续字节，由指令决定如何解释。这源于冯·诺依曼架构的本质：数据和指令共享同一存储空间，内存单元本身不携带类型信息。</p>
+<ul>
+<li><code>mov eax, [addr]</code> —— 按 4 字节整数解释</li>
+<li><code>mov al, [addr]</code> —— 按 1 字节整数解释</li>
+<li><code>fld dword ptr [addr]</code> —— 按 32 位浮点数解释</li>
+<li><code>call [addr]</code> —— 按函数指针解释</li>
+</ul>
+<p>与 C 的强类型相反，汇编器不验证也不关心你对内存的"用法"，一切决定权交给程序员。同一块内存可用不同步长读写，<code>ptr</code> 关键字临时指定操作数大小，是"告诉 CPU 你想怎么解释这块内存"的标准方式：</p>
+<pre><code>
+.data
+myData dd 12345678h      ; 4 字节
+
+.code
+mov eax, myData               ; eax = 0x12345678（按 DWORD 读）
+mov ax, word ptr [myData]     ; ax = 0x5678（低 2 字节）
+mov al, byte ptr [myData]     ; al = 0x78（最低字节）
+mov ax, word ptr [myData + 2] ; ax = 0x1234（跳过前 2 字节，高 2 字节）
+</code></pre>
+<h2>关键伪指令</h2>
+<p>| 伪指令 | 作用 | |--------|------| | <code>offset</code> | 获取变量或标号的偏移地址（RVA），等价于 C 的 <code>&</code> 取地址符 | | <code>end</code> | 标记源文件结束 | | <code>end start</code> | 源文件结束 + 指定程序入口点为 <code>start</code> 标号 | | <code>PROTO</code> | 声明外部函数原型（参数个数和类型） | | <code>INVOKE</code> | 调用已声明的函数，自动生成参数压栈序列 | | <code>MACRO</code> / <code>ENDM</code> | 定义宏，在编译时展开为预定义的指令序列 |</p>
+<h3>offset</h3>
+<p><code>offset</code> 在编译期计算变量相对于段基址的偏移（RVA，相对虚拟地址），常用于把变量地址传给 API。编译期即可确定，不生成额外指令，效率比 <code>lea</code> 高。</p>
+<pre><code>
+.data
+szMsg db &quot;Hello&quot;, 0
+
+.code
+push offset szMsg     ; 压入 szMsg 的地址（OFFSET 和 offset 写法不区分大小写）
+call MessageBoxA
+
+mov esi, offset szMsg ; esi 指向字符串首地址
+</code></pre>
+<h3>end 与 end start</h3>
+<ul>
+<li><code>end</code> 单独使用：仅告诉汇编器源文件到此为止。链接器会找默认入口点（<code>WinMain</code> 或 <code>main</code>），找不到报 <code>error LNK2001: unresolved external symbol _WinMain@16</code></li>
+<li><code>end start</code>：指定 <code>start</code> 标号为程序入口点。标号名可任意（如 <code>begin</code>、<code>entry</code>），命名为 <code>start</code> 是约定俗成</li>
+</ul>
+<pre><code>
+.code
+start:
+    xor eax, eax
+    ret
+end start      ; 必须！指定入口点，否则链接失败
+</code></pre>
+<h3>PROTO 与 INVOKE</h3>
+<p>手写 <code>push</code> + <code>call</code> 序列要求精确记忆参数个数和压栈顺序（从右往左压栈是 stdcall 和 cdecl 的共性）。<code>INVOKE</code> 是 MASM 的高级抽象：根据 <code>PROTO</code> 声明在编译期校验参数个数和类型，自动计算 push 序列（包括 <code>ADDR</code> 到 <code>OFFSET</code> 的转换），并按调用约定处理栈清理。</p>
+<pre><code>
+; 声明原型（通常在程序开头或包含文件中）
+MessageBoxA PROTO, hWnd:DWORD, lpText:DWORD, lpCaption:DWORD, uType:DWORD
+ExitProcess PROTO, uExitCode:DWORD
+
+; 调用（ADDR 是 INVOKE 专用地址操作符，展开为 push offset；
+; 在 INVOKE 上下文中 ADDR 和 OFFSET 可互换）
+INVOKE MessageBoxA, 0, ADDR szMsg, ADDR szTitle, 0
+INVOKE ExitProcess, 0
+</code></pre>
+<p>INVOKE 只是编译期文本展开，反汇编看到的是一串 <code>push</code> + <code>call</code>，最后一个参数最先压栈：</p>
+<pre><code>
+push 0                ; uType
+push OFFSET szTitle   ; lpCaption
+push OFFSET szMsg     ; lpText
+push 0                ; hWnd
+call MessageBoxA
+</code></pre>
+<p>注意：逆向看到"连续 push + call"且参数从右到左压栈，就是函数调用的标准模式，push 个数 = 参数个数。call 后紧跟 <code>add esp, N</code> → cdecl；call 后无清理且函数结尾是 <code>ret N</code> → stdcall。</p>
+<h3>MACRO 宏</h3>
+<p>宏在编译期展开，本质是文本替换，适合封装频繁使用的指令序列：</p>
+<pre><code>
+; 无参数宏
+PRINT_EAX MACRO
+    push eax
+    push offset fmt
+    call printf
+    add esp, 8
+ENDM
+
+; 带参数宏
+MyMacro MACRO param1, param2
+    mov eax, param1
+    add eax, param2
+ENDM
+
+MyMacro 10, 20    ; 展开为: mov eax, 10 / add eax, 20
+</code></pre>
+<p>宏被多次展开时内部标号会重名导致汇编错误，<code>LOCAL</code> 为每次展开生成唯一标号：</p>
+<pre><code>
+MyLoop MACRO count
+    LOCAL loop_start          ; 声明局部标号
+    mov ecx, count
+loop_start:
+    dec ecx
+    jnz loop_start
+ENDM
+
+MyLoop 5
+MyLoop 10
+; 两次展开标号自动不同：第一次 loop_start$1，第二次 loop_start$2
+</code></pre>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>调用约定 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">调用约定</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>调用约定</h1>
+<p>调用约定（Calling Convention）是函数调用者与被调用者之间的一份<strong>二进制级契约</strong>，约定了参数如何传递、栈由谁清理、返回值如何存放、寄存器谁负责保存。不同的编译器/语言/平台有各自的默认约定，但在 x86 Win32 汇编中可以自由选择。</p>
+<h2>四种调用约定总览</h2>
+<p>| 调用约定 | 参数传递 | 压栈顺序 | 谁清栈 | <code>ret</code> 形式 | 典型用途 | |---|---|---|---|---|---| | <code>__stdcall</code> | 全部压栈 | 右到左 | 被调用者 | <code>ret N</code> | Win32 API | | <code>__cdecl</code> | 全部压栈 | 右到左 | 调用者 | <code>ret</code> | C 标准库、可变参数函数 | | <code>__fastcall</code> | 前两个参数走 <code>ecx</code>/<code>edx</code>，其余压栈 | 右到左 | 被调用者 | <code>ret N</code> | 编译器优化 | | <code>__pascal</code> | 全部压栈 | <strong>左到右</strong> | 被调用者 | <code>ret N</code> | 已废弃，早期 Pascal / Windows 16 位 |</p>
+<h3>stdcall</h3>
+<p><strong>Win32 API 的标准约定</strong>。被调用者（函数本身）负责清栈，用 <code>ret N</code> 一步完成返回 + 清理参数。</p>
+<pre><code>
+; MessageBoxA(NULL, &quot;Hello&quot;, &quot;Title&quot;, MB_OK)
+push 0                    ; MB_OK（最后一个参数最先压）
+push offset szTitle
+push offset szMsg
+push 0                    ; NULL
+call MessageBoxA@16       ; 函数内部 ret 16，自动清 4 个参数
+; 调用后 ESP 已恢复，不需要做任何事
+</code></pre>
+<p>对应的函数定义（MASM）：</p>
+<pre><code>
+MyFunc proc stdcall, arg1:dword, arg2:dword
+    ; ... 函数体 ...
+    ret                   ; MASM 自动展开为 ret 8
+MyFunc endp
+</code></pre>
+<p>MASM 在检测到 <code>proc stdcall</code> 时，会根据参数列表自动在 <code>ret</code> 指令后附加参数总字节数，生成 <code>ret 8</code>。</p>
+<h3>cdecl</h3>
+<p><strong>C 标准约定</strong>。调用者负责清栈，函数只做 <code>ret</code>，调用方之后手动 <code>add esp, N</code>。<strong>可变参数函数</strong>（<code>printf</code>、<code>wsprintf</code>）必须用 cdecl，因为只有调用者知道压了多少参数，被调用者无法在编译时确定参数个数。</p>
+<pre><code>
+; wsprintfA(szBuf, &quot;x=%d y=%d&quot;, x, y)
+push eax                  ; y（最后一个参数最先压）
+push edx                  ; x
+push offset szFmt
+push offset szBuf
+call wsprintfA            ; 函数内部只做 ret，不清栈
+add esp, 16               ; 调用者手动清：4 个参数 x 4 = 16
+</code></pre>
+<h3>fastcall</h3>
+<p><strong>编译器优化约定</strong>。前两个参数通过寄存器 <code>ecx</code>、<code>edx</code> 传递，避免栈操作开销，其余参数仍压栈、仍从右到左。</p>
+<pre><code>
+; fastcall foo(1, 2, 3)
+mov  ecx, 1               ; 第 1 个参数走 ecx
+mov  edx, 2               ; 第 2 个参数走 edx
+push 3                    ; 第 3 个参数压栈
+call foo@12               ; @N 计入全部 3 个参数（12 字节）；ret 4 只清栈上的 1 个参数
+</code></pre>
+<ul>
+<li>优点：减少栈访问次数，提升调用密集型代码的性能</li>
+<li>缺点：调用方必须保证 <code>ecx</code>/<code>edx</code> 的值不被其他操作覆盖</li>
+</ul>
+<h3>pascal</h3>
+<p><strong>左到右压栈 + 被调用者清栈</strong>，与主流方向相反。这导致被调函数无法确定第一个参数的位置（因为参数个数变化时偏移量也会变化），已彻底淘汰。了解即可。</p>
+<h2>为什么参数从右向左压栈</h2>
+<pre><code>
+; foo(a, b, c) 压栈顺序：c -&gt; b -&gt; a
+push c
+push b
+push a
+call foo
+</code></pre>
+<p>压栈完成后的栈布局（默认 <code>ebp</code> 已保存）：</p>
+<pre><code>
+[ebp+8]   -&gt; a（第 1 个参数）
+[ebp+12]  -&gt; b（第 2 个参数）
+[ebp+16]  -&gt; c（第 3 个参数）
+</code></pre>
+<p><strong>核心原因：固定偏移。</strong> 第 1 个参数永远在 <code>[ebp+8]</code>，与参数总个数无关。这意味着：</p>
+<ul>
+<li>被调函数可以用硬编码的偏移量访问每个参数</li>
+<li>可变参数（<code>...</code>）成为可能——<code>va_start</code> 宏就是通过第 1 个参数的地址 + 固定偏移来依次取出后续参数的</li>
+<li>如果是从左到右压栈（pascal），参数个数变化后 <code>a</code> 的偏移会变，导致无法实现可变参数</li>
+</ul>
+<h2>为什么 Win32 API 选择 stdcall</h2>
+<p>Win32 API（如 <code>CreateWindow</code>、<code>GetMessage</code>）有成千上万个导出函数，被成百上千个应用程序调用。选择 stdcall 的考虑：</p>
+<p>1. <strong>代码体积优化</strong>：清理栈的 <code>ret N</code> 指令（2-3 字节）位于函数内部，只出现一次；如果由每个调用者分别清理（cdecl 的 <code>add esp, N</code>），每个调用点都要多 3 字节。对于 Kernel32、User32 这种被大量调用的 DLL，stdcall 节省了可观的总体代码体积。 2. <strong>减少调用者心智负担</strong>：调用者只需 <code>call</code>，不必关心有多少个参数需要清理。忘记 <code>add esp, N</code> 是 x86 汇编最常见的崩溃原因之一。 3. <strong>统一规范</strong>：所有 API 使用同一约定，避免了混用出错的可能。</p>
+<h2>为什么 cdecl 必须用于可变参数</h2>
+<pre><code>
+printf(&quot;%d %d %d&quot;, a, b, c);  // 3 个参数
+printf(&quot;hello&quot;);               // 1 个参数
+</code></pre>
+<p>同一个 <code>printf</code> 在不同调用点接受的参数个数不同。如果采用 stdcall，函数内部的 <code>ret N</code> 无法在编译时确定 <code>N</code> 的值——因为 <code>printf</code> 的实现看不到调用者压了多少参数。只有调用者知道自己压了多少参数，所以必须由调用者来清栈。</p>
+<p><strong>底层机制</strong>：<code>printf</code> 通过 <code>va_start</code>、<code>va_arg</code> 宏遍历栈上的参数。<code>va_start</code> 的底层实现大致是：</p>
+<pre><code>
+// 简化实现
+#define va_start(ap, last) (ap = (char*)&amp;last + sizeof(last))
+#define va_arg(ap, type)   (*(type*)((ap += sizeof(type)) - sizeof(type)))
+</code></pre>
+<p>它从最后一个已知参数（格式化字符串）的地址向后遍历栈，依次取出不定数量的参数。这就要求参数在栈上从右到左连续排列，且调用者负责清栈。</p>
+<h2>为什么 stdcall 需要 @N 后缀（名称修饰）</h2>
+<p>由于被调用者执行 <code>ret N</code> 来清栈，<strong>链接器必须知道参数的总字节数</strong>，否则无法验证调用是否正确，也无法在重定位时修正符号。</p>
+<pre><code>
+MessageBoxA@16    -&gt; 4 个 DWORD 参数 = 16 字节
+ExitProcess@4     -&gt; 1 个 DWORD 参数 = 4 字节
+</code></pre>
+<ul>
+<li>对 <strong>stdcall</strong>：名称修饰为 <code>_FunctionName@N</code>（MASM/TASM 下有时省略前导下划线）</li>
+<li>对 <strong>cdecl</strong>：名称修饰为 <code>_FunctionName</code>（仅前导下划线，无 <code>@N</code>）</li>
+<li>对 <strong>fastcall</strong>：名称修饰为 <code>@FunctionName@N</code>（前导 <code>@</code>）</li>
+</ul>
+<p>链接器通过符号名中的 <code>@N</code> 就能知道该函数期望的栈清理量，类型不匹配时会报 unresolved symbol 或链接错误，起到一定的静态检查作用。</p>
+<h2>为什么 fastcall 走 ecx/edx</h2>
+<p><code>ecx</code> 和 <code>edx</code> 是 x86 架构中<strong>最适合传递参数的通用寄存器</strong>：</p>
+<ul>
+<li>它们不是"被调用者保存"寄存器（callee-saved），不需要函数 prolog 保存</li>
+<li><code>eax</code> 专门用于返回值，<code>ebx</code> 常被用作基址，<code>esi</code>/<code>edi</code> 用于串操作——<code>ecx</code>/<code>edx</code> 最适合临时传递参数</li>
+<li>编译器在 fastcall 模式下可以省略对前两个参数的 <code>push</code>/<code>pop</code> 操作，减少栈访问带来的延迟</li>
+</ul>
+<h2>栈帧结构（stdcall 为例）</h2>
+<p>调用 <code>foo(1, 2)</code> 后的栈布局：</p>
+<pre><code>
+高地址
++----------+----------+
+|    2     | [ebp+12]  参数 2
++----------+----------+
+|    1     | [ebp+8]   参数 1
++----------+----------+
+| 返回地址  | [ebp+4]   call 指令自动压入
++----------+----------+
+| 旧 EBP   | [ebp]     push ebp 保存的前一帧基址
++----------+----------+
+| 局部变量1 | [ebp-4]   sub esp, N 分配的局部空间
++----------+----------+
+| 局部变量2 | [ebp-8]
++----------+----------+
+低地址      &lt;- ESP
+</code></pre>
+<p><strong>栈帧构建步骤</strong>：</p>
+<p>1. 调用者 <code>push</code> 参数（从右到左） 2. <code>call</code> 指令将返回地址压栈（<strong>这一步自动完成</strong>） 3. 被调用者 <code>push ebp</code> 保存旧基址 4. 被调用者 <code>mov ebp, esp</code> 建立新帧基址 5. 被调用者 <code>sub esp, N</code> 分配局部变量空间 6. 函数体执行 7. 被调用者 <code>mov esp, ebp</code> / <code>pop ebp</code> 恢复 8. 被调用者 <code>ret N</code>（stdcall）或 <code>ret</code>（cdecl）</p>
+<h2>不同约定的调用流程对比</h2>
+<pre><code>
+stdcall 流程：
+  调用者  push 参数（右 -&gt; 左）
+  调用者  call（自动压入返回地址）
+  被调者  push ebp / mov ebp, esp
+  被调者  sub esp, N（分配局部变量）
+  被调者  ... 函数体 ...
+  被调者  mov esp, ebp / pop ebp
+  被调者  ret N（返回 + 清栈）
+  调用者  ESP 已恢复，无需操作
+
+cdecl 流程：
+  调用者  push 参数（右 -&gt; 左）
+  调用者  call
+  被调者  标准 prolog / epilog
+  被调者  ret（只返回，不清栈）
+  调用者  add esp, N（调用者手动清栈）
+</code></pre>
+<p><strong>关键差异</strong>：stdcall 的清栈指令嵌入在函数结尾，而 cdecl 的清栈指令分散在每个调用点之后。</p>
+<h2>逆向识别调用约定</h2>
+<p>看函数结尾指令是 <code>ret</code> 还是 <code>ret N</code>：</p>
+<pre><code>
+; stdcall 函数结尾（被调用者清栈）
+    ret 8              ; ← 带 N，说明是 stdcall，N=参数总字节数
+
+; cdecl 函数结尾（调用者清栈）
+    ret                ; ← 不带 N，说明是 cdecl
+; 且调用点后面必然紧跟：
+; call bar
+; add esp, 8           ; ← 调用者手动清栈
+</code></pre>
+<p>注意：看到 <code>ret N</code> → 被调用者清栈 → stdcall（Windows API）；看到裸 <code>ret</code> 且调用点后有 <code>add esp, N</code> → 调用者清栈 → cdecl（C 库函数/可变参数）。这是判断函数约定的第一信号。</p>
+<p>链接器符号名里的 <code>@N</code> 直接编码了参数字节数，是调用约定的静态指纹：</p>
+<pre><code>
+MessageBoxA@16    → stdcall，4 个 DWORD 参数（16 字节）
+ExitProcess@4     → stdcall，1 个 DWORD 参数
+_wsprintfA        → cdecl（仅前导下划线，无 @N）
+@foo@8            → fastcall（前导 @ + 结尾 @N）
+</code></pre>
+<p>注意：在 PE 导出表或 <code>.idata</code> 里看到带 <code>@N</code> 后缀的符号，立刻判定为 stdcall，且 N 就是参数字节数（32 位下除以 4 即参数个数）。<code>dumpbin /exports user32.dll</code> 可直接看到这些修饰名。</p>
+<h2>计算 add esp, N 中的 N</h2>
+<pre><code>
+N = 参数个数 x 4（每个 DWORD 参数占 4 字节）
+
+3 个参数 -&gt; add esp, 12
+4 个参数 -&gt; add esp, 16
+5 个参数 -&gt; add esp, 20
+</code></pre>
+<p>注意：如果参数中包含 8 字节的 <code>__int64</code> 或结构体，需手动计算实际字节数。</p>
+<h2>声明外部函数（MASM）</h2>
+<pre><code>
+; stdcall：使用带 @N 的名称
+extrn MessageBoxA@16   : PROC
+extrn ExitProcess@4    : PROC
+
+; cdecl：名称前加下划线，无 @N 后缀
+extrn _wsprintfA       : PROC
+</code></pre>
+<h2>定义自己的函数</h2>
+<pre><code>
+; 定义一个 stdcall 函数
+AddTwo proc stdcall, a:dword, b:dword
+    mov  eax, a
+    add  eax, b
+    ret                     ; MASM 自动 =&gt; ret 8
+AddTwo endp
+
+; 定义一个 cdecl 函数
+AddTwoCdecl proc cdecl, a:dword, b:dword
+    mov  eax, a
+    add  eax, b
+    ret                     ; MASM 生成 ret（无 N）
+AddTwoCdecl endp
+
+; 定义一个 fastcall 函数
+AddTwoFast proc fastcall, a:dword, b:dword
+    mov  eax, ecx           ; a 来自 ecx
+    add  eax, edx           ; b 来自 edx
+    ret                     ; MASM 自动 =&gt; ret 0（栈上无参数）
+AddTwoFast endp
+</code></pre>
+<h2>调用约定选择决策树</h2>
+<pre><code>
+需要决定调用约定
+  是用来调用 Win32 API？
+    是 → stdcall
+    否 → 被调函数有可变参数？
+           是 → cdecl
+           否 → 追求极致的调用性能？
+                  是 → fastcall
+                  否 → 与 C 交互 → cdecl
+                        纯汇编   → stdcall
+</code></pre>
+<h2>快速判断既有函数采用哪种约定</h2>
+<ul>
+<li>Win32 API（<code>CreateWindow</code>、<code>GetMessage</code>、<code>TextOut</code>、<code>DispatchMessage</code> 等）→ <strong>stdcall</strong>，调用后不用清栈</li>
+<li>格式化字符串函数（<code>wsprintfA</code>、<code>_sprintf</code>、<code>printf</code> 等）→ <strong>cdecl</strong>，调用后必须 <code>add esp, N</code></li>
+<li>函数名末尾有 <code>@N</code> → <strong>stdcall</strong></li>
+<li>函数名以 <code>@</code> 开头 → <strong>fastcall</strong></li>
+<li>不确定 → 查 MSDN（Windows SDK 文档）或看头文件声明中 <code>WINAPI</code> 宏（展开为 <code>__stdcall</code>）</li>
+</ul>
+<h2>常见汇编指令速查</h2>
+<p>| 指令 | 作用 | 字节数 | |---|---|---| | <code>ret</code> | 返回，不清栈 | 1 | | <code>ret N</code> | 返回，然后 ESP += N | 3 | | <code>add esp, N</code> | 手动调整 ESP（清理参数） | 3-6 | | <code>push r32</code> | 32 位寄存器/内存压栈 | 1-2 | | <code>call addr</code> | 压入返回地址并跳转 | 5 |</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

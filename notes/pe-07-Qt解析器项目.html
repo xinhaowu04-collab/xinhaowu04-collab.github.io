@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Qt PE32 解析器项目 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">Qt PE32 解析器项目</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>Qt PE32 解析器项目</h1>
+<p>Qt/C++ 编写的 PE32 解析器：<code>PEParser</code> 负责读取磁盘文件和解析，<code>MainWindow</code> 负责树和表格展示。本节整理导出功能设计、典型代码错误修正、前端拉伸、作业顺序与攻防讨论。</p>
+<h2>解析器结构与职责分离</h2>
+<pre><code>
+MainWindow（QTreeWidget + QTableWidget）
+└── PEParser m_parse（对象成员，用点号调用）
+     ├── QByteArray m_fileData              磁盘文件原始字节
+     ├── IMAGE_DOS_HEADER m_dosHander
+     ├── IMAGE_NT_HEADERS32 m_ntHander
+     └── QVector&lt;IMAGE_SECTION_HEADER&gt; m_sections
+</code></pre>
+<p><code>m_parse</code> 是 <code>MainWindow</code> 的 <code>PEParser</code> 对象成员，不是指针，调用写 <code>m_parse.ReadFile(...)</code> 而不是 <code>m_parse->ReadFile(...)</code>。</p>
+<p>已有流程：<code>QFileDialog → ReadFile → ParserHeader → parserSections → GetPE → 树和详情表显示</code>，已能显示 DOS 头、NT 头、File Header、Optional Header 和节表的主要字段。</p>
+<p><strong><code>PEParser</code> 拥有 <code>m_fileData</code>，解析逻辑必须放在解析器里；UI 层直接模拟课堂的 <code>hModule + RVA</code>，就是把磁盘文件误当内存映像。</strong></p>
+<h2>导出功能的 UI 设计</h2>
+<p>最终目标：点击 <code>Export Table</code> 节点时，不显示一整页元数据，而是每个有效导出项目一行：</p>
+<pre><code>
+EAT下标 | 导出序号 | 函数名称 | 函数RVA / 转发目标
+</code></pre>
+<p>| 阶段 | 内容 | 状态 | |---|---|---| | 第一版最小验证 | 只显示 <code>DataDirectory[0].VirtualAddress/Size</code> | 仅内部定位验证 | | 第二版 | 显示 <code>IMAGE_EXPORT_DIRECTORY</code> 11 个字段 | 信息完整但不够简洁 | | 第三版 | 只显示 Base、数量和三张表地址 6 个核心字段 | 仍偏结构体查看 | | 最终选择 | 每个导出项目一行：EAT下标、序号、名称、RVA/转发 | 当前设计 |</p>
+<p>树节点层级：</p>
+<pre><code>
+NT Headers
+└── Optional Header
+    └── Export Table
+</code></pre>
+<p>不要把导出表挂在 <code>.edata</code> 节下：<code>.edata</code> 只是常见存放位置，实际位置由 <code>DataDirectory[0]</code> 指定，目录 RVA 也不要求等于同名节的起始 RVA。</p>
+<p>问题代码（创建了子节点却修改父节点，真正子节点为空；类型又存进点击处理器不读的 <code>UserRole + 2</code>）：</p>
+<pre><code>
+QTreeWidgetItem *ExportTable = new QTreeWidgetItem(OptionalHeader);
+OptionalHeader-&gt;setText(0, &quot;ExportTable&quot;);
+OptionalHeader-&gt;setData(0, Qt::UserRole + 2, NodeType_ExportTable);
+</code></pre>
+<p>修正：</p>
+<pre><code>
+QTreeWidgetItem *exportTableItem = new QTreeWidgetItem(OptionalHeader);
+exportTableItem-&gt;setText(0, &quot;Export Table&quot;);
+exportTableItem-&gt;setData(0, Qt::UserRole, NodeType_Export_Table);
+</code></pre>
+<p>枚举中增加 <code>NodeType_Export_Table</code>，点击分支加 <code>case NodeType_Export_Table: { ExportTable(); break; }</code>。</p>
+<p><code>Qt::UserRole</code> 是"自定义数据槽位"，不是节点类别。当前约定：<code>UserRole</code> 统一保存 NodeType，<code>UserRole + 1</code> 给 Section 节点额外保存节索引。区分节点靠枚举值，不是为每类节点换一个 Role。</p>
+<h2>读取导出表头：典型错误与修正</h2>
+<h3>错误一：UI 层直接算地址</h3>
+<pre><code>
+DWORD EptAddressRVA = m_ntHander.OptionalHeader.DataDirectory[0].VirtualAddress;
+PDWORD EptAddress = (PDWORD)EptAddressRVA + m_ntHander.OptionalHeader.ImageBase;
+PIMAGE_EXPORT_DIRECTORY ExportTables = (PIMAGE_EXPORT_DIRECTORY)*EptAddress;
+for (int i = 0; i &gt; EptSize; i++) { }
+</code></pre>
+<p>| 问题 | 原因 | |---|---| | 用 <code>ImageBase + RVA</code> 访问 | 当前是磁盘文件，不是已加载模块 | | 整数强转 <code>PDWORD</code> 后相加 | 指针运算按 <code>sizeof(DWORD)</code> 缩放，且地址不可解引用 | | <code>*EptAddress</code> 再强转结构指针 | 把目标处 4 字节内容误当成新指针 | | <code>EptSize</code> 用作循环数量 | Size 是字节范围，不是导出数量 | | <code>i > EptSize</code> | <code>i=0</code> 时为假，循环一次也不执行 | | UI 直接读私有文件数据 | 破坏 <code>PEParser</code>/<code>MainWindow</code> 职责分离 |</p>
+<h3>错误二：memcpy 方向与 sizeof</h3>
+<pre><code>
+memcpy(
+    m_fileData.constData() + exprotFov,
+    exportDirectory,
+    sizeof(PIMAGE_EXPORT_DIRECTORY)
+);
+</code></pre>
+<p>问题：<code>memcpy</code> 目标和来源写反；<code>constData()</code> 是只读来源不能当写入目标；引用作目标要写 <code>&exportDirectory</code>；<code>sizeof(PIMAGE_EXPORT_DIRECTORY)</code> 是指针大小不是结构体大小；局部 <code>exprotFov</code> 没赋给输出参数；返回 <code>void</code> 让调用者无法区分"无导出表/转换失败/成功"；<code>RvaToFov</code> 失败时 <code>exprotFov</code> 可能未初始化。</p>
+<p>修正后：</p>
+<pre><code>
+bool PEParser::GetExportDirectory(
+    IMAGE_EXPORT_DIRECTORY &amp;exportDirectory,
+    DWORD &amp;exportFoa)
+{
+    exportDirectory = {};
+    exportFoa = 0;
+
+    const IMAGE_DATA_DIRECTORY &amp;directory =
+        m_ntHander.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (directory.VirtualAddress == 0 || directory.Size == 0) {
+        return false;
+    }
+    if (!RvaToFov(directory.VirtualAddress, exportFoa)) {
+        return false;
+    }
+    memcpy(
+        &amp;exportDirectory,
+        m_fileData.constData() + exportFoa,
+        sizeof(IMAGE_EXPORT_DIRECTORY)
+    );
+    return true;
+}
+</code></pre>
+<p>正确复制方向：<code>m_fileData + exportFoa</code> →（memcpy）→ <code>exportDirectory</code>。</p>
+<p><code>RvaToFov</code> 也应改为 <code>bool RvaToFov(DWORD rva, DWORD &foa)</code>：成功写入并返回 <code>true</code>，无匹配时清零返回 <code>false</code>；调用者不能把失败后的 0 当成有效 FOA。</p>
+<h2>构造导出函数列表</h2>
+<p><code>ExportFunctionInfo</code> 不用 union：名称和序号并不互斥（命名导出同样有序号），转发状态也不是名称/序号的替代项。</p>
+<pre><code>
+struct ExportFunctionInfo
+{
+    DWORD eatIndex {};
+    DWORD ordinal {};
+    DWORD functionRva {};
+    QString name;       // 空 = 没有名称
+    QString forwarder;  // 空 = 普通导出
+};
+</code></pre>
+<p>两遍构造，避免"每个 EAT 项都重新扫描整个名称序号表"：</p>
+<pre><code>
+第一遍：遍历 EAT
+  for i in [0, NumberOfFunctions):
+      functionRva == 0 → 空洞，跳过或标 Empty
+      eatIndex = i，ordinal = Base + i，name = 空
+
+第二遍：遍历名称表补名字
+  for j in [0, NumberOfNames):
+      nameRva = Names[j]，eatIndex = NameOrdinals[j]
+      functions[eatIndex].name = 文件中的零结尾字符串
+
+第三步：识别转发
+  ExportRVA &lt;= functionRva &lt; ExportRVA + ExportSize → 读转发字符串
+  否则 → 普通 EAT RVA（仍需区分函数/数据导出）
+</code></pre>
+<p>UI 最终四列：</p>
+<pre><code>
+EAT下标 | 导出序号 | 函数名称 | 函数RVA / 转发目标
+</code></pre>
+<p>普通导出示意 <code>0 | 1000 | MyAdd | 0x00001000</code>；转发导出示意 <code>3 | 1003 | MsgBox | 0x0000581F -> user32.MessageBoxA</code>。函数 RVA 应显示；默认不显示 VA（首选 VA 受 ASLR 影响，不一定是运行时地址）；FOA 可由地址转换器按需查看。</p>
+<h3>易错点</h3>
+<p>1. <code>exportFoa</code> 不是多余数据，它是导出表头在磁盘文件内的位置，用于从 <code>m_fileData</code> 读取并计算各字段 FOA。 2. 显示每个导出项目不等于不解析表头：UI 可隐藏 <code>Base/NumberOfFunctions</code>，但解析器内部必须使用这些字段。 3. 结构体字段视图适合 <code>字段名|FOA|大小|值</code> 四列；函数列表视图列语义不同，可另写 <code>addExportRow</code> 或切换表头。 4. 只得到表头不代表功能完成，还需 EAT、名称、序号、转发解析和实际 DLL 验证。</p>
+<h3>验证状态</h3>
+<p>导出解析已完成结构设计和代码纠错，最小验证步骤：</p>
+<pre><code>
+1. 选择一个确定有导出的 32 位 DLL
+2. GetExportDirectory 返回 true
+3. 记录 exportFoa
+4. 记录 NumberOfFunctions 与 NumberOfNames
+5. 用另一 PE 工具交叉核对
+6. 再进入 EAT 遍历
+</code></pre>
+<h2>Qt 前端与自动拉伸</h2>
+<p>界面为 QTreeWidget 加两个 QTableWidget：导出模式上表显示 <code>IMAGE_EXPORT_DIRECTORY</code>、下表显示导出函数；重定位模式上表显示块、下表显示选中块的条目。<code>PEParser</code> 管理原始数据和解析结果，<code>MainWindow</code> 负责显示；嵌套 QVector 正好对应"点击块显示块内条目"。</p>
+<p><code>ResizeToContents</code> 只按内容算列宽，可能留白；<code>Stretch</code> 让列共同填满表格宽度。改变列数后要重新设置 Stretch。</p>
+<pre><code>
+void MainWindow::stretchTables()
+{
+    ui-&gt;tableDetail-&gt;horizontalHeader()
+        -&gt;setSectionResizeMode(QHeaderView::Stretch);
+    ui-&gt;tableExportFunctions-&gt;horizontalHeader()
+        -&gt;setSectionResizeMode(QHeaderView::Stretch);
+}
+</code></pre>
+<p>在构造函数、<code>resetTableHeaders</code>、<code>RelocationTable</code>、<code>ExportTable</code>、<code>showRelocationEntries</code> 和节点点击结束处调用；删除会覆盖 Stretch 效果的 <code>resizeColumnsToContents</code>。默认最大化可在 main 中 <code>w.showMaximized();</code>。</p>
+<p>当前表头：</p>
+<pre><code>
+导出：  EAT下标 | EAT项FOA | 导出序号 | 函数RVA | 名称RVA | 名称 | 转发器
+重定位：块FOA | Page RVA | Block Size | 项目数
+       项目FOA | 值 | 类型 | 页内偏移 | Reloc RVA
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>Qt Creator 报"读取 1 行、1 列 UI 文件时需要开始标记"，通常是 XML 前有多余文本或误复制了 Markdown 代码围栏，文件第一行应从 XML 声明开始。</li>
+<li>列自动拉伸和上下表格高度不是一回事：列用 <code>QHeaderView::Stretch</code>，上下高度由 QSplitter 控制。</li>
+<li>节点切换要清空旧内容、恢复表头、设置新列数，最后再次调用 <code>stretchTables</code>。</li>
+</ul>
+<h2>作业顺序与学习路线</h2>
+<p>老师布置两项作业：32 位汇编模拟实现 <code>MyGetProcAddress</code>；PE 工具增加导出表解析。</p>
+<p>没有硬性提交顺序时，先做可视化 PE 工具更适合：三张表、RVA→FOA、名称→EAT下标→序号→函数RVA 都能直接看见，之后写 MASM 只是把同一流程换成寄存器、指针和调用约定表达。若老师下一节优先检查汇编作业，则先完成汇编的最小普通查询，再回头补 UI。</p>
+<p>推荐顺序：</p>
+<pre><code>
+阶段1：Qt 工具取得导出表头并验证
+阶段2：遍历 EAT，显示 EAT下标/序号/RVA
+阶段3：名称表 + 名称序号表补名称
+阶段4：识别转发字符串
+阶段5：MASM 实现按名称/序号查询普通导出
+阶段6：MASM 增加函数转发
+</code></pre>
+<p>PE 工具可作为汇编作业的"结果观察器"：汇编算出 EAT 下标、序号或 RVA 后用工具对照。不要一开始同时写转发、EAT Hook、IAT 反查和 UI 全功能，每层先有可核对输出。作业是否要求转发、空洞、仅序号导出，应向老师确认验收范围。</p>
+<h2>导入/导出逆向攻防思路</h2>
+<p>当前只学过导入表、IAT、导出表、EAT、函数转发和 API 解析，攻防讨论以此为限（授权实验环境）：</p>
+<p>| 攻击/对抗思路 | 防御/逆向关注点 | |---|---| | 擦除或伪造导入描述符 | 从现存 IAT 地址、模块和导出表尝试恢复名称 | | 手工遍历导出表 | 不只监控系统 <code>GetProcAddress</code>，还关注最终调用目标 | | API Hash | 恢复哈希算法与候选导出名称，结合动态行为确认 | | IAT Hook | 检查 IAT 目标是否指向预期模块/导出 | | EAT Hook | 比较内存 EAT 与可信文件/干净映像的 EAT RVA | | 仅序号导入/导出 | 结合具体 DLL 版本导出表还原名称，注意版本兼容性 | | 代理 DLL/导出转发 | 检查模块加载路径、来源、转发链与最终实现 | | 伪造大量假导入 | 区分"文件声明"与"运行时实际调用" |</p>
+<p>静态导入表只是"文件声明的依赖"，不必然等于运行时所有实际 API：可能存在未使用的导入、故意添加的假导入、运行时动态解析的额外 API、被擦除描述符但保留的 IAT，甚至不保留 IAT 而手工解析导出表。<strong>防御分析必须把静态声明、运行时地址、转发链和实际控制流结合起来。</strong></p>
+<p>可向老师追问的问题：</p>
+<p>1. EAT Hook 不影响已填好的 IAT，攻击者何时选 EAT Hook、何时选 IAT Hook 或 Inline Hook？ 2. 攻击者短暂修改 EAT、调用后立即恢复，快照式扫描如何发现？是否应监控 <code>.edata</code> 页保护变化与写入？ 3. EAT 指向模块内部代码洞/跳板时返回地址仍在 <code>SizeOfImage</code> 内，范围检查为何失效？ 4. 无导入表、手工遍历导出表并用 API Hash 时，静态和动态分析如何恢复真实 API？ 5. 恶意 PE 能否利用无序名称表、异常数量、越界 RVA 或循环转发造成加载器与安全工具解析差异？ 6. IAT 地址最终落在 <code>KernelBase/ntdll</code> 时，如何同时保留原始 <code>kernel32</code> 导入名与最终实现？ 7. 磁盘文件也不可信时，内存 EAT 比较应从哪里取得可信基线？ 8. 安全产品只 Hook <code>GetProcAddress/LdrGetProcedureAddress</code> 时，手工导出解析能否绕过？防守应观察解析过程还是最终调用？ 9. IAT 与 EAT 同时被修改时，怎样避免用两张都被污染的表互相验证？ 10. 序号导入可隐藏名称，但不同 DLL 版本的序号稳定性如何？ 11. 代理 DLL 大量转发真实 DLL 导出时，怎样区分正常转发和恶意代理？ 12. 伪造敏感假导入是否会误导静态分析，怎样与运行时实际调用区分？</p>
+<p>注意：</p>
+<ul>
+<li>"地址在模块外"只是异常线索（合法转发本来落到其他模块）；"地址在模块内"也不是强证明（可能是内部跳板或代码洞）。</li>
+<li>EAT 原始项是 RVA，ASLR 通常不改变它，可信同版本映像的 EAT RVA 可比较，但来源和版本必须可信。</li>
+<li>热补丁、安全产品 Hook、版本更新都可能造成差异，发现差异后需结合上下文判断。</li>
+<li>导出反查可能有多个候选名称：转发、别名、导出变量、Hook 都会造成歧义。</li>
+<li>"导出表由系统维护、更稳定"是相对说法，EAT Hook 本身证明它也能被修改。</li>
+</ul>
+<p>尚未学习、仅作未来路线的旁支：TLS 回调与 OEP 之前执行、重定位与手动映射、节加密/异常权限/重叠节、资源与 Overlay 数据、Load Config/CFG、Dump 后修复节表/入口点/IAT/重定位/TLS、PEB 模块链/VAD/MEM_IMAGE/MEM_PRIVATE、64 位 EAT 仍保存 32 位 RVA 的限制。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

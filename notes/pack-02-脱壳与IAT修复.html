@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>脱壳与 IAT 修复 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">脱壳与 IAT 修复</h1>
+<div class="meta"><span class="cat">壳与脱壳</span></div>
+<article>
+<h1>脱壳与 IAT 修复</h1>
+<p>脱壳的课堂主线是找到原程序入口点 OEP，并在原程序已经恢复到内存后进行 Dump；要得到能够独立运行的 PE，通常还需继续修复 PE 结构、导入表、重定位、资源或 TLS。本笔记只用于自有程序、课堂样本和明确授权的 PE32/x86 实验环境。</p>
+<h2>AEP、OEP 与地址体系</h2>
+<p>| 概念 | 含义 | 本次实验中的例子 | |---|---|---| | <code>ImageBase</code> | PE 希望或实际装载的模块基址；必须区分文件首选基址与进程实际基址 | 文件字段曾看到 <code>0x00400000</code>，Scylla 所附加进程曾实际位于 <code>0x00030000</code> | | <code>AddressOfEntryPoint</code> / 入口 RVA | 可选头中记录的入口相对地址 | 原程序入口 RVA 为 <code>0x1479</code> | | AEP | 当前磁盘 PE 的入口。加壳文件的 AEP 通常先进入壳 | PE-bear 的 UPX 文件显示入口位于 <code>UPX1</code>，工具中显示 <code>EP = 1420</code> | | OEP | Original Entry Point，原程序入口 | 实际基址为 <code>0x30000</code> 时，OEP VA 为 <code>0x31479</code> | | RVA | 相对于模块基址的地址 | <code>OEP RVA = 0x1479</code>，<code>IAT RVA = 0x2000</code> | | VA | 进程中的虚拟地址 | <code>VA = 实际模块基址 + RVA</code> | | FOA | 文件中的偏移 | 文件解析时通过节表把 RVA 转成 FOA；不能直接用 <code>ImageBase + RVA</code> 索引文件字节 |</p>
+<p>两个实际基址场景：</p>
+<pre><code>
+场景 A：进程实际基址 = 00030000
+OEP VA = 00030000 + 00001479 = 00031479
+IAT VA = 00030000 + 00002000 = 00032000
+
+场景 B：关闭 ASLR 后按首选基址 00400000 装载
+OEP VA = 00400000 + 00001479 = 00401479
+IAT VA = 00400000 + 00002000 = 00402000
+</code></pre>
+<p>壳先让壳代码获得控制权，负责解压/解密原代码、加载依赖、修复 IAT、恢复寄存器和栈环境，最后才把控制流交给 OEP，因此壳的 AEP 和原程序 OEP 不是同一个入口：</p>
+<pre><code>
+Windows Loader 按加壳 PE 的 AEP 启动
+  → 壳保存现场
+  → 解压或解密原映像
+  → 修复导入、重定位、内存属性等
+  → 恢复寄存器和栈
+  → 壳尾跳转
+  → OEP：原程序入口
+  → Dump 后继续修复 PE 结构
+</code></pre>
+<p>完整脱壳检查链：</p>
+<pre><code>
+找到 OEP
+  → 在正确时机 Dump 内存
+  → 修正入口 RVA
+  → 重建导入表
+  → 检查 ImageBase/ASLR/重定位
+  → 检查节、资源、TLS 等
+  → 从新进程验证能否独立运行
+</code></pre>
+<p>地址换算：</p>
+<pre><code>
+VA  = ActualImageBase + RVA
+RVA = VA - ActualImageBase
+FOA = PointerToRawData + (RVA - Section.VirtualAddress)
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>"找 OEP＋Dump"是核心起点，不等于得到可运行文件。本次先经历了 <code>?.DLL</code> 导入错误，之后又经历了重定位/ASLR 崩溃。</li>
+<li><code>AddressOfEntryPoint</code> 是 RVA，不是 VA。Scylla 的 OEP 输入框本次用的是进程 VA；PE 可选头中写的是入口 RVA。</li>
+<li>文件中的 <code>ImageBase=0x400000</code> 与 Scylla 显示的实际基址 <code>0x30000</code> 可以同时为真：前者是文件首选基址，后者是当次进程的实际装载基址。对话早期曾把 <code>0x30000</code> 概括成"该文件 ImageBase"，后来查看字段发现当前文件为 <code>0x400000</code>；应按文件和进程分别确认，不能把一次运行的实际基址永久当作所有文件的首选基址。</li>
+<li>"入口特征法"没有给出某个编译器的固定入口模板。当前只确认：跳转目标应位于原程序代码区、反汇编合理、控制流能够继续；具体入口特征待确认，不能凭一个常见函数序言认定 OEP。</li>
+</ul>
+<p>实验观察：当前查看的 PE 字段显示 <code>ImageBase = 400000h</code>（文件偏移 <code>12Ch</code>，DWORD），小端序保存为 <code>00 00 40 00</code>；另一次观察到 <code>00 00 03 00 → 0x00030000</code>。两组字节很可能来自不同阶段的文件或不同观察对象，具体文件名当时没有再次确认，标记为对象待确认。</p>
+<h2>ESP 定律与 OEP 定位</h2>
+<p>"ESP 定律"不是 CPU 手册中的正式定律，而是脱壳中的经验方法：很多壳在入口保存原程序寄存器现场，在跳转 OEP 前恢复现场；对保存现场所在的栈内存下硬件访问断点，可以较快断在恢复现场附近。</p>
+<p>典型壳结构：</p>
+<pre><code>
+pushad
+call    UnpackOrDecrypt
+; 修复环境
+popad
+jmp     OEP
+</code></pre>
+<p><code>PUSHAD</code> 在 x86 中压入 8 个 32 位值，共占 <code>8 × 4 = 32 = 20h</code> 字节。例如 <code>PUSHAD 前 ESP = 0019FF70</code>，<code>PUSHAD 后 ESP = 0019FF50</code>，从新 ESP 开始的布局：</p>
+<p>| 栈位置 | 保存内容 | |---|---| | <code>[ESP]</code> | EDI | | <code>[ESP+4]</code> | ESI | | <code>[ESP+8]</code> | EBP | | <code>[ESP+0C]</code> | PUSHAD 前的 ESP（POPAD 跳过该槽） | | <code>[ESP+10]</code> | EBX | | <code>[ESP+14]</code> | EDX | | <code>[ESP+18]</code> | ECX | | <code>[ESP+1C]</code> | EAX |</p>
+<p>后面的 <code>POPAD</code> 必须读取这些栈内存，所以监视 <code>[ESP]</code> 所在地址可以在恢复现场时触发。</p>
+<p>课堂操作（x32dbg/OllyDbg）：</p>
+<p>1. 到壳入口附近，单步执行完 <code>PUSHAD</code>。 2. 记录此时 ESP，例如 <code>ESP=0019FF50</code>。 3. 在栈窗口选中地址 <code>0019FF50</code>。 4. 设置"硬件断点 → 访问 → DWORD"。 5. 按 <code>F9</code> 运行。 6. 命中后观察是否位于 <code>POPAD</code>、多个 <code>POP</code> 或其他恢复现场代码附近。 7. 继续单步，寻找从壳代码区转入原程序代码区的 <code>JMP</code>、<code>PUSH OEP / RET</code> 等控制转移。</p>
+<p>关键区别：<code>ESP = 0019FF50</code> 是地址值，<code>[ESP]</code> 是该地址中保存的 DWORD。硬件访问断点监视的是 <code>[ESP]</code> 这块内存，不是把 <code>0019FF50</code> 当作代码执行地址下断点。</p>
+<p>注意：</p>
+<ul>
+<li>ESP 定律不是"只要看 ESP 就能直接得到 OEP"，它只是把分析者带到壳尾附近。</li>
+<li>断点触发只证明那块栈内存被访问，可能命中 <code>POPAD</code>、<code>POP</code>、<code>MOV reg,[ESP]</code> 或壳的临时访问。</li>
+<li>壳可以不使用 <code>PUSHAD/POPAD</code>、多次保存现场、分批恢复、切换栈或提前复用栈区，可能要在不同栈位置多次尝试。</li>
+<li>恢复现场后的跳转目标是 OEP 候选，还需确认它是否进入原程序代码区以及反汇编是否正常。</li>
+</ul>
+<p>本次样本出现了非常典型的壳尾：</p>
+<pre><code>
+000371CE  61              popad
+000371CF  8D4424 80       lea eax,dword ptr [esp-80]
+000371D3  6A 00           push 0
+000371D5  39C4            cmp esp,eax
+000371D7  75 FA           jne 000371D3
+000371D9  83EC 80         sub esp,FFFFFF80
+000371DC  E9 98A2FFFF     jmp 00031479
+</code></pre>
+<p>逐步解释：</p>
+<pre><code>
+POPAD：恢复保存的通用寄存器
+LEA EAX,[ESP-80h]：计算清零结束位置
+PUSH 0 循环：每次 ESP-=4，共执行 80h/4=32 次，清零 0x80 字节栈空间
+SUB ESP,FFFFFF80h：FFFFFF80h 是 -80h，因此等价于 ADD ESP,80h
+JMP 31479：从壳尾跳入原程序入口
+</code></pre>
+<p>在该次进程实际基址 <code>0x30000</code> 下：<code>OEP VA = 00031479</code>，<code>OEP RVA = 00031479 - 00030000 = 00001479</code>。</p>
+<h2>API 断点辅助找 OEP</h2>
+<p>API 断点法是根据"壳会调用哪些 API"或"原程序启动后会调用哪些 API"设置断点，再利用 API 的返回地址判断调用者位于壳区还是原程序区。</p>
+<p>在 32 位调用中，刚进入 API 时通常有：</p>
+<pre><code>
+[ESP]   = API 返回地址
+[ESP+4] = 第一个参数
+[ESP+8] = 第二个参数
+</code></pre>
+<p>API 命中本身不是 OEP；真正有价值的是 <code>[ESP]</code> 中的调用者返回位置。</p>
+<p>按壳行为猜测：</p>
+<p>| API | 可能用途 | |---|---| | <code>VirtualAlloc</code> | 为解压数据或临时代码申请空间 | | <code>VirtualProtect</code> | 修改解压后页面权限 | | <code>LoadLibraryA/W</code> | 加载原程序依赖 DLL | | <code>GetProcAddress</code> | 解析原程序使用的 API 地址 |</p>
+<p>按原程序功能猜测：</p>
+<p>| 程序现象 | 可尝试的 API | |---|---| | 弹消息框 | <code>MessageBoxA/W</code> | | 创建窗口 | <code>CreateWindowExA/W</code> | | 创建对话框 | <code>DialogBoxParamA/W</code> | | 查询模块 | <code>GetModuleHandleA/W</code> | | 获取命令行 | <code>GetCommandLineA/W</code> | | 控制台/文件输出 | <code>WriteConsoleA/W</code>、<code>WriteFile</code> | | 打开文件 | <code>CreateFileA/W</code> | | 网络初始化/连接 | <code>WSAStartup</code>、<code>connect</code> |</p>
+<p>命中后查看返回地址：落在壳区则仍是壳调用；落在原 <code>.text</code> 区则原程序很可能已经开始执行。</p>
+<p>注意：</p>
+<ul>
+<li>API 地址不是 OEP；API 断点只是把分析带到 OEP 之后的原程序代码附近，或带到壳修复环境的位置。</li>
+<li><code>GetProcAddress</code> 可能连续命中很多次，因为壳正在批量修复导入，并不意味着每次都接近 OEP。</li>
+<li>壳可以自己遍历 DLL 导出表、按 HASH 解析函数、调用更底层接口或故意制造大量 API 调用，从而削弱 API 断点的效果。</li>
+<li>本次没有记录某个 API 断点命中时的实际 <code>[ESP]</code> 返回地址；老师只提到复杂壳可结合 <code>GetModuleHandle</code> 等 API 辅助定位，具体命中地址待确认。</li>
+</ul>
+<h2>第二代壳、反调试与 CloseHandle</h2>
+<p>课堂所说"第二代加密壳"，是在压缩/加密原程序的基础上加入反调试：检测调试器、改变控制流、退出、进入假解密流程或制造假 OEP。</p>
+<p>常见检查面：</p>
+<pre><code>
+IsDebuggerPresent
+CheckRemoteDebuggerPresent
+NtQueryInformationProcess
+PEB.BeingDebugged
+PEB.NtGlobalFlag
+软件断点字节 CC
+硬件断点寄存器 DR0～DR3/DR7
+EFLAGS.TF 与单步行为
+时间差检测
+异常分发差异
+</code></pre>
+<p>第一层保护让磁盘上的原代码不可直接阅读；第二层再干扰"调试壳 → 观察解密 → 观察恢复现场 → 看到跳转 → 找到 OEP"这条链。</p>
+<p><code>CloseHandle</code> 本身只是关闭句柄。反调试利用的是故意传入无效句柄、伪句柄或重复关闭句柄后产生的异常差异，相关异常通常为 <code>STATUS_INVALID_HANDLE = C0000008</code>。在调试器下，异常会先作为第一次机会异常交给调试器，再决定是否交还给程序自己的 SEH；壳可根据异常是否到达预期处理器来改变流程。</p>
+<p>课堂检测思路：</p>
+<pre><code>
+__try {
+    CloseHandle((HANDLE)1234); // 故意传非法句柄
+}
+__except (1) {
+    ExitProcess(0);
+}
+</code></pre>
+<p>在 x86 API 入口观察参数：<code>[ESP] = 返回地址</code>，<code>[ESP+4] = hObject</code>。若 <code>hObject</code> 为明显无效值，且调用周围存在 SEH/退出逻辑，才形成反调试证据链。</p>
+<p>OEP 软件断点检查思路：</p>
+<pre><code>
+BYTE* pCode = ImageBase + AddressOfEntryPoint;
+if (*pCode == 0xCC) {
+    ExitProcess(0);
+}
+</code></pre>
+<p>绕过思路包括在授权实验中 Hook 更底层的 <code>NtClose</code>，只过滤壳故意制造的无效句柄调用；OllyDbg/x32dbg 的反反调试插件则集中处理多种常见检测。</p>
+<p>注意：</p>
+<ul>
+<li>"第一代/第二代"是课程便于理解的分类，不是 Windows 或 PE 的正式代际标准。</li>
+<li>正常调用 <code>CloseHandle(有效句柄)</code> 没有反调试意义；"非法句柄＋异常控制流"才构成检测。</li>
+<li>不能简单把所有 <code>NtClose/CloseHandle</code> 调用强制改成成功，否则会破坏程序正常资源管理。</li>
+<li>软件断点把首字节改成 <code>CC</code>，所以字节校验可发现软件断点；硬件执行断点不修改代码字节，但壳还可能检查调试寄存器。</li>
+<li>看到 <code>INT3</code> 不等于看到反调试。编译器也会用 <code>CC</code> 作为函数间填充、不可达路径保护或调试陷阱。</li>
+<li>老师源码中的两段 <code>AntiDebug</code> 代码均被注释；按给出的源码直接编译时，这两项检测没有启用。</li>
+<li>对话讨论过 x32dbg 出现第一次机会 <code>C0000008</code> 的可能性，但没有该样本实际命中的日志，是否真的执行 <code>CloseHandle</code> 反调试待确认。</li>
+<li>反调试与反反调试是持续对抗：壳增加新检查，插件也需要更新策略；插件成功注入本身不等于已经绕过所有检查。</li>
+</ul>
+<h2>反内存 Dump、反 IAT 修复与偷代码</h2>
+<p>反内存 Dump 的目标通常不是绝对阻止读取，而是让某一时刻导出的内存不完整、不同步或无法重建成可运行 PE。反 IAT 修复则破坏"连续、稳定、明文、标准的 IAT"这一自动工具假设。</p>
+<p>CPU 执行代码时，相关页最终必须在某个时刻以可执行形式存在；调用外部 API 时，控制流最终也必须到达真实 API 地址。因此用户态保护通常只能显著增加抓取和重建成本，不能从原理上让明文和真实调用目标永远不存在。</p>
+<p>反 Dump 思路：</p>
+<p>| 思路 | 效果 | 局限 | |---|---|---| | 按函数/按页临时解密，执行后重加密 | 任意时刻只有部分明文 | 执行窗口仍可被观察 | | <code>PAGE_NOACCESS</code>、<code>PAGE_GUARD</code>、动态切换权限 | 干扰扫描并感知访问 | 程序自己执行前也必须恢复权限；<code>PAGE_GUARD</code> 是一次性告警 | | 擦除或伪造 PE 头 | 工具难以确定模块、节和目录 | 代码仍存在，可人工重建头 | | 不保留稳定标准 IAT | Dump 后仍无法直接运行 | API 调用瞬间仍需得到目标 | | 把代码分散到多个私有内存区 | 只 Dump 主模块会漏数据 | 需要枚举并拼接多个区域 | | 限制进程句柄/读取权限 | 阻挡普通低权限读取 | 高权限、调试权限或内核工具仍可能读取 | | 自己生成 MiniDump 时过滤内存 | 控制自身崩溃转储内容 | 不能阻止其他有权限的读取工具 |</p>
+<p>反 IAT 修复思路：</p>
+<pre><code>
+擦除 DLL/API 名称和导入描述符
+把 IAT 打散到多个区域
+调用前临时解析、调用后清除
+保存编码后的函数地址
+IAT → 本地跳板 → 真实 API
+所有 API 进入统一调度器
+自行遍历 DLL 导出表或按 HASH 解析
+填入假 API、重复项、垃圾项干扰范围识别
+</code></pre>
+<p>"偷代码"则把 OEP 开头的关键指令移到壳中执行，随后跳到 <code>OEP+N</code>。分析者即使找到壳尾跳转，也可能缺少原入口的前几条初始化指令，需要把被偷指令恢复到可执行文件中。</p>
+<p>注意：</p>
+<ul>
+<li>擦除字符串不能阻止所有工具。工具仍可用"IAT 目标 VA → 所属 DLL → EAT 导出"反查 API。</li>
+<li>IAT 指向 EXE 自身地址不一定就是加密：也可能是回调、普通函数指针、IAT Hook、跳板或搜索越界后的相邻数据。</li>
+<li>"IAT 加密"在课堂中可能泛指地址编码、跳板、动态解析或自定义指针表，不一定是把标准 IAT 整体当作一段密文。</li>
+<li>偷代码不是让调试器"看不见任何入口"，而是让真正的原始入口指令不再完整地位于原 OEP。</li>
+<li>完整修复的目标不必还原出与原文件字节完全相同的导入表；只要重建合法导入结构并让调用点使用它，文件也可能恢复运行。</li>
+<li>本次没有提供按页解密、<code>PAGE_GUARD</code> 命中或偷代码样本的实际地址；这些属于课堂原理，具体样本结果待确认。</li>
+</ul>
+<h2>UPX 样本与壳的最小导入表</h2>
+<p>PE-bear 打开磁盘上的 <code>crackme1_pack.exe</code> 时看到 <code>UPX0</code>、<code>UPX1</code>、<code>.rsrc</code> 三节，表明该样本是 UPX 风格的压缩壳。普通 UPX 主要是压缩壳，不能因为节名是 UPX 就直接称为"加密壳"。磁盘上的导入表主要服务于壳启动，不是 OEP 处原程序已经恢复好的完整导入表。</p>
+<p>壳只需保留少量引导 API，就能在运行时加载其他 DLL、解析函数、改变内存属性并把原程序恢复出来。截图中的 <code>KERNEL32.DLL</code> 导入有 <code>LoadLibraryA</code>、<code>ExitProcess</code>、<code>GetProcAddress</code>、<code>VirtualProtect</code>，用途分别是加载依赖、退出、解析 API 和修改页面权限。</p>
+<p>磁盘壳 IAT 与运行时原程序 IAT 是两套位置：</p>
+<p>| 对象 | 地址范围/示例 | 用途 | |---|---|---| | 壳的磁盘导入 | <code>FirstThunk RVA 827C、8284、828C…</code> | 让 UPX 壳先运行 | | 原程序运行时 IAT | <code>RVA 2000</code> 附近 | OEP 后的原程序调用真实 API |</p>
+<p>判断当前工具看到哪一张导入表：</p>
+<p>1. PE-bear 直接打开原加壳文件：看到的是磁盘上的壳导入。 2. x32dbg 运行到 OEP：原程序代码和 IAT 已在内存中恢复。 3. Scylla 附加当前进程并扫描 <code>RVA 2000</code> 附近：重建的是原程序导入。 4. 修复后的文件再用 PE-bear 打开：应出现 Scylla 重建的新导入结构。</p>
+<p>PE-bear 截图记录：</p>
+<p>| DLL | 函数数 | NameRVA | FirstThunk RVA | |---|---:|---:|---:| | <code>api-ms-win-crt-heap-l1-1-0.dll</code> | 1 | <code>82C0</code> | <code>827C</code> | | <code>api-ms-win-crt-locale-l1-1-0.dll</code> | 1 | <code>82DF</code> | <code>8284</code> | | <code>api-ms-win-crt-math-l1-1-0.dll</code> | 1 | <code>8300</code> | <code>828C</code> | | <code>api-ms-win-crt-runtime-l1-1-0.dll</code> | 1 | <code>831F</code> | <code>8294</code> | | <code>api-ms-win-crt-stdio-l1-1-0.dll</code> | 1 | <code>8341</code> | <code>829C</code> | | <code>KERNEL32.DLL</code> | 4 | <code>8361</code> | <code>82A4</code> | | <code>VCRUNTIME140.dll</code> | 1 | <code>836E</code> | <code>82B8</code> |</p>
+<p>截图中这些描述符的 <code>OriginalFirstThunk</code> 均显示为 0。</p>
+<p>注意：</p>
+<ul>
+<li>PE-bear 中壳导入少，不代表原程序只调用这几个 API。</li>
+<li>PE-bear 中出现多个 <code>api-ms-win-crt-*</code> 名称，而 Scylla 将运行时目标归到 <code>ucrtbase.dll</code>，不一定是错误。API Set 名称可映射到实际承载模块。</li>
+<li><code>OriginalFirstThunk=0</code> 表示没有单独 INT 时可回退使用 <code>FirstThunk</code> 中的查找数据；它不是跳转指令，也不是"导入不存在"。</li>
+<li>原 UPX 文件中的壳 IAT 不能直接替代原程序完整 IAT。</li>
+</ul>
+<h2>Scylla 自动搜索缺陷与假 IAT 项</h2>
+<p>在实际基址 <code>0x30000</code> 的进程中，Scylla 自动搜索得到：</p>
+<pre><code>
+OEP      = 00031479
+IAT VA   = 00032000
+IAT Size = 000000D8
+Imports  = 47
+Invalid  = 1
+</code></pre>
+<p>正常识别的三组：</p>
+<pre><code>
+kernel32.dll      (12) FThunk RVA 00002000
+vcruntime140.dll   (4) FThunk RVA 00002034
+ucrtbase.dll      (30) FThunk RVA 00002048
+</code></pre>
+<p>错误组：</p>
+<pre><code>
+? (1) FThunk RVA 000020D4
+rva: 000020D4  ptr: 000318CB
+</code></pre>
+<p><code>rva:20D4</code> 是 IAT 槽候选的位置，<code>ptr:318CB</code> 是该槽中保存的目标地址：</p>
+<pre><code>
+槽VA = ActualImageBase + RVA = 00030000 + 000020D4 = 000320D4
+[000320D4] = 000318CB
+目标RVA = 000318CB - 00030000 = 000018CB
+</code></pre>
+<p>目标代码：</p>
+<pre><code>
+000318BE  85C0            test eax,eax
+000318C0  75 01           jne 000318C3
+000318C2  C3              ret
+000318C3  6A 07           push 7
+000318C5  E8 39000000     call 00031903
+000318CA  CC              int3
+000318CB  C2 0000         ret 0
+000318CE  E8 2DF7FFFF     call 00031000
+</code></pre>
+<p>如果 CPU 从 <code>0x318CB</code> 进入，只执行 <code>ret 0</code>，不会倒退去执行前一字节 <code>0x318CA</code> 的 <code>INT3</code>。<code>RET 0</code> 弹出返回地址且额外清理 0 字节，效果基本等同普通 <code>RET</code>，只是编码不同。</p>
+<p>正确的 IAT 边界计算：</p>
+<pre><code>
+kernel32：12项    2000 ～ 202C，2030 为终止 DWORD
+vcruntime：4项    2034 ～ 2040，2044 为终止 DWORD
+ucrtbase：30项    2048 ～ 20BC，20C0 为终止 DWORD
+
+总范围：2000 ～ 20C3
+Size = 20C4 - 2000 = C4
+</code></pre>
+<p>Scylla 操作：</p>
+<p>1. 点击 <code>Clear</code>。 2. 手工输入与本次实际基址对应的值：<code>OEP = 00031479</code>、<code>VA = 00032000</code>、<code>Size = 000000C4</code>。 3. 不再点击 <code>IAT Autosearch</code>，否则它会重新扩展范围。 4. 点击 <code>Get Imports</code>。 5. 验证应为 <code>Imports = 46</code>、<code>Invalid = 0</code>。 6. 点击 <code>Dump</code> 生成新文件。 7. 点击 <code>Fix Dump</code>，选择刚刚生成的新 Dump。 8. 运行新生成的 <code>*_SCY.exe</code>，不要误运行旧版本。</p>
+<p>一次重新自动搜索把范围改成 <code>VA = 00031FFC</code>、<code>Size = 000000E4</code>，结果为 46 valid、2 missed、Imports 48、Invalid 2——起点比真实 IAT 早 4 字节，终点又超过 <code>0x320C0</code> 终止项，反而多收了两个无效项。</p>
+<p>保留红色 <code>?</code> 组执行 Fix Dump 后，Windows 报错"由于找不到 ?.DLL，无法继续执行代码"。这证明 Scylla 把未知组真的写成了名为 <code>?.DLL</code> 的导入描述符，Windows Loader 在进入 OEP 之前就尝试加载它并失败。这一现象不是反调试。</p>
+<p>注意：</p>
+<ul>
+<li><code>Import Rebuild success</code> 只表示 Scylla 成功写出了重建结构，不保证 OEP、IAT 边界、重定位和最终运行都正确。</li>
+<li><code>0x320D4 → 0x318CB</code> 只证明该 DWORD 指向 EXE 内部的空函数。它可能是普通回调数据、干扰项或搜索越界结果；单凭它不能判定反调试。</li>
+<li><code>INT3</code> 与 <code>RET 0</code> 在地址上相邻，不等于执行路径一定是"INT3 后再 RET"。函数边界和实际入口地址比反汇编窗口的连续显示更重要。</li>
+<li>验证槽是否被使用，应搜索对 <code>0x320D4</code> 的引用，例如 <code>FF 15 D4 20 03 00</code>（<code>call dword ptr [000320D4]</code>）或 <code>FF 25 D4 20 03 00</code>（<code>jmp dword ptr [000320D4]</code>）。没有引用更支持"相邻普通数据/假项"；有引用则要继续分析调用语义。</li>
+<li>删除 Scylla 树中的错误项不会自动修改之前已经生成的 <code>*_SCY.exe</code>，必须重新 Dump/Fix 或至少重新 Fix 新文件。</li>
+</ul>
+<h2>断点设置异常的诊断边界</h2>
+<p>分析 <code>0x318CB</code> 期间出现过"部分位置不能下断点，后来所有断点都不能下"的现象。该现象本身不足以证明样本存在反调试。</p>
+<p>软件断点通常把目标首字节改成 <code>CC</code>。地址 <code>0x318CA</code> 原本已经是 <code>CC int3</code>，所以在那里再下软件断点不会产生新的字节变化。另一方面，<code>0x318BE</code> 与 <code>0x318CB</code> 仅相距 13 字节，处于同一 4KB 页；如果一个地址能写软件断点、另一个不能，仅凭页面权限解释不充分。</p>
+<p>最小诊断顺序：</p>
+<p>1. 查看调试状态是 <code>Paused</code>、<code>Running</code> 还是 <code>Terminated</code>。 2. 在当前 EIP 所在指令上测试 <code>F2</code>。 3. 检查是否仍在有效调试会话中，而不是查看已退出进程留下的反汇编。 4. 确认重新打开文件后的实际模块基址；不要继续在旧 VA 上下断点。 5. 尝试硬件执行断点，排除软件断点写入失败或代码自恢复。 6. 查看 x32dbg 日志中的具体错误，而不是只看有没有红点。</p>
+<p>注意：</p>
+<ul>
+<li>"断点没命中"和"断点设置不上"不是一回事。前者可能只是 CPU 从未执行该地址。</li>
+<li>"断点设置后立即消失"才更像代码被覆盖、自校验恢复字节或壳主动清理；本次没有提供这一现象的日志。</li>
+<li>进程已经因 Loader 错误退出时，用户代码尚未执行，OEP 附近所有断点自然不可能命中。</li>
+<li>当时没有提供 x32dbg 按 <code>F2</code> 后的具体日志，"所有断点不能下"的最终原因待确认。后来发现修复文件存在 <code>?.DLL</code>，至少能解释其中一次为何用户代码尚未开始执行。</li>
+</ul>
+<h2>Dump 重载崩溃、重定位与关闭随机基址</h2>
+<p>去掉 <code>?.DLL</code> 后，新 Dump 进入程序但在以下位置崩溃：</p>
+<pre><code>
+001D1843  8B0D 04300300    mov ecx,dword ptr ds:[00033004]
+</code></pre>
+<p>x32dbg 状态：<code>EIP = 001D1843</code>，异常 <code>C0000005 EXCEPTION_ACCESS_VIOLATION</code>，实际模块基址 <code>001D0000</code>。</p>
+<p>代码 RVA 仍为 <code>001D1843 - 001D0000 = 00001843</code>，但绝对操作数仍是旧运行基址 <code>0x30000</code> 下的地址：</p>
+<pre><code>
+旧地址 = 00030000 + RVA 3004 = 00033004
+新地址 = 001D0000 + RVA 3004 = 001D3004
+Delta  = 001D0000 - 00030000 = 001A0000
+00033004 + 001A0000 = 001D3004
+</code></pre>
+<p>该绝对操作数未被重定位，访问未映射的 <code>0x33004</code> 导致 <code>C0000005</code>。</p>
+<p>指令字节 <code>8B 0D 04 30 03 00</code> 中 DWORD 绝对地址 <code>00033004</code> 的起始位置对应代码 RVA <code>0x1845</code>，完整重定位表中应有相应的 PE32 <code>IMAGE_REL_BASED_HIGHLOW(3)</code> 项。截图上方的 <code>call dword ptr [0003202C]</code> 同样是旧基址下的 IAT 绝对地址；若模块位于 <code>0x1D0000</code>，应对应 <code>0x1D202C</code>。</p>
+<p>课堂最简单方案不是逐条改绝对地址，而是让修复后的 Dump 固定回捕获时的实际基址：</p>
+<pre><code>
+Dump 捕获时实际基址 = 00030000
+修复后文件 ImageBase = 00030000
+清除 DllCharacteristics 的 Dynamic Base 位 0x0040
+入口 RVA 仍为 00001479
+</code></pre>
+<p>若 PE 工具只显示数值，则 <code>新值 = 原 DllCharacteristics & ~0040h</code>。位运算示例：<code>8140h → 8100h</code>、<code>0140h → 0100h</code>；实际值必须以目标文件当前字段为准，不能照抄示例。</p>
+<p>另一条路线是在原文件仍以首选基址 <code>0x400000</code> 固定加载后重新完整脱壳：实际基址 <code>00400000</code>、OEP VA <code>00401479</code>、IAT VA <code>00402000</code>、IAT Size <code>000000C4</code>。</p>
+<p>两套合法但不能混用的输入：</p>
+<p>| 实际基址 | OEP VA | IAT VA | IAT Size | |---:|---:|---:|---:| | <code>00030000</code> | <code>00031479</code> | <code>00032000</code> | <code>000000C4</code> | | <code>00400000</code> | <code>00401479</code> | <code>00402000</code> | <code>000000C4</code> |</p>
+<p>先前成功流程按当时截图更接近第一套：在 <code>0x30000</code> 进程到达 OEP 后 Dump，Scylla 手填 <code>31479/32000/C4</code>，再让最终文件固定在 <code>0x30000</code>。但用户后来查看的当前文件字段为 <code>0x400000</code>，说明复现实验时必须再次确认打开的是原文件还是修复文件。</p>
+<p>注意：</p>
+<ul>
+<li>关闭 ASLR 解决的是"避免再次换基址"，不是补齐重定位表。完整方案仍是恢复正确的 Base Relocation Table。</li>
+<li>不应只把当前一条 <code>[33004]</code> 改成 <code>[1D3004]</code>，因为代码和数据中可能存在许多绝对地址。</li>
+<li>如果 Dump 内容是在 <code>0x30000</code> 下完成重定位后捕获，就不能保留文件首选基址 <code>0x400000</code> 却继续使用 <code>0x31479/0x32000</code> 这组 VA；文件头、实际装载基址和 Scylla 输入必须一致。</li>
+<li>"先用 PE 关随机基址，再手动输入 Dump 地址"的准确说法是：清除 <code>Dynamic Base</code>，然后在 Scylla 手动输入与本次实际基址对应的 OEP VA、IAT VA 和 IAT Size。</li>
+</ul>
+<h2>课程总结的四层保护框架</h2>
+<p>其他 AI 将老师课程总结为：压缩壳基础、ESP 定律、第二代反调试、Hook 绕过、IAT 加密、反 Dump、抹除特征和偷代码。主线正确，但作为复习笔记需要补充适用条件。</p>
+<p>课程可按四层保护理解：</p>
+<pre><code>
+第一层：隐藏代码
+压缩/加密 → 找 OEP → 内存 Dump
+
+第二层：干扰观察
+异常检测 → 断点检测 → 反调试 → Hook/插件对抗
+
+第三层：破坏自动修复
+IAT 跳板/动态解析 → 抹除名称 → 假 IAT 项
+
+第四层：破坏程序重建
+偷 OEP 代码 → 伪造 PE 头/目录 → 资源或重定位缺失
+</code></pre>
+<p>课堂结论的严谨化：</p>
+<p>| 课堂表达 | 严谨补充 | |---|---| | 脱壳两步是找 OEP 和 Dump | 之后通常还要修复入口、导入、重定位、节、资源/TLS 并运行验证 | | 自动插件 Dump 后资源丢失是因为从文件读目录 | 这是特定插件/样本现象；还需确认资源数据、<code>.rsrc</code> 映射、目录 RVA/Size 和节大小都存在且一致 | | 第二代壳会反调试 | 这是课堂分类，不是统一行业标准 | | CloseHandle 可反调试 | 必须是非法/伪句柄加异常控制流；正常关闭有效句柄不是反调试 | | OEP 断点检测 | 本质是检查 <code>CC</code> 或做代码完整性校验，只直接覆盖软件断点 | | 抹除字符串可防 IAT 重建 | 只打击依赖字符串的方法；运行时地址仍可结合 DLL EAT 反查 | | 偷代码使调试器找不到入口 | 更准确是 OEP 前几条指令被移走，壳尾可能跳到 <code>OEP+N</code>，需要恢复被偷指令 |</p>
+<p>注意：</p>
+<ul>
+<li>资源目录只改 <code>DataDirectory[RESOURCE].VirtualAddress/Size</code> 并不总能恢复图标；该实验能成功，说明对应资源数据和节布局仍可用。</li>
+<li>壳无法从原理上让 CPU 永远不执行明文，也无法让 API 调用永远没有最终目标；它主要增加自动化分析时间成本。</li>
+<li>插件绕过一个检测点不等于绕过所有反调试路径。</li>
+</ul>
+<p>课堂曾演示 OllyDbg 自动脱壳插件生成的文件缺少图标/资源，通过手工纠正资源目录地址和大小后恢复图标并运行；具体 RVA、Size 或文件字节未提供，数值待确认。</p>
+<h2>LZMS 壳与 IAT 跳板加密</h2>
+<p>老师源码由三个主要部分组成（这是另一份三节实现，与前面的两节 Packer 不同）：</p>
+<p>| 模块 | 责任 | |---|---| | <code>CPeParse</code> | 使用 <code>ImageLoad</code> 取得 DOS 头、NT 头、可选头、节表、文件大小和对齐结果 | | <code>CPacker</code> | 压缩整个原 PE、重建外壳文件、写入 <code>PackInfo + 压缩数据 + Stub</code> | | <code>StubCode</code> | 运行时找 API、解压、映射节、修复导入/重定位/权限/TLS，最后跳 OEP |</p>
+<p>基础结构与 <code>CPeParse</code> 接口同前（<code>PackInfo</code> 三个 DWORD、<code>GetDosHeader</code> 等一组方法）。该实现首先是使用 Windows Compression API 和 <code>COMPRESS_ALGORITHM_LZMS</code> 的压缩壳；IAT 保护发生在 Stub 解压并恢复原映像之后。</p>
+<p><code>BuildNewPe</code> 建立三个节：</p>
+<p>| 节 | Raw 数据 | 内存用途 | |---|---|---| | <code>.old</code> | <code>PointerToRawData=0</code>、<code>SizeOfRawData=0</code> | 为原程序映像预留虚拟空间 | | <code>.iat</code> | Raw 大小为 0，<code>VirtualSize=0x2000</code> | 运行时写入每个 API 的 12 字节跳板 | | <code>.pack</code> | 有 Raw 数据 | 保存 <code>PackInfo</code>、压缩数据和 <code>hexData</code> Stub |</p>
+<p>外壳构建时 <code>NumberOfRvaAndSizes = 0</code> 并清零整个 <code>DataDirectory</code>，Windows Loader 因此看不到原程序的数据目录；Stub 通过 PEB 和自写导出解析器取得所需 API，再自行恢复原映像。</p>
+<p>新 AEP 设置为 <code>NewSections[2].VirtualAddress + sizeof(PackInfo) + m_PackInfo.dwComDataSize</code>，即 <code>.pack</code> 中的 Stub 起点。</p>
+<p>运行流程：</p>
+<pre><code>
+MainEntry: PUSHAD
+  → Entry / InitEnv
+  → 从 PEB 找模块并手工解析导出
+  → 加载 Cabinet.dll 与解压 API
+  → LZMS 解压完整原 PE 到临时缓冲区
+  → FixSections 恢复头和节
+  → FixImportTable 生成 .iat 跳板
+  → FixRelTable 修复重定位
+  → FixMemProto 与 FixTlsCallback
+  → 返回 ImageBase + 原入口 RVA
+  → 写入保存的 ECX / POPAD / JMP ECX
+</code></pre>
+<h3>Stub 保存现场并跳 OEP</h3>
+<pre><code>
+pushad
+call Entry
+xchg [esp+18h],eax
+popad
+jmp ecx
+</code></pre>
+<p><code>Entry</code> 返回 OEP VA 到 EAX；<code>PUSHAD</code> 后的 <code>[ESP+18h]</code> 是保存的 ECX。交换后 <code>POPAD</code> 把 OEP 恢复进 ECX，最后 <code>JMP ECX</code> 进入 OEP。</p>
+<h3>初始化运行环境</h3>
+<p><code>RunEnv</code> 保存：</p>
+<pre><code>
+ImageBase、pIat
+LoadLibraryA、GetProcAddress
+VirtualAlloc、VirtualFree、VirtualProtect
+CreateDecompressor、Decompress、CloseDecompressor
+CloseHandle、ExitProcess
+</code></pre>
+<p>Stub 通过 <code>FS:[30h]</code> 找到 PEB 和模块链，自写 <code>MyGetProcAddress</code> 解析 Kernel 模块导出，再解析其他 API 和 <code>Cabinet.dll</code> 中的解压函数。</p>
+<h3>恢复映像</h3>
+<p><code>FixSections</code> 先令头部可写，将解压缓冲区中的原 PE 头复制回当前 <code>ImageBase</code>，再按"源 = <code>DecompressedBuffer + Section.PointerToRawData</code>，目标 = <code>ImageBase + Section.VirtualAddress</code>"复制各节。<code>.iat</code> 跳板起点在复制前由外壳第二节的 <code>VirtualAddress</code> 保存到 <code>pEnv->pIat</code>。</p>
+<h3>IAT 不写真实 API，而写跳板地址</h3>
+<p>正常加载是"原 IAT 槽 → 真实 API 地址"；老师代码执行 <code>pImportAddressTable[i] = (DWORD)pIat;</code>，变成"原 IAT 槽 → .iat 中的本地跳板"。</p>
+<p>每个跳板固定 12 字节：</p>
+<pre><code>
+BYTE Code[] = {
+    0xB8, 0x78, 0x56, 0x34, 0x12, // mov eax, encoded
+    0x35, 0x90, 0x00, 0x00, 0x00, // xor eax,90h
+    0xFF, 0xE0                    // jmp eax
+};
+
+*(DWORD*)(Code + 1) = (DWORD)Func ^ 0x90;
+</code></pre>
+<p>示例：真实 API 地址 <code>75AB1234</code>，编码值 <code>75AB1234 XOR 00000090 = 75AB12A4</code>。跳板执行：</p>
+<pre><code>
+mov eax,75AB12A4
+xor eax,90
+jmp eax             ; EAX 恢复为 75AB1234
+</code></pre>
+<p>完整调用链：</p>
+<pre><code>
+原程序 CALL [IAT]
+  → IAT 槽中的 .iat 地址
+  → MOV EAX,编码值
+  → XOR EAX,90
+  → JMP EAX
+  → 真实 DLL API
+  → API RET 回原程序
+</code></pre>
+<p>这里必须是 <code>JMP EAX</code> 而不是 <code>CALL EAX</code>，因为原程序的 <code>CALL [IAT]</code> 已经压入了返回地址。</p>
+<h3>抹除原导入特征</h3>
+<p>名称导入解析后 <code>pName->Name[0] = '\0';</code>。每个 DLL 描述符处理后：</p>
+<pre><code>
+pImportTable-&gt;Name = 0;
+pImportTable-&gt;FirstThunk = 0;
+pImportTable-&gt;OriginalFirstThunk = 0;
+</code></pre>
+<p>最终组合：DLL/API 名称被擦除、导入描述符关键字段归零、原 IAT 槽指向 EXE 自身 <code>.iat</code> 节、真实 API 地址以 XOR 值藏在跳板中。</p>
+<p>注意：</p>
+<ul>
+<li>这不是把整个 IAT 结构一次性加密，而是"IAT 重定向＋逐 API 跳板＋地址异或＋抹除导入特征"。</li>
+<li>这份源码生成 <code>.old/.iat/.pack</code>，而此前实验文件是 <code>UPX0/UPX1/.rsrc</code>。因此 <code>0x318CB RET 0</code> 不是这份老师代码生成的 12 字节跳板。</li>
+<li>Scylla 普通扫描期望 IAT 指向 DLL 导出；老师的 IAT 指向 EXE 自身 <code>.iat</code>，所以可能被标记为无效或可疑。只有继续跟踪 <code>MOV/XOR/JMP</code> 才能恢复真实目标。</li>
+<li>固定 <code>XOR 0x90</code> 和固定 12 字节模板特征明显，主要是课堂演示保护，不能视为强商业壳。</li>
+<li><code>AntiDebug</code> 中的非法 <code>CloseHandle</code> 和 OEP 首字节 <code>CC</code> 检测在给出的源码中被注释，不能把"设计存在"说成"当前构建已验证启用"。</li>
+<li>代码中 <code>.iat</code> 大小固定为 <code>0x2000</code>，每项跳板 12 字节，理论容量约 <code>2000h / 0Ch = 682</code>（向下取整）；源码没有检查跳板是否超过该区域。</li>
+<li>附件包含 4096 字节 <code>hexData</code> Stub 数组，但本次没有重新编译、反汇编和运行验证，机器码数组与源码是否完全匹配待确认。</li>
+</ul>
+<h2>源码问题与修正原则</h2>
+<p>老师代码能够清楚演示壳和 IAT 跳板原理，但存在若干边界或索引问题，应视为课堂实验代码，不应直接等同于经过完整健壮性验证的实现。</p>
+<h3>序号导入判断始终检查第一项</h3>
+<pre><code>
+// 问题代码：循环变量是 i，判断却用 *pImportNameTable，等价于只检查第 0 项
+if (*pImportNameTable &amp; 0x80000000) {
+    Func = pEnv-&gt;GetProcAddress(
+        hDll,
+        (LPCSTR)(LOWORD(pImportNameTable[i])));
+}
+</code></pre>
+<p>混合名称导入与序号导入时可能判断错误。修正：<code>if (pImportNameTable[i] & 0x80000000)</code>，按当前 i 项处理。</p>
+<h3>重定位块头大小使用了指针大小</h3>
+<pre><code>
+// 问题代码
+int Count =
+    (RelTable-&gt;SizeOfBlock - sizeof(PIMAGE_BASE_RELOCATION))
+    / sizeof(WORD);
+</code></pre>
+<p><code>PIMAGE_BASE_RELOCATION</code> 是指针，x86 中通常为 4 字节；<code>IMAGE_BASE_RELOCATION</code> 结构头实际为 8 字节（<code>DWORD VirtualAddress; DWORD SizeOfBlock;</code>）。</p>
+<p>修正：<code>EntryCount = (SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);</code>，同时使用重定位数据目录 <code>Size</code> 约束总遍历范围，拒绝 <code>SizeOfBlock < 8</code>、条目区字节数为奇数、<code>SizeOfBlock</code> 超过目录剩余大小的块；不能只依赖 <code>SizeOfBlock==0</code> 作为唯一终止条件。</p>
+<h3>MEM_RELEASE 的大小参数</h3>
+<pre><code>
+// 问题代码
+Env.VirtualFree(DecompressedBuffer, DecompressedDataSize, MEM_RELEASE);
+
+// 修正：释放整个区域时 dwSize 为 0
+Env.VirtualFree(DecompressedBuffer, 0, MEM_RELEASE);
+</code></pre>
+<h3>固定 .iat 空间没有容量检查</h3>
+<p>代码每生成一个跳板执行 <code>pIat += sizeof(Code);</code>（12 字节），但没有在写入前验证 <code>当前 pIat + 12 <= .iat 末尾</code>。修正原则是按导入总数预计算空间，或每次写入前检查边界。</p>
+<h3>重复声明 CloseDecompressor 联合成员</h3>
+<p><code>RunEnv</code> 里出现了两段同名 <code>CloseDecompressor/pCloseDecompressor</code> 联合声明，属于源码机械重复，应删除一份；具体编译器报错情况未重新编译验证。</p>
+<p>审查课堂 Stub 时分别标记：</p>
+<pre><code>
+设计目标：源码想实现什么
+已写代码：当前函数是否存在
+编译验证：是否能成功生成匹配 Stub
+运行验证：实际样本是否完成解压、修复并到达 OEP
+边界验证：异常 PE、混合序号导入、大 IAT、畸形重定位是否安全
+</code></pre>
+<p>关键返回值也应检查：<code>VirtualAlloc</code>、<code>CreateDecompressor / Decompress</code>、<code>FixImportTable</code>、<code>VirtualProtect</code>、<code>VirtualFree</code>。</p>
+<p>注意：</p>
+<ul>
+<li>"函数已经写出来"不等于"已经编译运行验证"。本次附件只完成源码分析，没有在当前环境重新构建老师项目。</li>
+<li>修复一处当前崩溃不等于完成整个 Stub；后续仍可能遇到其他导入、重定位、TLS 或权限边界。</li>
+<li>源码中的 <code>MyGetProcAddress</code> 依赖课堂模块链假设；本次没有验证所有 Windows 版本、转发导出和异常模块布局，不能把它描述为完整系统加载器替代品。</li>
+<li>本次实际完成的是源码静态追踪与 UPX 样本脱壳排错；没有运行老师这份 <code>.old/.iat/.pack</code> 壳来记录其真实 OEP、IAT 跳板 VA 或动态解密结果，这些值均为待确认。</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

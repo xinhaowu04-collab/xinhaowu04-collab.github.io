@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>最小 PE 逐字节解析 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">最小 PE 逐字节解析</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>最小 PE 逐字节解析</h1>
+<p>课堂样例按所给字节数为 0xB4 字节，核心是字段复用：字符串放入不影响装载的头字段，机器码放入节名或其他可复用位置，节头的一部分复用为导入描述符，低对齐使文件偏移和 RVA 尽量重合。</p>
+<h2>课堂样例的结构重叠</h2>
+<pre><code>
+偏移00：4D 5A         ; MZ
+偏移04：50 45 00 00   ; PE\0\0
+</code></pre>
+<p>关键重叠：</p>
+<pre><code>
+DOS 头 e_lfanew 位于物理偏移 3Ch
+样例可选头 SectionAlignment 也位于物理偏移 3Ch
+3Ch处：04 00 00 00
+因此：e_lfanew=4，同时 SectionAlignment=4
+</code></pre>
+<p>这就是样例能把 PE 签名/NT 头放在偏移 4 的原因：它利用了结构重叠，不能简单理解为忽略 e_lfanew。</p>
+<h2>关键字段</h2>
+<p>| 物理偏移 | 字节/值 | 解释 | |---:|---|---| | 00h | 4D 5A | MZ | | 04h | 50 45 00 00 | PE签名 | | 08h | 4C 01 | Machine=014Ch，x86 | | 0Ah | 01 00 | NumberOfSections=1 | | 18h | 70 00 | SizeOfOptionalHeader=70h | | 1Ah | 0F 01 | Characteristics=010Fh | | 1Ch | 0B 01 | PE32 Magic=010Bh | | 2Ch | 44 00 00 00 | AddressOfEntryPoint=44h | | 38h | 00 00 40 00 | ImageBase=00400000h | | 3Ch | 04 00 00 00 | SectionAlignment=4，同时是 e_lfanew=4 | | 40h | 04 00 00 00 | FileAlignment=4 | | 54h | 00 10 00 00 | SizeOfImage=1000h | | 58h | B4 00 00 00 | SizeOfHeaders=B4h | | 60h | 02 00 | Subsystem=2，Windows GUI | | 78h | 02 00 00 00 | NumberOfRvaAndSizes=2 | | 84h | 98 00 00 00 | Import Directory RVA=98h | | 8Ch | FF 15 AC 00 40 00 C3 | 节名区域同时形成代码 |</p>
+<p>节表起点：</p>
+<pre><code>
+PE偏移=4，签名=4，FileHeader=14h，SizeOfOptionalHeader=70h
+
+第一张节表 = 4 + 4 + 14h + 70h = 8Ch
+</code></pre>
+<p>8Ch 的字节可按节名读取，也可反汇编：</p>
+<pre><code>
+FF 15 AC 00 40 00    call dword ptr [004000ACh]
+C3                   ret
+AA                   ; 填充/具体用途待确认
+</code></pre>
+<p>按节头解释，8Ch 之后可读到：</p>
+<pre><code>
+VirtualSize       = B4h
+VirtualAddress    = 0
+SizeOfRawData     = B4h
+PointerToRawData  = 0
+</code></pre>
+<p>这让整个文件从偏移 0 开始，低对齐时尽量保持 FOA≈RVA。</p>
+<p>字符串和导入：</p>
+<pre><code>
+RVA 0Ch：Hello World\0
+RVA 1Eh：Hint（AA AA）+ MessageBoxA\0
+RVA 30h：user32\0
+RVA 98h：Import Descriptor 起点
+RVA ACh：IAT项=1Eh
+</code></pre>
+<p>入口控制流：</p>
+<pre><code>
+RVA 44h: 6A 00             push 0
+RVA 46h: 6A 00             push 0
+RVA 48h: EB 1A             jmp 00400064h
+
+RVA 64h: 68 0C 00 40 00    push 0040000Ch ; Hello World
+RVA 69h: 90                nop
+RVA 6Ah: 6A 00             push 0          ; hWnd
+RVA 6Ch: EB 1E             jmp 0040008Ch
+
+RVA 8Ch: FF 15 AC 00 40 00 call dword ptr [004000ACh]
+RVA 92h: C3                ret
+</code></pre>
+<p>按 MessageBoxA(hWnd, lpText, lpCaption, uType) 逆序压栈，意图：hWnd=0、lpText=0040000Ch（Hello World）、lpCaption=0、uType=0。</p>
+<p>样例参数汇总：</p>
+<pre><code>
+总长度：B4h
+PE签名：偏移4
+e_lfanew：偏移3Ch的04 00 00 00
+Machine：014Ch
+节数：1
+可选头大小：70h
+PE32 Magic：010Bh
+AEP：44h
+ImageBase：00400000h
+SectionAlignment：4
+FileAlignment：4
+SizeOfImage：1000h
+SizeOfHeaders：B4h
+Import RVA：98h
+Import Name：30h → user32
+IAT RVA：ACh
+函数名 RVA：1Eh → MessageBoxA
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>样例把字符串塞到头字段，是因为这些字段对该极简实验不关键，不是说普通 PE 可以随便把每个字段改成字符串。</li>
+<li>8Ch 同时是节名和机器码，是因为加载器不依赖节名。</li>
+<li>样例中 Import Directory Size 为 0、节 Characteristics 看起来为 0、导入描述符可能与 IAT/节头重叠，这些是课堂极限样例线索；能否被指定 Windows 版本直接运行待确认。</li>
+<li>AAAA 有些是未使用字段、Hint 或填充，不能对每个 AA 凭空赋予确定语义。</li>
+</ul>
+<h2>作业：手写更小的最小 PE</h2>
+<p>作业约束：</p>
+<pre><code>
+手写一个最小 PE
+体积小于课堂样例（约 B4h）
+PE 头不能位于物理偏移 4
+</code></pre>
+<p>「PE 头」究竟指 PE 签名还是完整 NT Headers，需要向老师确认。</p>
+<p>课堂样例把 PE 放在 4，靠的是物理 3Ch 的 e_lfanew 与可选头 SectionAlignment 重叠为同一个 DWORD。如果保守地把 NT 头放到 40h，且仍保留两个目录项：40h + 4h + 14h + 70h = C8h，仅到可选头末尾就已大于课堂样例 B4h，还没算节表和节数据。因此以下三个条件可能冲突：</p>
+<pre><code>
+标准 PE 头在 40h 以后
+体积严格小于 B4h
+仍然保留 MessageBox 导入功能
+</code></pre>
+<p>这不是实现细节小问题，需要先确认作业允许的格式边界。</p>
+<p>建议按阶段设计：</p>
+<p>1. 确认是 Windows 标准 Loader 直接运行，还是老师的手动 Loader 识别。 2. 先做无 Import 的最小入口，验证头和装载；再增加 MessageBox。 3. 选择新 PE 偏移，在物理 3Ch 写入对应 e_lfanew，并重新计算所有字段。 4. 只声明实际需要的目录项。 5. 如老师允许，考虑无节/少节和低对齐；这类方案必须在指定系统测试。 6. 复用不影响加载的头字段存放代码/字符串，但逐个列出每个字节的两个用途。 7. 最后核对 e_lfanew、签名、Machine、节数、可选头大小、AEP、ImageBase、对齐、SizeOfImage、SizeOfHeaders、目录 RVA/Size、节表起点和最终文件长度。</p>
+<p>注意：</p>
+<ul>
+<li>不能只把课堂 PE 的签名从 4 挪到 40；AEP、导入 RVA、字符串 RVA、节表起点、SizeOfHeaders 和重叠关系都要重新算。</li>
+<li>「比课堂小」不一定要求保留 MessageBox；无 Import 的最小验证文件与带 MessageBox 的最小 PE 是不同目标。</li>
+<li>标准 PE 与课堂 Loader 能识别的极限 PE 要分开；课堂异常字段不能直接推广到所有系统。</li>
+<li>若要求双击运行，应以指定系统真实测试为准；若只要求自写 Loader 识别，才能使用自定义布局。</li>
+</ul>
+<p>待确认：</p>
+<pre><code>
+是否必须弹 MessageBox
+目标系统是 Win7、XP 还是老师自己的 Loader
+是否允许 NumberOfSections=0
+是否允许 SectionAlignment=FileAlignment=4
+是否允许截短 Optional Header
+「PE 头」是 PE 签名还是完整 NT Headers
+</code></pre>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

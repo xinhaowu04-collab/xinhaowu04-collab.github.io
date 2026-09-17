@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shellcode：内存与位置无关代码 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">Shellcode：内存与位置无关代码</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>Shellcode：内存与位置无关代码</h1>
+<p>写 shellcode loader 之前必须掌握的前置知识：用什么类型存 shellcode 字节、怎么申请能执行代码的内存、代码如何在任意地址运行。</p>
+<h2>unsigned char 与 C 数据类型</h2>
+<p><code>unsigned char</code> 是 C 语言中占用 <strong>1 字节</strong>、<strong>无符号</strong>的整数类型，取值范围 <strong>0 ~ 255</strong>。它本质上是"1 字节的无符号整数"，而非通常意义上的"字符"。shellcode 的每一个字节范围是 <code>0x00 ~ 0xFF</code>，<code>unsigned char</code> 是存储 shellcode 最自然、最安全的类型。</p>
+<p><strong>C 整数类型全家：</strong></p>
+<p>|类型|大小|范围| |---|---|---| |<code>unsigned char</code>|1 字节|0 ~ 255| |<code>char</code>|1 字节|-128 ~ 127| |<code>unsigned short</code>|2 字节|0 ~ 65535| |<code>short</code>|2 字节|-32768 ~ 32767| |<code>unsigned int</code>|4 字节|0 ~ 4294967295| |<code>int</code>|4 字节|-2147483648 ~ 2147483647|</p>
+<p><strong>与汇编对应关系：</strong></p>
+<p>|C|汇编伪指令|大小| |---|---|---| |<code>unsigned char</code>|<code>db</code> / <code>BYTE</code>|1 字节| |<code>unsigned short</code>|<code>dw</code> / <code>WORD</code>|2 字节| |<code>unsigned int</code>|<code>dd</code> / <code>DWORD</code>|4 字节|</p>
+<p>因此 <code>unsigned char shellcode[]</code> 等价于汇编中的 <code>shellcode db 90h, 0C3h</code>。</p>
+<h3>为什么必须用无符号类型</h3>
+<p>普通 <code>char</code> 的最高位是符号位（补码表示），取值范围 <code>-128 ~ 127</code>。当存放的值超过 127 时会被解释为负数，例如 <code>0x90 = 144</code> 在 signed char 中实际存储为 <code>-112</code>。虽然内存中的比特位完全相同，但在打印、比较、数学运算时会产生意外结果。</p>
+<p>shellcode 字节中的每一位都是指令或数据的一部分，没有任何"符号"语义，必须使用无符号类型避免符号扩展问题。</p>
+<pre><code>
+0x90 (144)
+  ├─ unsigned char → 值为 144，打印正确，比较正确
+  └─ signed char   → 值为 -112（补码），打印出错，比较出错
+</code></pre>
+<h3>用法</h3>
+<pre><code>
+unsigned char shellcode[] = {
+    0x90,   // NOP
+    0xC3,   // RET
+    0x48, 0x31, 0xC0,  // xor rax, rax (64-bit)
+    0xC3                // RET
+};
+
+// 传递给 Win32 API 时，通常需要强制转型
+void *addr = VirtualAlloc(NULL, sizeof(shellcode), MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+memcpy(addr, shellcode, sizeof(shellcode));
+</code></pre>
+<p>若 API 需要 <code>BYTE*</code> 或 <code>LPVOID</code> 参数，<code>unsigned char*</code> 可以安全转换（<code>BYTE</code> 即是 <code>unsigned char</code> 的 typedef）。</p>
+<p>注意：shellcode 中可能包含 <code>0x00</code> 空字节，不能用 <code>strlen</code> 获取长度，它会在第一个空字节处停止。</p>
+<h2>VirtualAlloc 与 VirtualFree</h2>
+<p><code>VirtualAlloc</code> 和 <code>VirtualFree</code> 是 Windows 提供的<strong>虚拟内存分配与释放 API</strong>，允许调用者精确控制内存的分配方式（提交/保留）和保护属性（读/写/执行），是 shellcode loader 中申请可执行内存的核心手段。</p>
+<pre><code>
+// VirtualAlloc — 申请虚拟内存
+LPVOID VirtualAlloc(
+    LPVOID lpAddress,        // 想要的地址，传 NULL 让系统自动选择
+    SIZE_T dwSize,           // 申请大小（字节）
+    DWORD  flAllocationType, // 分配方式：MEM_COMMIT / MEM_RESERVE
+    DWORD  flProtect         // 保护属性：PAGE_EXECUTE_READWRITE 等
+);
+
+// VirtualFree — 释放虚拟内存
+BOOL VirtualFree(
+    LPVOID lpAddress, // VirtualAlloc 返回的地址
+    SIZE_T dwSize,    // 大小，MEM_RELEASE 时必须为 0
+    DWORD  dwFreeType // MEM_RELEASE / MEM_DECOMMIT
+);
+</code></pre>
+<h3>参数速查</h3>
+<p>|参数|典型值|含义| |---|---|---| |<code>lpAddress</code>|NULL|让系统自动选地址，避免指定地址被占用导致失败| |<code>dwSize</code>|shellcode 长度|申请多少字节| |<code>flAllocationType</code>|MEM_COMMIT|提交物理内存| |<code>flProtect</code>|PAGE_EXECUTE_READWRITE|可读可写可执行|</p>
+<p><strong>flAllocationType 取值：</strong></p>
+<p>|值|含义| |---|---| |<code>MEM_COMMIT</code> (0x1000)|提交物理内存，分配后可直接读写| |<code>MEM_RESERVE</code> (0x2000)|只保留地址空间，不占物理内存| |<code>MEM_COMMIT \| MEM_RESERVE</code>|保留 + 提交，一步到位|</p>
+<p><strong>flProtect 取值：</strong></p>
+<p>|值|含义|读|写|执行| |---|---|:-:|:-:|:-:| |<code>PAGE_READONLY</code> (0x02)|只读|是|否|否| |<code>PAGE_READWRITE</code> (0x04)|可读写|是|是|否| |<code>PAGE_EXECUTE</code> (0x10)|只执行|否|否|是| |<code>PAGE_EXECUTE_READ</code> (0x20)|可读可执行|是|否|是| |<code>PAGE_EXECUTE_READWRITE</code> (0x40)|可读写可执行|是|是|是|</p>
+<p><strong>flFreeType 取值：</strong></p>
+<p>|值|含义| |---|---| |<code>MEM_RELEASE</code> (0x8000)|彻底释放，归还给系统，<code>dwSize</code> 必须为 0| |<code>MEM_DECOMMIT</code> (0x4000)|只回收物理内存，地址空间还保留着|</p>
+<h3>为什么 malloc 不够用</h3>
+<pre><code>
+void* mem = malloc(1024);
+memcpy(mem, shellcode, 1024);
+((void(*)())mem)();   // 崩溃！malloc 分配的内存不可执行
+</code></pre>
+<pre><code>
+malloc        → PAGE_READWRITE         能读 能写 不能执行
+VirtualAlloc  → PAGE_EXECUTE_READWRITE  能读 能写 能执行
+</code></pre>
+<p><code>malloc</code> 分配的内存保护属性为 <code>PAGE_READWRITE</code>，只允许读写，不允许执行。这是 Windows <strong>DEP（Data Execution Prevention，数据执行保护）</strong> 机制的体现——数据段不能当作代码执行，防止缓冲区溢出攻击。</p>
+<p>Shellcode loader 的本质就是：<strong>主动申请一块可执行内存（PAGE_EXECUTE_READWRITE），从而在 DEP 保护下合法地执行注入的代码</strong>。</p>
+<p>内存生命周期：</p>
+<pre><code>
+VirtualAlloc（申请 RWX 内存）
+    → memcpy（写入 shellcode）
+    → 函数指针调用（执行 shellcode）
+    → VirtualFree（释放内存）
+</code></pre>
+<p>注意：RWX 内存页是 EDR/杀软的经典检测特征。实战中通常分两步：先以 <code>PAGE_READWRITE</code> 申请并写入 shellcode，再用 <code>VirtualProtect</code> 改为 <code>PAGE_EXECUTE_READ</code>。</p>
+<h3>标准 loader 分配模式</h3>
+<pre><code>
+#include &lt;windows.h&gt;
+
+int main() {
+    // shellcode 数据
+    unsigned char shellcode[] = { /* ... */ };
+    SIZE_T size = sizeof(shellcode);
+
+    // 1. 申请可执行内存
+    LPVOID mem = VirtualAlloc(
+        NULL,                    // 系统选地址
+        size,                    // shellcode 大小
+        MEM_COMMIT,              // 提交物理内存
+        PAGE_EXECUTE_READWRITE   // RWX 权限
+    );
+    if (mem == NULL) return -1;
+
+    // 2. 写入 shellcode
+    memcpy(mem, shellcode, size);
+
+    // 3. 执行 shellcode
+    ((void(*)())mem)();
+
+    // 4. 释放内存
+    VirtualFree(mem, 0, MEM_RELEASE);
+
+    return 0;
+}
+</code></pre>
+<p>参数选择要点：</p>
+<ul>
+<li><strong>lpAddress = NULL</strong>：让系统自动选择地址，避免因指定地址已被占用而失败</li>
+<li><strong>flAllocationType = MEM_COMMIT</strong>：直接提交物理内存，一步到位</li>
+<li><strong>flProtect = PAGE_EXECUTE_READWRITE</strong>：同时满足写入（memcpy）和执行（跳转调用）的需求</li>
+<li><strong>VirtualFree 的 dwSize = 0</strong>：MEM_RELEASE 时要求 dwSize 必须为 0，否则调用失败</li>
+</ul>
+<h2>位置无关代码（PIC）与 call/pop 技术</h2>
+<p><strong>位置无关代码（Position-Independent Code, PIC）</strong> 是指代码中<strong>不出现任何绝对地址</strong>，所有内存引用都是相对地址。无论将代码加载到哪个内存基址，它都能正确执行，无需重定位修正。</p>
+<p>这是 shellcode 编写的核心基础——shellcode 被注入到目标进程后，由 <code>VirtualAlloc</code> 分配的内存地址不可预知，必须保证代码在任何地址都能正常运行。</p>
+<h3>普通 exe 代码不能直接当 shellcode 的三个原因</h3>
+<p><strong>问题 1：<code>offset</code> 是绝对地址</strong></p>
+<pre><code>
+push offset szLoadLibraryA   ; 编译后变成 push 0x00402030（写死的地址）
+</code></pre>
+<p>shellcode 被放到其他地址时，<code>0x00402030</code> 指向垃圾内存，导致崩溃。</p>
+<p><strong>问题 2：<code>extrn</code> 依赖导入表</strong></p>
+<pre><code>
+call ExitProcess@4   ; 跳到 IAT（导入地址表）
+</code></pre>
+<p>提取出来的裸机器码没有 IAT，没有加载器帮忙填充真实地址，调用失败。</p>
+<p><strong>问题 3：<code>.data</code> 变量地址写死</strong></p>
+<pre><code>
+mov pGetProcAddress, eax   ; pGetProcAddress 在 .data 段，地址固定
+</code></pre>
+<p>shellcode 运行时 <code>.data</code> 段不存在于目标内存中。</p>
+<h3>PE 文件 vs shellcode</h3>
+<p>|特性|PE 文件|shellcode| |---|---|---| |绝对地址|有，靠重定位表修正|<strong>根本不出现</strong>| |字符串|<code>.data</code> 段 + <code>offset</code>|<code>call/pop</code> 内联| |API 地址|IAT，加载器填写|PEB 遍历 + 导出表动态查找| |任意地址运行|否（需重定位）|是|</p>
+<h3>call/pop 原理</h3>
+<p><code>call</code> 指令在底层做两件事：将返回地址（call 下一条指令的地址）压栈，然后跳转到目标地址。call/pop 技巧利用这一机制，<strong>通过 <code>call</code> 跳过内联的字符串数据，然后用 <code>pop</code> 从栈上取出该字符串的运行时地址</strong>。</p>
+<pre><code>
+call lbl          ① 把下一条指令地址压栈（= 字符串起始地址）
+db &quot;hello&quot;, 0     ② 字符串紧跟在 call 后面（数据，不会被执行）
+lbl:              ③ 跳到这里继续执行
+pop eax           ④ eax = 字符串的地址！
+</code></pre>
+<p>无论 shellcode 被加载到哪个基址，<code>call</code> 指令和其后面的内联数据之间的<strong>相对距离永远不变</strong>，因此拿到的地址始终正确。</p>
+<p>call 指令的机器码：</p>
+<pre><code>
+E8 0D 00 00 00    call lbl
+</code></pre>
+<p><code>E8</code> 是 <code>call rel32</code> 的操作码，后面 4 字节是<strong>相对偏移</strong>（有符号整数），不是绝对地址。这就是 call/pop 能做到位置无关的根本原因——相对偏移在任意加载地址下语义不变。</p>
+<h3>基本模式与寄存器分工</h3>
+<pre><code>
+; 错误：绝对地址（位置相关）
+push 0x00402030          ; 写死的地址，换个内存就错
+
+; 正确：call/pop（位置无关）
+call s1
+db &quot;LoadLibraryA&quot;, 0
+s1: pop eax              ; eax = &quot;LoadLibraryA&quot; 的当前地址
+push eax
+</code></pre>
+<p>避免使用 <code>.data</code> 变量，改用寄存器持久保存函数指针：</p>
+<p>|寄存器|用途| |---|---| |<code>edi</code>|保存 <code>GetProcAddress</code> 地址| |<code>ebp</code>|保存 <code>LoadLibraryA</code> 地址| |<code>esi</code>|保存 kernel32 基地址|</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

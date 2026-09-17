@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>可选头与节表 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">可选头与节表</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>可选头与节表</h1>
+<p><code>ImageBase</code> 是 PE 模块的<strong>首选加载基址</strong>，即程序希望映像第一个字节落在哪个虚拟地址。它不是某个节的地址，也不等于所有情况下的实际加载地址。PE 中大量位置用 RVA（相对模块开头的偏移）表示，核心关系：</p>
+<pre><code>
+VA = 实际模块基址 + RVA
+</code></pre>
+<h2>ImageBase 与可选头</h2>
+<p>PE32 <code>IMAGE_OPTIONAL_HEADER32</code> 字段：</p>
+<pre><code>
+typedef struct _IMAGE_OPTIONAL_HEADER32 {
+    /* Standard fields */
+    WORD  Magic;
+    /* ... */
+
+    /* Windows-specific fields */
+    DWORD BaseOfCode;
+    DWORD BaseOfData;
+    DWORD ImageBase;
+    DWORD SectionAlignment;
+    DWORD FileAlignment;
+    WORD  MajorOperatingSystemVersion;
+    WORD  MinorOperatingSystemVersion;
+    WORD  MajorImageVersion;
+    WORD  MinorImageVersion;
+    WORD  MajorSubsystemVersion;
+    WORD  MinorSubsystemVersion;
+    DWORD Win32VersionValue;
+    DWORD SizeOfImage;
+    DWORD SizeOfHeaders;
+    DWORD CheckSum;
+    WORD  Subsystem;
+    WORD  DllCharacteristics;
+    DWORD SizeOfStackReserve;
+    DWORD SizeOfStackCommit;
+    DWORD SizeOfHeapReserve;
+    DWORD SizeOfHeapCommit;
+    DWORD LoaderFlags;
+    DWORD NumberOfRvaAndSizes;
+    IMAGE_DATA_DIRECTORY DataDirectory[IMAGE_NUMBEROF_DIRECTORY_ENTRIES];
+} IMAGE_OPTIONAL_HEADER32;
+</code></pre>
+<ul>
+<li><code>BaseOfCode</code>、<code>BaseOfData</code> 是代码/数据区域的 RVA 摘要，不是带基址的绝对地址；<code>BaseOfData</code> 仅见于 PE32，PE32+ 通常没有</li>
+<li>真正逐节的装载位置和大小仍由节表的 <code>VirtualAddress</code>、<code>VirtualSize</code> 决定，<code>BaseOfCode</code>/<code>BaseOfData</code> 不能替代</li>
+</ul>
+<h3>基址搬迁与重定位</h3>
+<p>模块内相对距离不因整体搬家改变。<code>ImageBase=00400000h</code>、<code>RVA=2000h</code> 时原地址为 <code>00402000h</code>；基址改成 <code>00500000h</code> 后同一 RVA 对应 <code>00502000h</code>，整体变化量 <code>00100000h</code>。代码中写死的绝对地址搬家后仍指向旧处：</p>
+<pre><code>
+mov eax, [00402000h]   ; 搬家后应修正为 mov eax, [00502000h]
+</code></pre>
+<p>大型程序不可能手工找所有绝对引用，PE 用<strong>重定位表</strong>批量修正：</p>
+<pre><code>
+重定位差值 = 实际加载基址 - 首选 ImageBase
+</code></pre>
+<p>ASLR 也会让实际基址与首选值不同；能否换址还取决于重定位信息、相关标志和系统策略。处理地址的顺序：</p>
+<p>1. 先确认它是 VA、RVA 还是文件偏移 2. VA 减去<strong>实际模块基址</strong>得 RVA 3. 启用 ASLR 时不要把首选 <code>ImageBase</code> 当运行基址 4. 人为改 ImageBase 必须检查重定位表和所有基址相关绝对引用</p>
+<p>注意：</p>
+<ul>
+<li>改 ImageBase 后只有基址相关的绝对引用需要修正；RVA 和相对寻址本身不因搬家改变</li>
+<li>打开随机基址位不保证一定随机加载，还要有可用重定位信息</li>
+<li>新增节通常不需要改 ImageBase，新节只是在映像末端安排新区域</li>
+</ul>
+<h2>对齐与镜像大小</h2>
+<p>PE 同时存在文件空间和内存空间，两种空间用不同对齐字段：</p>
+<p>| 字段 | 作用 | 常见课堂值 | |---|---|---:| | <code>FileAlignment</code> | 文件中节原始数据的排列对齐（管磁盘） | <code>200h</code> | | <code>SectionAlignment</code> | 节加载到内存后的 RVA 对齐（管内存） | <code>1000h</code> |</p>
+<p><code>SizeOfImage</code> 是整个映像（头部加所有节）在内存中覆盖的范围，必须是 <code>SectionAlignment</code> 的倍数；<code>SizeOfHeaders</code> 是 DOS Stub、PE 头和节表按 <code>FileAlignment</code> 对齐后的头部范围。</p>
+<p>文件按 <code>200h</code> 排列、内存按 <code>1000h</code> 排列时：</p>
+<pre><code>
+文件：0000h~01FFh PE 头 / 0200h~03FFh 代码节 / 0400h~05FFh 数据节
+内存：RVA 0000h~0FFFh 头部页 / RVA 1000h~1FFFh 代码节 / RVA 2000h~2FFFh 数据节
+</code></pre>
+<p>这不是文件中 <code>200h</code> 字节"变成"<code>1000h</code>，而是实际复制的字节数与内存页覆盖范围不同。</p>
+<h3>下一节 RVA 与 SizeOfImage 计算</h3>
+<pre><code>
+下一节 VirtualAddress
+    = AlignUp(当前节 VirtualAddress + 当前节 VirtualSize, SectionAlignment)
+</code></pre>
+<p><code>SectionAlignment=1000h</code>、第一节从 <code>1000h</code> 开始：</p>
+<p>| 第一节 <code>VirtualSize</code> | 结束计算 | 第二节起点 | |---:|---:|---:| | <code>1800h</code> | <code>1000h+1800h=2800h</code>，向上对齐 | <code>3000h</code> | | <code>0800h</code> | <code>1000h+0800h=1800h</code>，向上对齐 | <code>2000h</code> | | <code>2000h</code> | <code>1000h+2000h=3000h</code> | <code>3000h</code> |</p>
+<pre><code>
+SizeOfImage = AlignUp(max(每节 VirtualAddress + VirtualSize), SectionAlignment)
+</code></pre>
+<p>这比"把所有节大小简单相加"可靠。</p>
+<p>注意：</p>
+<ul>
+<li>第二节起点不是固定 <code>3000h</code>，取决于第一节大小和对齐</li>
+<li><code>VirtualAddress</code> 是 RVA，不是带 <code>ImageBase</code> 的最终 VA</li>
+<li><code>SizeOfImage</code> 不是各 <code>VirtualSize</code> 相加，也不是单个节的字段；它必须至少覆盖所有节的映像末端，改小到覆盖不足会加载失败，改大只是预留范围</li>
+<li>异常布局中 <code>SizeOfRawData</code> 可能大于 <code>VirtualSize</code>，课堂公式是常见简化，需结合具体加载器判断</li>
+</ul>
+<h2>节表</h2>
+<p>节表是"文件到内存的搬运说明书"：每条 40 字节（<code>28h</code>）的节头告诉加载器这个节在文件哪里、放到内存哪里、占多大、什么权限。</p>
+<pre><code>
+typedef struct _IMAGE_SECTION_HEADER {
+    BYTE    Name[IMAGE_SIZEOF_SHORT_NAME];
+    DWORD   VirtualSize;
+    DWORD   VirtualAddress;
+    DWORD   SizeOfRawData;
+    DWORD   PointerToRawData;
+    DWORD   PointerToRelocations;
+    DWORD   PointerToLinenumbers;
+    WORD    NumberOfRelocations;
+    WORD    NumberOfLinenumbers;
+    DWORD   Characteristics;
+} IMAGE_SECTION_HEADER, *PIMAGE_SECTION_HEADER;
+</code></pre>
+<p>| 字段 | 含义 | 关键注意 | |---|---|---| | <code>Name[8]</code> | 节名，如 <code>.text</code>、<code>.data</code> | 主要给人和工具看，不直接决定权限 | | <code>VirtualSize</code> | 节在内存中的有效大小 | 可大于原始文件数据，超出部分通常零填 | | <code>VirtualAddress</code> | 节在内存中的 RVA 起点 | 按 <code>SectionAlignment</code> 排列 | | <code>SizeOfRawData</code> | 节在文件中占用的原始数据大小 | 通常按 <code>FileAlignment</code> 对齐 | | <code>PointerToRawData</code> | 节在文件中的起始偏移 | 是 FOA，不是 RVA | | <code>PointerToRelocations</code> | 目标文件重定位信息位置 | 已链接普通 EXE/DLL 通常为 0 | | <code>PointerToLinenumbers</code> | 旧式行号信息位置 | 普通映像通常为 0 | | <code>NumberOfRelocations</code> | 重定位项数量 | 目标文件用途更多 | | <code>NumberOfLinenumbers</code> | 行号项数量 | 普通映像通常为 0 | | <code>Characteristics</code> | 节的代码/数据及读写执行属性 | 影响最终内存保护和运行 |</p>
+<p>某节 <code>VirtualAddress=1000h</code>、<code>VirtualSize=180h</code>、<code>PointerToRawData=200h</code>、<code>SizeOfRawData=200h</code>，含义：</p>
+<pre><code>
+文件中：文件偏移 0200h 开始取 0200h 字节
+内存中：从 ImageBase + 1000h 开始放置，有效内容前 0180h 字节
+</code></pre>
+<p>节内同一偏移 <code>x</code> 满足：</p>
+<pre><code>
+文件 FOA = PointerToRawData + x
+内存 RVA = VirtualAddress + x
+</code></pre>
+<p><code>VirtualSize > SizeOfRawData</code> 时，文件未覆盖的内存尾部由零填充，类似未初始化全局数据。</p>
+<p>典型权限（课堂概念）：<code>.text</code> 可读可执行（RX）、<code>.data</code> 可读可写（RW）、<code>.rdata</code> 只读（R）。</p>
+<p>注意：</p>
+<ul>
+<li>节名没有"编译器必加点"的硬规则，改名通常不影响加载，但程序、保护逻辑或分析工具可能依赖节名</li>
+<li><code>Characteristics</code> 不是装饰字段：去掉代码节执行属性代码无法执行，给数据节加执行属性改变安全边界</li>
+<li><code>PointerToRelocations</code> 等字段并非所有场景都没用，只是已链接的普通 EXE/DLL 通常为零</li>
+</ul>
+<h2>可选头其他字段与数据目录</h2>
+<p>可选头名叫"可选"，但对普通 EXE/DLL 的装载信息实际必需。</p>
+<p>| 字段 | 更准确的理解 | |---|---| | <code>Major/MinorOperatingSystemVersion</code> | 映像声明的最低 OS 版本要求，改高系统可能认为环境不满足 | | <code>Major/MinorImageVersion</code> | 主要是版本元数据 | | <code>Major/MinorSubsystemVersion</code> | 与 <code>Subsystem</code> 共同描述期望的子系统环境 | | <code>Win32VersionValue</code> | 保留字段，普通映像通常为 0 | | <code>SizeOfImage</code> | 覆盖所有头和节的内存范围，按 <code>SectionAlignment</code> 对齐 | | <code>SizeOfHeaders</code> | 头和节表按 <code>FileAlignment</code> 对齐的范围 | | <code>CheckSum</code> | 普通 EXE 常不检查；驱动、启动阶段 DLL 等场景可能检查 | | <code>Subsystem</code> | 指定映像所需的子系统（控制台/窗口/驱动） | | <code>DllCharacteristics</code> | 多个按位标志的组合 | | <code>SizeOfStackReserve/Commit</code>、<code>SizeOfHeapReserve/Commit</code> | Reserve 是预留地址空间，Commit 是当前实际提交的内存 | | <code>LoaderFlags</code> | 保留字段，普通映像通常不用 | | <code>NumberOfRvaAndSizes</code> | 后面有效数据目录项的数量 | | <code>DataDirectory[]</code> | 每项提供一个位置（通常 RVA）和大小 |</p>
+<p>栈提交默认约 <code>4KB</code> 是课堂常见示例，实际默认值与平台、链接器和映像有关。</p>
+<h3>DllCharacteristics 位掩码</h3>
+<pre><code>
+0x0008  IMAGE_LIBRARY_THREAD_TERM       ; 原课堂文本名称，待核对/保留位
+0x0020  IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA
+0x0040  IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE
+0x0080  IMAGE_DLLCHARACTERISTICS_FORCE_INTEGRITY
+0x0100  IMAGE_DLLCHARACTERISTICS_NX_COMPAT
+0x0200  IMAGE_DLLCHARACTERISTICS_NO_ISOLATION
+0x0400  IMAGE_DLLCHARACTERISTICS_NO_SEH
+0x0800  IMAGE_DLLCHARACTERISTICS_NO_BIND
+0x1000  IMAGE_DLLCHARACTERISTICS_APPCONTAINER
+0x2000  IMAGE_DLLCHARACTERISTICS_WDM_DRIVER
+0x4000  IMAGE_DLLCHARACTERISTICS_GUARD_CF
+0x8000  IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE
+</code></pre>
+<ul>
+<li><code>DYNAMIC_BASE</code> 表示支持动态基址/重定位语义，但单独置位不保证 ASLR，还要看重定位表是否存在及系统策略</li>
+<li><code>NX_COMPAT</code> 表示兼容 DEP/NX，不等于"数据段一定不能执行"，具体页面权限由节 <code>Characteristics</code> 和系统策略决定</li>
+<li>这是位集合，可同时设置多个属性，不是互斥枚举</li>
+</ul>
+<p>注意：课堂文本中的 <code>IMAGE_LIBRARY_THREAD_TERM 0x0008</code> 名称需以实际头文件核对；该低位在常见官方定义中属保留范围，不能据此推断出通用"线程终止属性"。</p>
+<p>数据目录可能指向导入、导出、资源、重定位、TLS、延迟导入等结构；<code>NumberOfRvaAndSizes</code> 限制对目录的读取，避免越过真实可选头边界。详细表结构待下节课展开。</p>
+<p>检查可选头的顺序：</p>
+<p>1. 按 Magic 区分 PE32/PE32+，不要把 PE32 独有字段套到 PE32+ 2. 核对 ImageBase、两个对齐值、<code>SizeOfHeaders</code>、<code>SizeOfImage</code> 的互相约束 3. 版本字段问"声明的最低环境是什么"，不写"任意值" 4. <code>DllCharacteristics</code> 当位掩码逐位解析 5. 用 Reserve/Commit 语义检查栈堆参数 6. 用 <code>NumberOfRvaAndSizes</code> 限制 DataDirectory 读取范围</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

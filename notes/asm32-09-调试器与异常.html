@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>调试器与异常 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">调试器与异常</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>调试器与异常</h1>
+<p>调试器的核心手段是三类断点（软件/硬件/内存），全部建立在 Windows 异常分发机制之上；反调试与反反调试的对抗也围绕"异常先给谁"展开。本篇覆盖 OllyDbg 基础、断点原理、内存断点与反调试，以及 VEH/SEH/筛选器的完整异常处理体系。</p>
+<h2>OllyDbg 界面与基础功能</h2>
+<h3>四大核心窗口</h3>
+<p>| 窗口 | 内容 | 说明 | |------|------|------| | CPU 窗口 | 地址列 / 机器码列（HEX opcode）/ 反汇编列 / 注释列 | 注释可手动添加，OD 也会自动标注字符串引用、API 说明 | | 寄存器窗口 | EAX/EBX/ECX/EDX/ESI/EDI/EBP/ESP/EIP + EFLAGS | 含 ZF/SF/CF/OF 等标志位，右键可直接改值构造测试条件 | | 堆栈窗口 | 跟随 ESP | 回车跳转栈中保存的地址，看函数返回地址、传入参数 | | 内存窗口（Memory Map / Dump） | 进程所有内存区块及属性（R/W/X） | Dump 窗口可跟随查看任意地址内容 |</p>
+<h3>常用快捷键</h3>
+<p>| 快捷键 | 作用 | 备注 | |--------|------|------| | 回车 | 跟随操作数地址（仅视图跳转，不执行） | 易与单步步入混淆，回车只改反汇编窗口焦点 | | <code>-</code> / <code>+</code> | 返回 / 前进到上一个查看位置 | 导航历史，不是函数返回 | | F2 | 在当前指令下 / 取消软件断点（INT3） | | | F4 | 运行到选中行 | 临时跑到此处，不下断点，比 F2+F9 快，实战高频 | | F7 | 单步步入（遇 CALL 进入被调用函数内部） | | | F8 | 单步步过（遇 CALL 直接执行完整个函数） | | | F9 | 运行，直到命中断点 | | | Ctrl+F9 | 执行到当前函数返回（ret） | 原理：在栈帧返回地址下临时断点 | | Alt+F9 | 执行到用户代码（跳过系统 DLL） | | | Ctrl+G | 输入地址直接跳转 | | | Ctrl+\* | 设置新 EIP 到选中行 | 跳过 / 重放代码，手动改执行流 | | Animate | 自动连续单步 | 可视化执行流 |</p>
+<h3>UDD 调试信息保存机制</h3>
+<p>OD 把断点、注释、标签等保存为与目标程序同名的 <code>.udd</code> 文件，下次打开自动复原。</p>
+<ul>
+<li>匹配依据：UDD 与 PE 的匹配依赖文件路径、大小、时间戳等特征</li>
+<li>冲突问题：目标程序重新编译（哪怕只改一行代码），地址布局变化，旧 UDD 与新 PE 不再对应，导致断点错位、注释错乱</li>
+<li>实践：每次重新编译后清理旧 UDD，或另存新文件名调试</li>
+</ul>
+<h2>两种调试启动方式</h2>
+<p>| 方式 | 起点 | 特点 | |------|------|------| | 直接打开（Open） | 入口点（EP） | 观察完整初始化流程；但加壳/反调试程序可能检测"从调试器启动"这一行为 | | 附加（Attach） | 挂到已运行进程 | 绕过"启动瞬间检测调试器"的逻辑；大型软件初始化冗长，attach 可跳过 |</p>
+<h2>软件断点（INT3）原理</h2>
+<p>本质：把目标指令首字节替换为 <code>0xCC</code>（INT 3 的单字节机器码）。</p>
+<pre><code>
+原始代码:    55 8B EC 83 EC ...        (push ebp; mov ebp,esp; ...)
+下断点后:    CC 8B EC 83 EC ...        (首字节 55 → CC)
+</code></pre>
+<p>触发流程：</p>
+<p>1. CPU 执行 <code>0xCC</code>，触发中断向量 3，异常 <code>EXCEPTION_BREAKPOINT</code>（<code>0x80000003</code>） 2. 此时 EIP 已指向 <code>0xCC</code> 的下一条指令（INT 指令压栈的返回地址是下一条） 3. 调试器捕获异常：EIP 回退 1 指向原断点指令；用备份的原始字节覆盖回去恢复原指令；暂停等待用户操作 4. 用户继续运行（F9）时：先单步执行这条恢复后的原指令，再把 <code>0xCC</code> 写回该地址维持断点，然后继续运行</p>
+<p>| 优点 | 缺点 | |------|------| | 数量几乎不受限 | 修改了代码段字节，易被 CRC 完整性校验/特征码扫描检测 | | 设置简单 | 只能断代码执行，不能断数据访问 |</p>
+<h2>硬件断点（DR 调试寄存器）原理</h2>
+<p>本质：利用 CPU 内置调试寄存器，不修改任何内存。</p>
+<p>| 寄存器 | 作用 | |--------|------| | DR0~DR3 | 存放 4 个断点的线性地址 | | DR6 | 调试状态寄存器（标识哪个断点被触发） | | DR7 | 控制寄存器（配置每个断点的启用、类型、长度） |</p>
+<h3>DR7 位域</h3>
+<pre><code>
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+|31 |30 |29 |28 |27 |26 |25 |24 |23 |22 |21 |20 |19 |18 |17 |16 |
+|  LEN3 |  RW3  |  LEN2 |  RW2  |  LEN1 |  RW1  |  LEN0 |  RW0  |
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+|15 |14 |13 |12 |11 |10 | 9 | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+| 0 | 0 |GD | 0 | 0 | 0 | G | L |G3 |L3 |G2 |L2 |G1 |L1 |G0 |L0 |
++---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+
+</code></pre>
+<p>| 位域 | 字段 | 含义 | |------|------|------| | bit 0,2,4,6 | L0~L3 | 局部启用（任务切换时清除，常用） | | bit 1,3,5,7 | G0~G3 | 全局启用（任务切换不清除） | | bit 8 / 9 | L / G | 局部/全局精确断点 | | bit 13 | GD | 保护位：置 1 后任何读写调试寄存器的指令（如 <code>mov dr0, eax</code>）都会被 CPU 拦截并强制抛出 INT 1 异常（强力反调试） | | bit 16-17 等 | RW0~RW3 | 触发条件（见下表） | | bit 18-19 等 | LEN0~LEN3 | 监视长度（见下表） |</p>
+<p>RW 字段（触发条件），硬件断点强于软件断点的关键：</p>
+<p>| RW 值 | 含义 | 用途 | |-------|------|------| | 00 | 执行断点 | 代码执行到此（等价软件断点，但不改内存） | | 01 | 写入断点 | 内存被写入时触发，定位"谁修改了变量" | | 11 | 读写断点 | 读或写都触发 | | 10 | I/O 端口 | I/O 读写（需 CR4.DE，少用） |</p>
+<p>LEN 字段（监视长度）：</p>
+<p>| LEN 值 | 长度 | 对齐要求 | |--------|------|---------| | 00 | 1 字节 | 任意地址 | | 01 | 2 字节 | 2 字节对齐 | | 11 | 4 字节 | 4 字节对齐 | | 10 | 8 字节 | 仅 x64 |</p>
+<h3>触发机制与软件断点差异</h3>
+<p>命中 DRx 地址，触发 #DB 异常（中断向量 1），异常码 <code>EXCEPTION_SINGLE_STEP</code>（<code>0x80000004</code>）。</p>
+<p>注意：硬件断点与单步执行（TF 标志）共享中断向量 1，调试器靠检查 DR6 区分是哪个 DR 断点触发还是单步触发。</p>
+<p>| 维度 | 软件断点（INT3） | 硬件执行断点（DR） | |------|-----------------|-------------------| | 触发时机 | 执行 0xCC 之后 | 指令执行之前 | | 触发时 EIP | 指向 0xCC 的下一条 | 指向该指令本身 | | 是否需回退 EIP | 需要（EIP-1） | 不需要 | | 中断向量 | 3 | 1 |</p>
+<p>多线程：DR 寄存器属于线程上下文（CONTEXT 结构），调试器通过 <code>SetThreadContext</code> 为每个线程单独设置。DR7 的 L 位在任务切换时清除、G 位不清除，但 Windows 用户态线程切换会整体切换 CONTEXT（含 DR），实际仍需为每个线程单独设。</p>
+<p>| 优点 | 缺点 | |------|------| | 不改内存字节，绕过 0xCC 扫描 | 只有 4 个（DR0~DR3） | | 能断数据访问（读/写） | 地址须对齐 | | 性能零损耗 | 反调试可读 DR 寄存器检测 |</p>
+<h2>断点进阶形态</h2>
+<p>| 类型 | 机制 | 典型场景 | |------|------|---------| | 条件断点 | 命中后求值条件表达式，为真才暂停 | 函数调用 1000 次，只关心 <code>EAX==0x1234</code> 那次 | | 日志断点 | 命中后不暂停，只记录寄存器/表达式到日志 | 批量记录某 API 每次调用参数，不中断流程 | | 消息断点 | 在窗口处理特定 Windows 消息时断下 | GUI 程序定位 <code>WM_COMMAND</code>/<code>WM_PAINT</code> 处理逻辑 | | 一次性断点 | 触发后自动删除 | 临时跑到某处一次，用完即弃 |</p>
+<p>条件断点本质仍是软件/硬件断点，只是调试器在断下后加一层"条件判断再决定是否交给用户"。</p>
+<h2>内存断点（访问/写入）</h2>
+<p>原理：修改目标内存页属性，访问时触发异常。</p>
+<p>| 页属性 | 触发异常 | |--------|---------| | <code>PAGE_GUARD</code> | <code>STATUS_GUARD_PAGE_VIOLATION</code>（<code>0x80000001</code>） | | <code>PAGE_NOACCESS</code> | <code>EXCEPTION_ACCESS_VIOLATION</code>（<code>0xC0000005</code>） |</p>
+<p>关键特性：<code>PAGE_GUARD</code> 触发一次后系统自动移除 GUARD 标志，因此调试器流程是"重新设置"而非"恢复"：</p>
+<pre><code>
+1. 访问受保护页 → 触发 GUARD_PAGE 异常（GUARD 标志已被系统自动移除）
+2. 调试器捕获异常，判断访问地址是否在断点范围内
+3. 设置 TF=1 单步，执行原指令
+4. 单步返回 → 重新 VirtualProtect 加回 PAGE_GUARD
+5. 循环
+</code></pre>
+<p>| 优点 | 缺点 | |------|------| | 数量几乎无限（受页数限制） | 性能差，异常频繁 | | 可断大范围内存访问 | 粒度是整页（4KB），同页无关读写也触发，噪音大 | | 不改代码字节 | <code>PAGE_NOACCESS</code> 类型可被 <code>VirtualQuery</code> 检测（GUARD 触发后已移除，难检测） |</p>
+<p>注意：CE 的"Find out what writes to this address"本质是硬件写入断点（DR 寄存器），受 4 个数量限制。</p>
+<h2>三类断点对比</h2>
+<p>| 维度 | 软件断点（INT3） | 硬件断点（DR0-3） | 内存断点（页属性） | |------|----------------|-----------------|-----------------| | 实现机制 | 改写 0xCC | DR0~DR7 寄存器 | 内存页保护 | | 中断向量 | 3（INT 3） | 1（#DB） | 14（#PF 页错误） | | 异常码 | <code>0x80000003</code> | <code>0x80000004</code> | <code>0x80000001</code> | | 数量 | 无限 | 4 个 | 几乎无限 | | 修改内存 | 是（1 字节） | 否 | 否（改页属性） | | 能断执行 | 能 | 能 | 能 | | 能断数据访问 | 不能 | 能（读/写） | 能（读/写） | | 粒度 | 字节级（指令） | 1/2/4/8 字节 | 4KB 页级 | | 性能 | 好 | 好（零损耗） | 差 | | 反检测难度 | 易被 CRC 检测 | 难（可检测 DR） | 难 | | 典型场景 | 普通调试 | 脱壳、追数据 | 大范围内存监控 | | 对抗思路 | 代码段 CRC 校验，检测 0xCC | 异常过滤器中经 CONTEXT 快照清空 regDr0~regDr7 | 把核心算法放该页，用高频缺页异常卡死调试器 |</p>
+<h2>反调试技术体系</h2>
+<p>按检测原理分类：</p>
+<p>| 类别 | 代表技术 | 检测原理 | 对抗 | |------|---------|---------|------| | 标志位检测 | <code>IsDebuggerPresent</code> | 读 PEB->BeingDebugged | ScyllaHide hook / 改 PEB | | PEB 字段 | <code>NtGlobalFlag</code> | 调试器启动时堆标志位被改 | 还原标志位 | | 进程信息 | <code>NtQueryInformationProcess</code> | 查 ProcessDebugPort(0x7)/ProcessDebugFlags(0x1F) | hook 返回值 | | 时间检测 | <code>RDTSC</code> / <code>GetTickCount</code> 前后差值 | 单步/断点耗时远超正常 | 调试器隐藏时间 / 让 RDTSC 返回正常值 | | 异常链检测 | <code>CloseHandle(无效句柄)</code> | 被调试时触发异常，否则只返回 FALSE | 把异常 pass to program | | INT 3 区分 | 程序自埋 <code>int 3</code> | 看调试器是否在 first chance 拦截 | 异常 pass to program | | INT 2D | 执行 <code>int 2d</code> | 调试器下吞掉一字节，行为不同于原生 | 硬件断点 / patch | | 线程隐藏 | <code>NtSetInformationThread(ThreadHideFromDebugger)</code> | 线程事件不对调试器上报 | hook 该 API | | 调试器存在性 | <code>FindWindow("OLLYDBG")</code> / 枚举进程 | 直接找调试器窗口/进程 | ScyllaHide 隐藏窗口 | | 调试端口 | <code>NtQueryObject</code> 查 DebugObject | 被调试时存在调试对象 | 内核态规避 |</p>
+<p>对抗工具：ScyllaHide（OD/x64dbg 通用反反调试插件，hook 各类检测点）、StrongOD（较老）。</p>
+<h2>异常分发机制：first chance / second chance</h2>
+<p>异常处理不是"先交给程序自己的 SEH"，而是两阶段分发：</p>
+<pre><code>
+异常发生
+  ↓
+① First chance：系统先问调试器&quot;你要不要处理？&quot;
+  ├─ 调试器拦截（默认）→ 程序的 VEH/SEH 收不到 → 程序判定&quot;被调试&quot;
+  └─ 调试器 pass to program → 异常继续分发给程序的 VEH/SEH
+  ↓
+② 程序的 VEH → SEH → SUEF 依次处理
+  ├─ 处理了 → 正常继续
+  └─ 都没处理 →
+  ↓
+③ Second chance：再给调试器一次机会（通常程序将终止）
+</code></pre>
+<p>反调试检测本质：程序故意触发异常（int3/除零），预期自己的 SEH 能收到。若调试器在 first chance 截获不传递，SEH 收不到，即检测到调试器。</p>
+<p>对抗：在 OD/x64dbg 异常选项中，把非自身断点产生的异常配置为 pass to program（直接传递给被调试程序），让异常处理流程正常走完。x64dbg 可按具体异常码分别配置策略，更精细。</p>
+<p>注意：即使调试器放行异常，自定义 SUEF 仍可能收不到——<code>kernel32!UnhandledExceptionFilter</code> 内部会检查被调试标记（<code>IsDebuggerPresent</code>），发现调试器存在就短路异常、跳过用户回调，直接移交 second chance。</p>
+<h2>VEH / SEH / SUEF 三层异常处理</h2>
+<p>| 机制 | 注册方式 | 作用域 | 数量 | 触发时机 | |------|---------|--------|------|---------| | VEH（向量化异常处理） | <code>AddVectoredExceptionHandler</code> / <code>RemoveVectoredExceptionHandler</code> | 进程全局双向链表 | 可注册多个 | 最优先，先于所有局部 SEH；被调试时只要调试器放行就能收到 | | SEH（结构化异常处理） | <code>__try/__except</code> 编译生成，或手写压栈注册 | 线程局部栈，链头在 <code>fs:[0]</code>（TIB.ExceptionList） | 每个 try 块一个节点 | VEH 不处理后遍历 | | SUEF（顶层筛选器） | <code>SetUnhandledExceptionFilter</code> | 进程全局 | 唯一 | 最后；VEH 和所有 SEH 都没处理且程序未被调试时才调用 |</p>
+<p>回调签名：</p>
+<pre><code>
+// VEH
+LONG CALLBACK VectoredHandler(PEXCEPTION_POINTERS ExceptionInfo);
+// SUEF
+LONG WINAPI TopLevelExceptionFilter(LPEXCEPTION_POINTERS ExceptionInfo);
+</code></pre>
+<p>SEH 注册记录结构（每个 <code>__try/__except</code> 块在栈上压入一个节点，按从新到旧链成单向链表）：</p>
+<pre><code>
+typedef struct _EXCEPTION_REGISTRATION_RECORD {
+    struct _EXCEPTION_REGISTRATION_RECORD *Next;     // +0x00 指向下一个 SEH 记录（链尾 0xFFFFFFFF）
+    PEXCEPTION_DISPOSITION Handler;                  // +0x04 异常处理回调函数
+} EXCEPTION_REGISTRATION_RECORD, *PEXCEPTION_REGISTRATION_RECORD;
+</code></pre>
+<p>完整的用户态异常路由：</p>
+<pre><code>
+CPU 硬件异常 / 软中断 → 进入内核 (Ring0) → 分发回用户态 (Ring3)
+  ↓
+ntdll.dll!KiUserExceptionDispatcher
+  ↓
+1. 遍历所有注册的 VEH（首发站，按注册顺序）
+  ↓ 都不处理（返回 EXCEPTION_CONTINUE_SEARCH）
+2. 遍历当前线程栈上的 SEH 链（fs:[0] 索引，从新到旧）
+  ↓ 都不处理
+3. kernel32.dll!UnhandledExceptionFilter
+  ├─ 有调试器 → 跳过用户 SUEF → 移交 second chance 调试器
+  └─ 无调试器 → 执行用户注册的 SUEF 筛选器；仍不处理则进程终止
+</code></pre>
+<p>VEH 调用顺序控制：<code>AddVectoredExceptionHandler</code> 的第一个参数 <code>FirstHandler</code> 决定插入位置。</p>
+<p>| FirstHandler | 插入位置 | 异常时调用顺序 | |---|---|---| | 非 0 | 链表头部 | 最先被调用 | | 0 | 链表尾部 | 最后被调用 |</p>
+<h2>异常信息获取：EXCEPTION_POINTERS 与 PEB 审计</h2>
+<h3>EXCEPTION_POINTERS 结构</h3>
+<p>异常发生后，筛选器或 VEH 回调收到指向 <code>EXCEPTION_POINTERS</code> 的指针：</p>
+<pre><code>
+typedef struct _EXCEPTION_POINTERS {
+  PEXCEPTION_RECORD ExceptionRecord; // 静态：异常类型、发生地址、附加参数
+  PCONTEXT          ContextRecord;   // 动态：崩溃瞬间 CPU 寄存器的完整备份
+} EXCEPTION_POINTERS;
+</code></pre>
+<p><code>0xC0000005</code>（非法访问）时通过 <code>ExceptionInformation</code> 数组二次审计：</p>
+<ul>
+<li><code>ExceptionInformation[0]</code>：操作属性。0 = 读非法内存；1 = 写非法内存；8 = 执行了 DEP 保护区域的代码</li>
+<li><code>ExceptionInformation[1]</code>：试图访问的具体坏地址</li>
+</ul>
+<p>汇编层参数提取（MASM）：</p>
+<pre><code>
+ExceptionFilter proc ExceptionInfo:ptr EXCEPTION_POINTERS
+    mov ebx, ExceptionInfo
+    assume ebx:ptr EXCEPTION_POINTERS
+
+    mov esi, [ebx].pExceptionRecord      ; 异常记录指针
+    assume esi:ptr EXCEPTION_RECORD
+
+    lea edx, [esi].ExceptionInformation  ; [edx+0] 读写标志，[edx+4] 坏地址
+    mov edx, [edx + 4]
+
+    mov edi, [ebx].ContextRecord         ; 上下文寄存器环境
+    assume edi:ptr CONTEXT
+    ; 此时可通过 edi 读崩溃瞬间的寄存器：mov eax, [edi].regEax
+</code></pre>
+<h3>PEB 反调试字段（IsDebuggerPresent 底层）</h3>
+<p><code>IsDebuggerPresent</code> 没有任何秘密，只是读 PEB（进程环境块）。32 位下 <code>FS:[30h]</code> 始终指向 PEB。</p>
+<p>| 字段 | 偏移 | 说明 | |------|------|------| | <code>BeingDebugged</code> | PEB + 0x02（1 字节） | 有调试器附加时为 1 | | <code>ProcessHeap</code> | PEB + 0x18（4 字节） | 指向默认进程堆 HEAP 结构 | | 堆 <code>Flags</code> | ProcessHeap + 0x0C（XP/7）或 +0x40（Win10） | 非调试为 0x2（HEAP_GROWABLE），调试下变为如 0x50000062 | | 堆 <code>ForceFlags</code> | ProcessHeap + 0x10（XP/7）或 +0x44（Win10） | 非调试为 0，调试下非零（如 0x40000060） | | <code>NtGlobalFlag</code> | PEB + 0x68（4 字节） | 进程被调试器启动时初始化为 0x70 |</p>
+<p>汇编直接读 PEB（无 API 反调试）：</p>
+<pre><code>
+; 检测 BeingDebugged
+mov eax, fs:[30h]           ; PEB 指针
+movzx ecx, byte ptr [eax+2] ; BeingDebugged
+.if ecx == 1
+    ; 发现调试器
+.endif
+
+; 检测 NtGlobalFlag
+mov edx, dword ptr [eax+68h]
+.if edx == 70h
+    ; 发现调试器由外部启动
+.endif
+
+; 检测默认堆 Flags（Win10 32 位）
+mov esi, dword ptr [eax+18h]  ; ProcessHeap
+mov edi, dword ptr [esi+40h]  ; Flags
+.if edi != 2
+    ; 发现调试器修改了堆环境
+.endif
+</code></pre>
+<h3>手动栈回溯（异常过滤器内）</h3>
+<p>利用 EBP 链在汇编里手动还原调用栈（Stack Walk）：</p>
+<pre><code>
+WalkStack proc
+    LOCAL retAddress:DWORD
+
+    mov ebp, esp                ; 建立当前栈帧
+    mov ebx, [ebp]              ; ebx = 调用者的 EBP（上一层栈帧基址）
+
+WalkLoop:
+    .if ebx == 0                ; EBP 为空 = 到达栈顶
+        jmp WalkEnd
+    .endif
+
+    mov eax, [ebx + 4]          ; 上一层函数的返回地址
+    mov retAddress, eax
+    ; 此处可打印 retAddress
+
+    mov ebx, [ebx]              ; 下钻到再上一层 EBP
+    jmp WalkLoop
+
+WalkEnd:
+    ret
+WalkStack endp
+</code></pre>
+<h2>异常返回值与 CONTEXT 恢复</h2>
+<p>筛选器返回 <code>EXCEPTION_CONTINUE_EXECUTION</code>（-1）时，系统做两件事：把修改过的 <code>ContextRecord</code> 快照复写回 CPU 寄存器；让 CPU 回到 <code>ContextRecord.Eip</code> 指向的地址重新执行。这是 SMC 和反调试绕过的核心手段。</p>
+<h3>EFLAGS.RF 恢复标志（第 16 位）</h3>
+<p>硬件断点捕获中的死循环悖论：硬件断点命中 → 触发 <code>0x80000004</code> 单步异常 → 过滤器处理完返回继续执行 → EIP 没变，CPU 一放行又在同一行触发硬件断点，无限原地触发。</p>
+<p>解决：EFLAGS 第 16 位是 RF（Resume Flag）。<code>RF = 1</code> 时 CPU 执行下一条指令临时忽略所有硬件断点一次，执行完自动清零。</p>
+<pre><code>
+; edi 指向 CONTEXT 快照
+or [edi].regFlag, 10000h    ; 置 RF（0x10000），不删断点即可步过
+</code></pre>
+<h2>手写 SEH</h2>
+<h3>注册与注销（头插法）</h3>
+<pre><code>
+; 注册三步
+mov  eax, fs:[0]       ; 1. 读旧链头 A
+push eax               ;    存为新节点的 prev（D.Next = A）
+push offset SehHandler ; 2. handler 地址
+mov  fs:[0], esp       ; 3. fs:[0] = 新节点 D
+
+; 注销（逆操作）：把注册时存的旧链头写回 fs:[0]
+mov  eax, [ebp-10h]
+mov  fs:[0], eax
+</code></pre>
+<p>push 顺序决定内存布局，先 push 的在高地址：</p>
+<pre><code>
+esp → [prev]     (+0x00)  ← fs:[0] 指这里
+      [handler]  (+0x04)
+</code></pre>
+<p>链表特性：后进先出（头插法），后注册的先被询问；谁压栈谁负责弹栈。</p>
+<p>分发流程：从 <code>fs:[0]</code> 取链头 → 调 <code>handler(异常记录, 节点本身, CONTEXT, 分发上下文)</code> → 返回 0 已处理按修改后的 CONTEXT 恢复执行，返回 1 沿 prev 走下一个节点 → 走到链尾（prev = 0xFFFFFFFF）无人认领则默认处理器终止进程。</p>
+<h3>Handler 函数原型与四个参数</h3>
+<pre><code>
+EXCEPTION_DISPOSITION __cdecl _except_handler(
+    struct _EXCEPTION_RECORD *ExceptionRecord,   // 发生了什么：异常码、异常地址、标志
+    void *EstablisherFrame,                       // 注册节点在哪（= 注册时 fs:[0] 存的值）
+    struct _CONTEXT *ContextRecord,              // CPU 此刻的状态，可修改
+    void *DispatcherContext                       // 系统内部用，基本不碰
+);
+</code></pre>
+<pre><code>
+struct _EXCEPTION_RECORD {
+    DWORD ExceptionCode;          // 异常码（0xC0000005 = 访问违例）
+    DWORD ExceptionFlags;         // 状态标志（0=分发, 2=展开中）
+    void  *ExceptionAddress;      // 异常发生时的 EIP
+    DWORD NumberParameters;
+    ULONG_PTR ExceptionInformation[15];
+};
+</code></pre>
+<p>CONTEXT 关键字段偏移（x86，以 <code>dt _CONTEXT</code> 为准）：</p>
+<pre><code>
+regEdi +0x98   regEsi +0x9C   regEbx +0xA0   regEdx +0xA4
+regEcx +0xA8   regEax +0xAC   regEbp +0xB0   regEip +0xB4
+regFlag +0xBC  regEsp +0xC0
+</code></pre>
+<p>handler 工作流程：看第 1 个参数判断异常类型 → 从第 2 个参数读救援信息 → 改第 3 个参数（CONTEXT）决定去哪 → 返回 0 或 1。</p>
+<h3>CONTEXT 改写：跳到 except 块</h3>
+<p>"跳到 except 块"不是 <code>jmp</code>，而是改写 CONTEXT 寄存器快照。handler 修改 CONTEXT 返回 0，内核按修改后的值恢复 CPU 执行。</p>
+<p>三件套缺一不可：</p>
+<pre><code>
+mov eax, EstablisherFrame       ; 注册帧地址
+mov edx, [eax+08h]              ; except_target
+mov [edi].regEip, edx           ; ① EIP → except 块（决定去哪）
+mov edx, [eax+0Ch]              ; saved_ebp
+mov [edi].regEbp, edx           ; ② EBP → 外层函数的帧（决定帧基对不对）
+mov [edi].regEsp, eax           ; ③ ESP → 注册帧地址（决定栈对不对）
+mov eax, ExceptionContinueExecution
+</code></pre>
+<p>| 寄存器 | 改成什么 | 不改的后果 | |--------|---------|-----------| | EIP | except_block 地址 | 原地重试崩溃指令 | | EBP | 外层的 ebp | <code>[ebp-xx]</code> 访问错位 | | ESP | 注册帧地址 | <code>[esp]</code> 读到垃圾，不是 prev |</p>
+<p>ESP 设成注册帧地址的原因：异常在内层函数里发生时 ESP 在内层栈帧（很低的位置），设成注册帧地址等于把内层栈帧整个丢弃，ESP 回到外层注册帧位置，except_block 里 <code>[esp]</code> 才能读到 prev。</p>
+<h3>注册帧布局：2 字段 vs 4 字段</h3>
+<p>基础版（2 字段，8 字节）：</p>
+<pre><code>
+push offset SehHandler     ; +0x04  handler
+push fs:[0]                ; +0x00  prev
+mov  fs:[0], esp
+</code></pre>
+<p>MSVC 扩展版（4 字段，16 字节）——多出的 except_target 和 saved_ebp 就是"救援计划"，handler 从注册帧读它们改写 CONTEXT：</p>
+<pre><code>
+push ebp                   ; +0x0C  saved_ebp（救援用）
+push offset except_block   ; +0x08  except_target（救援用）
+push offset SehHandler     ; +0x04  handler
+push fs:[0]                ; +0x00  prev
+mov  fs:[0], esp
+</code></pre>
+<p>MSVC <code>_except_handler4</code> 的扩展字段：</p>
+<pre><code>
+[ebp-04h] = tryLevel（初始 -2 = 0FFFFFFFEh，不在任何 try 块内）
+[ebp-08h] = scope_table ^ __security_cookie（异或加密保护）
+[ebp-0Ch] = handler（_except_handler4）
+[ebp-10h] = prev（旧 fs:[0]）
+</code></pre>
+<p>scope_table 记录每个 try 范围和对应的 except 地址；tryLevel 标记当前在哪个 try 层级。</p>
+<h3>lea vs mov</h3>
+<pre><code>
+mov eax, [ebp-10h]    ; eax = 栈上存的&quot;值&quot;（旧 fs:[0] 的值）
+lea eax, [ebp-10h]    ; eax = ebp-10h 这个&quot;地址本身&quot;
+</code></pre>
+<p>mov 打开信封看里面写了什么，lea 问信封放在哪个位置。SEH 注册中：<code>mov eax, fs:[0]</code> 读旧链头 A，<code>lea eax, [ebp-10h]</code> 取新节点 D 自己的地址写入 <code>fs:[0]</code>。</p>
+<h3>两阶段：分发与展开</h3>
+<p>阶段 1 分发（ExceptionFlags = 0）：系统沿 SEH 链逐个问 handler，handler 检查 ExceptionCode 决定处理（返回 0）或不管（返回 1）。</p>
+<p>阶段 2 展开（ExceptionFlags = 2）：某个 handler 认领异常后，系统自动回头再调一遍它前面的每个 handler，这次 flags = 2，给它们清理资源的机会。同一个 handler 被调两次，靠检查 ExceptionFlags 区分。</p>
+<p>展开阶段的正确返回值：</p>
+<pre><code>
+.if ExceptionFlags == 2
+    ; 释放资源
+    mov eax, ExceptionContinueSearch  ; 返回 1：&quot;清理完了，继续展开下一个&quot;
+.endif
+</code></pre>
+<p>返回 1 = 清理完了继续，不是返回 3（CollidedUnwind）。</p>
+<h3>ExceptionFlags 位标志</h3>
+<p>| 值 | 宏名 | 含义 | |----|------|------| | 0x1 | NONCONTINUABLE | 不可恢复的异常，不能返回 0 | | 0x2 | UNWINDING | 正在展开，该清理资源了 | | 0x4 | EXIT_UNWIND | 线程要退出，展开后走人 | | 0x8 | STACK_INVALID | 栈坏了，指针越界或没对齐 | | 0x10 | NESTED_CALL | 嵌套异常，handler 处理时又触发新异常 | | 0x20 | TARGET_UNWIND | 展开接近认领异常的目标帧 | | 0x40 | COLLIDED_UNWIND | 展开撞车了 | | 0x80 | SOFTWARE_ORIGINATE | 软件触发的异常（throw / RaiseException） |</p>
+<p>实际写代码只需认 <code>0x2</code>（展开了吗）和 <code>0x1</code>（能不能恢复）。</p>
+<h3>handler 四个返回值</h3>
+<p>| 值 | 宏名 | 含义 | 什么时候用 | |----|------|------|-----------| | 0 | ExceptionContinueExecution | 处理了，按改过的 CONTEXT 继续 | 改完 EIP/EBP/ESP 后 | | 1 | ExceptionContinueSearch | 不处理，交给上一层 | 异常不归我管 | | 2 | ExceptionNestedException | handler 自己又出异常了 | 系统协调用 | | 3 | ExceptionCollidedUnwind | 展开撞车了 | 系统协调用 |</p>
+<p>实际写代码只用 0 和 1。与 C 层 filter 返回值的区别：</p>
+<p>| 层面 | 返回值 | |------|--------| | C 层 <code>__except(filter)</code> | 1=处理, 0=不管, -1=重试 | | 汇编 handler | 0=继续, 1=不管, 2=嵌套, 3=撞车 |</p>
+<p>编译器在 handler 之上包了一层，把 filter 的 1/0/-1 翻译成 handler 的 0/1。展开撞车（CollidedUnwind）：展开过程中清理代码自己又崩了，导致两轮展开经过同一段栈，handler 返回 3 通知系统重新协调。</p>
+<h3>RtlUnwind 与资源清理</h3>
+<p><code>RtlUnwind</code> 是执行阶段 2 展开的系统函数：从异常点往认领者走，沿途调每个 handler（flags=2）清理资源，每走一步恢复 <code>fs:[0]</code> = prev（摘掉节点），最后跳到 except 块。</p>
+<pre><code>
+VOID RtlUnwind(
+    PVOID TargetFrame,                  // 展开到哪个帧停
+    PVOID TargetIp,                     // 展开完后从哪继续执行
+    PEXCEPTION_RECORD ExceptionRecord,  // 异常记录
+    PVOID ReturnValue                   // 返回值
+);
+</code></pre>
+<p>手写 handler 直接改 CONTEXT 跳走，没有调 RtlUnwind，中间帧的 handler 没被调用，清理代码被跳过，导致资源泄漏。MSVC 的 <code>_except_handler4</code> 内部会调 RtlUnwind，<code>__finally</code> 块和析构函数能保证执行。</p>
+<h3>__try/__except vs try/catch</h3>
+<p><code>__except</code> filter 三种返回值：</p>
+<p>| 返回值 | 宏名 | 效果 | |--------|------|------| | 1 | EXCEPTION_EXECUTE_HANDLER | 执行 except 块 | | 0 | EXCEPTION_CONTINUE_SEARCH | 不处理，交给上一层 | | -1 | EXCEPTION_CONTINUE_EXECUTION | 不跳，原地重试出错指令 |</p>
+<p>filter 是表达式，可以调用函数：<code>__except(MyFilter(GetExceptionCode()))</code>。</p>
+<p>| | __try/__except | try/catch | |---|---|---| | 匹配依据 | 异常码 | 异常类型 | | 硬件异常（访问违例、除零） | 能抓 | 抓不到 | | C++ 异常（throw） | 能看到 | 能抓，按类型匹配 |</p>
+<p>try/catch 按类型匹配，硬件异常没有 C++ 类型信息，catch 无从匹配；默认 <code>/EHsc</code> 编译下 try/catch 不碰硬件异常。<code>throw 1</code> 底层调 <code>RaiseException(0xE06D7363, ...)</code>，带类型信息，<code>catch(int)</code> 能匹配。</p>
+<h2>SMC 自修改代码与单步状态机</h2>
+<p>SMC 结合单步状态机是对抗逆向和动态调试的高阶方案：代码在内存中保持加密，执行到一条解密一条，执行完立即回抹（阅后即焚）。</p>
+<h3>节表属性 Patch</h3>
+<p><code>.text</code> 节默认不可写，运行中解密/擦除前必须改属性：在 010 Editor 中将 <code>.text</code> 节 Characteristics 由只读执行 <code>0x60000020</code> 改为全属性 <code>0xF0000020</code>。</p>
+<h3>Delta 偏移量自适应 ASLR</h3>
+<p>硬编码 EIP（如 <code>.if [edi].regEip == 00401013h</code>）在 ASLR 下基址改变会全部崩塌。用 call-pop 技术动态计算重定位偏差：</p>
+<pre><code>
+call GetDelta
+GetDelta:
+    pop ebp                  ; ebp = 当前指令的内存绝对地址
+    sub ebp, offset GetDelta ; 减去编译期固定偏移 = Delta 偏移量
+
+; 之后任何绝对地址运行时动态修正：
+mov eax, offset Encrypted_Block
+add eax, ebp                 ; 完美适应 ASLR
+</code></pre>
+<h3>多线程竞争</h3>
+<p>线程 A 正在解密某段代码时线程 B 并发执行到同一行，会执行半解密字节导致 Crash。对策：解密/抹除期间用临界区或互斥体全局同步；或先 <code>SuspendThread</code> 挂起其他工作线程，解密执行完再 <code>ResumeThread</code>。</p>
+<h3>FlushInstructionCache</h3>
+<p>SMC 经典坑：内存字节已改对，CPU 执行还是乱码。原因是哈佛架构分 I-Cache（指令缓存）和 D-Cache（数据缓存）：<code>xor</code> 修改走数据总线只同步到 D-Cache 和内存，而 CPU 执行从 I-Cache 取指，里面还是旧的加密指令。每次解密完必须强制刷新指令缓存：</p>
+<pre><code>
+invoke GetCurrentProcess
+invoke FlushInstructionCache, eax, offset DecryptStart, DecryptSize
+</code></pre>
+<h3>单步状态机核心源码</h3>
+<p>检测 <code>EXCEPTION_SINGLE_STEP</code> 异常，解密完将快照中的 TF（EFLAGS 第 8 位）置 1 实现逐条解密；执行完整个块后主动不再设 TF，状态机退出。</p>
+<pre><code>
+ExceptionFilter proc uses ebx edx esi edi ExceptionInfo:ptr EXCEPTION_POINTERS
+    mov ebx, ExceptionInfo
+    assume ebx:ptr EXCEPTION_POINTERS
+    mov esi, [ebx].pExceptionRecord
+    assume esi:ptr EXCEPTION_RECORD
+    mov edi, [ebx].ContextRecord
+    assume edi:ptr CONTEXT
+
+    ; 1. 主动触发的第一站：内存访问违规
+    .if [esi].ExceptionCode == EXCEPTION_ACCESS_VIOLATION
+        add [edi].regEip, 2        ; 跳过崩溃源（2 字节恶意指令）
+        mov eax, [edi].regEip
+        xor byte ptr [eax + 0], 90h; 解密下一条指令
+        xor byte ptr [eax + 1], 90h
+        or [edi].regFlag, 100h     ; TF = 1 开启单步陷阱
+
+    ; 2. 状态机循环：逐条解密，执行完的立即回抹
+    .elseif [esi].ExceptionCode == EXCEPTION_SINGLE_STEP
+
+        ; 状态 A：EIP 运行至第一条解密后的指令
+        .if [edi].regEip == 00401013h
+            mov ecx, 00401011h
+            xor byte ptr [ecx], 90h        ; 擦除上一条
+            mov eax, [edi].regEip
+            xor byte ptr [eax + 0], 90h    ; 解密当前
+            xor byte ptr [eax + 1], 90h
+            or [edi].regFlag, 100h         ; 保持单步
+
+        ; 状态 B：当前是 5 字节长指令
+        .elseif [edi].regEip == 00401015h
+            mov ecx, 00401013h
+            xor byte ptr [ecx + 0], 90h
+            xor byte ptr [ecx + 1], 90h
+            mov eax, [edi].regEip
+            xor byte ptr [eax + 0], 90h
+            xor byte ptr [eax + 1], 90h
+            xor byte ptr [eax + 2], 90h
+            xor byte ptr [eax + 3], 90h
+            xor byte ptr [eax + 4], 90h
+            or [edi].regFlag, 100h
+
+        ; 状态 C（终结）：解密最后一条并擦除上一条，不再设 TF
+        .elseif [edi].regEip == 0040101Ah
+            mov ecx, 00401015h
+            xor byte ptr [ecx + 0], 90h
+            xor byte ptr [ecx + 1], 90h
+            xor byte ptr [ecx + 2], 90h
+            xor byte ptr [ecx + 3], 90h
+            xor byte ptr [ecx + 4], 90h
+            mov eax, [edi].regEip
+            xor byte ptr [eax + 0], 90h
+            xor byte ptr [eax + 1], 90h
+            ; 不再 or regFlag,100h：单步异常消隐，恢复全速执行
+        .endif
+    .endif
+
+    mov eax, EXCEPTION_CONTINUE_EXECUTION
+    ret
+ExceptionFilter endp
+</code></pre>
+<h3>指令撕裂与 LDE</h3>
+<p>x86 是变长指令集，无脑按固定字节解密会破坏下一条指令的头部字节，导致非预期崩溃。实战方案：集成轻量级 LDE（Length Disassembler Engine，如 <code>LDE32</code>），在过滤器内读取当前 EIP，计算未加密指令的实际长度 N，精确对 N 字节异或。</p>
+<h2>反 Patch 与爆破博弈</h2>
+<h3>代码段完整性校验（Anti-Patching）</h3>
+<p>防御方在守护线程中定期读取 <code>.text</code> 段（含系统 DLL 关键判断区域）计算 CRC32/MD5，发现字节被改（如 <code>85 C0</code> 变 <code>33 C0</code>）就自我终止。</p>
+<p>逆向突破：直接 Patch 内存会被 CRC 检测到。改用硬件只读断点（DR0-DR3）挂在被检测的函数上，当 CRC 扫描线程读取这段内存时断点触发，在 VEH 中把读到的值动态伪造回原始字节，实现"静态读是明文，动态执行是 Patch 后"的欺骗。</p>
+<h3>字节级爆破示例：TEST 改 XOR</h3>
+<pre><code>
+; ===== 原版系统逻辑 =====
+CALL IsDebuggerPresent  ; 有调试器则 EAX = 1
+TEST EAX, EAX           ; 机器码 85 C0（2 字节），结果非零则 ZF = 0
+JNE  Skip_SUEF          ; ZF=0 跳转成立，绕过用户自定义异常处理
+
+; ===== 爆破补丁 =====
+CALL IsDebuggerPresent  ; EAX 依然 = 1
+XOR  EAX, EAX           ; 机器码 33 C0（同样 2 字节），结果必为 0，ZF = 1
+JNE  Skip_SUEF          ; ZF=1 不跳转，执行流落入用户 ExceptionFilter
+</code></pre>
+<p>爆破精妙之处：<code>85 C0</code> 与 <code>33 C0</code> 同为 2 字节物理对齐，无需插 NOP，避免指令截断导致后续指令崩塌；在内存级别让调试状态检测彻底失效。</p>
+<h2>TEB 关键字段与 TLS</h2>
+<p>TEB 有 4KB，关键字段：</p>
+<p>| 偏移 | 字段 | 用途 | |------|------|------| | +0x00 | NtTib.ExceptionList | SEH 链头（= fs:[0]） | | +0x04 | NtTib.StackBase | 栈底（高地址端） | | +0x08 | NtTib.StackLimit | 栈顶（低地址端） | | +0x18 | NtTib.Self | 指向自己（= TEB 地址，fs:[18h] 可读） | | +0x20 | ClientId | 当前 PID 和 TID | | +0x2c | ThreadLocalStoragePointer | TLS（<code>__declspec(thread)</code> / <code>thread_local</code>） | | +0x30 | ProcessEnvironmentBlock | PEB 地址 | | +0x34 | LastErrorValue | GetLastError() 读这里 | | +0xe10 | TlsSlots[64] | TlsAlloc/SetValue 用的 64 个槽 | | +0xf94 | TlsExpansionSlots | 超过 64 个后的扩展槽 |</p>
+<p>WinDbg 常用命令：</p>
+<pre><code>
+dt _NT_TIB              ; 看结构定义
+dt _TEB NtTib           ; 展开 TEB 里的 NtTib
+dd fs:[0] L2            ; 看 ExceptionList（prev, handler）
+dd fs:[18h] L1          ; 看 Self（验证 = TEB 地址）
+dd fs:[0e10h] L10       ; 看前 16 个 TLS 槽
+</code></pre>
+<p>三种 TLS 写法：</p>
+<p>| 写法 | 对应 TEB 字段 | 自动管理 | |------|-------------|---------| | <code>thread_local</code>（C++11） | +0x2c | 构造/析构全自动 | | <code>__declspec(thread)</code>（Windows） | +0x2c | 只初始化，不析构 | | <code>TlsAlloc/SetValue</code>（API） | +0xe10 TlsSlots | 全手动 |</p>
+<p>访问开销：普通全局变量 1 次内存访问；thread_local 3 次间接寻址（fs:[0x2c] → 数组 → 槽位）。</p>
+<h2>SEH 安全应用</h2>
+<h3>SEH 溢出利用与防御</h3>
+<p>SEH 注册节点压在栈上，栈缓冲区溢出可覆盖 handler 指针劫持控制流。经典技巧：nSEH + SEH 三段跳（prev 填 jmp，handler 填 pop;pop;ret gadget）。</p>
+<p>| 防御机制 | 原理 | |------|------| | SafeSEH | handler 必须在白名单模块内 | | SEHOP | 链尾必须是固定 magic cookie | | DEP | shellcode 不可执行 | | ASLR | 地址随机化 |</p>
+<h3>SEH 内存探测</h3>
+<p>故意读/写目标地址：触发异常 → SEH 拦截 → 标记"不可访问"；没异常 → 地址有效。</p>
+<h3>SEH + Trap Flag 反调试</h3>
+<p>原理：程序正常流程依赖 SEH handler 处理异常，调试器在 first chance 拦截异常后流程就断了。</p>
+<p>| 指令 | 机器码 | 字节数 | handler 怎么跳 | |------|--------|--------|---------------| | <code>inc dword ptr [eax]</code> | FF 00 | 2 | EIP+2 跳过 | | <code>xor eax, eax</code> | 31 C0 | 2 | 正常执行，TF 在这之后触发 | | <code>int 3</code> | CC | 1 | EIP+1 跳过 |</p>
+<pre><code>
+无调试器：
+inc [eax] → 崩 → handler: EIP+2, 设TF
+xor eax,eax → 执行完 → TF触发单步 → handler: EIP+1
+int 3 被跳过 → 正常继续
+
+有调试器：
+inc [eax] → 调试器拦截 → handler 没被调 → TF 没设
+int 3 → 调试器抓到断点 → 程序停住
+</code></pre>
+<p>handler 代码：</p>
+<pre><code>
+.if [esi].ExceptionCode == 0C0000005h
+    add [edi].regEip, 2        ; 跳过 inc [eax]（2 字节）
+    or  [edi].regFlag, 100h    ; 设 Trap Flag（EFLAGS 第 8 位）
+    mov eax, ExceptionContinueExecution
+.elseif [esi].ExceptionCode == 80000004h
+    add [edi].regEip, 1        ; 跳过 int 3（1 字节）
+    mov eax, ExceptionContinueExecution
+.else
+    mov eax, ExceptionContinueSearch
+.endif
+</code></pre>
+<h3>作业：手写模拟 __try/__except</h3>
+<p>C 代码：</p>
+<pre><code>
+void fun1() {
+    char* p = NULL;
+    *p = 1;                    // 访问违例
+}
+int main() {
+    __try { fun1(); }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        printf(&quot;main __except&quot;);
+    }
+    return 0;
+}
+</code></pre>
+<p>完整汇编实现：</p>
+<pre><code>
+.386
+.model flat, stdcall
+option casemap:none
+
+include windows.inc
+include user32.inc
+include kernel32.inc
+includelib user32.lib
+includelib kernel32.lib
+
+.data
+    g_szExcept  db &quot;main __except&quot;, 0
+    g_szTitle   db &quot;SEH&quot;, 0
+
+.code
+
+fun1 proc
+    push ebp
+    mov  ebp, esp
+    xor  eax, eax
+    mov  byte ptr [eax], 1       ; *p = 1, p=NULL → 0xC0000005
+    pop  ebp
+    ret
+fun1 endp
+
+SehHandler proc uses esi edi \
+    ExceptionInfo:ptr EXCEPTION_RECORD, EstablisherFrame:DWORD,
+    ContextRecord:ptr CONTEXT, DispatcherContext:dword
+
+    mov esi, ExceptionInfo
+    assume esi:ptr EXCEPTION_RECORD
+    mov edi, ContextRecord
+    assume edi:ptr CONTEXT
+
+    .if [esi].ExceptionCode == 0C0000005h
+        mov eax, EstablisherFrame       ; 注册帧地址
+        mov edx, [eax+08h]              ; except_target
+        mov [edi].regEip, edx           ; EIP → except 块
+        mov edx, [eax+0Ch]              ; saved_ebp
+        mov [edi].regEbp, edx           ; EBP → start 的帧
+        mov [edi].regEsp, eax           ; ESP → 注册帧（展开 fun1）
+        mov eax, ExceptionContinueExecution
+    .else
+        mov eax, ExceptionContinueSearch
+    .endif
+    ret
+SehHandler endp
+
+start:
+    assume fs:nothing
+    push ebp
+    mov  ebp, esp
+
+    ; 4 字段注册帧
+    push ebp                    ; [ebp-04h] saved_ebp
+    push offset except_block    ; [ebp-08h] except_target
+    push offset SehHandler      ; [ebp-0Ch] handler
+    push fs:[0]                 ; [ebp-10h] prev
+    mov  fs:[0], esp            ; 链头 = ebp-10h
+
+    ; try 块
+    call fun1                   ; 异常在这里触发
+
+    ; 正常路径
+    mov  eax, [ebp-10h]         ; prev
+    mov  fs:[0], eax
+    add  esp, 10h               ; 清 4 个 push
+    invoke ExitProcess, 0
+
+    ; except 块
+except_block:
+    mov  eax, [esp]             ; prev（ESP 被 handler 设成注册帧）
+    mov  fs:[0], eax            ; 恢复链
+    add  esp, 10h
+    invoke MessageBox, NULL, offset g_szExcept, offset g_szTitle, MB_OK
+    invoke ExitProcess, 0
+
+end start
+</code></pre>
+<p>注册帧布局：</p>
+<pre><code>
+[ebp-10h] +0x00  prev            ← fs:[0] 指这里 = EstablisherFrame
+[ebp-0Ch] +0x04  handler
+[ebp-08h] +0x08  except_target   ← handler 读 [EF+08h]
+[ebp-04h] +0x0C  saved_ebp       ← handler 读 [EF+0Ch]
+</code></pre>
+<p>执行流程：</p>
+<pre><code>
+1. start 注册 SEH（4 字段）
+2. call fun1
+3. fun1: mov [0], 1 → 访问违例 0xC0000005
+4. 系统走 SEH 链 → 调 SehHandler
+5. handler 判断 0xC0000005 → EIP = except_block，EBP = saved_ebp，
+   ESP = 注册帧地址（展开 fun1），返回 0
+6. 内核恢复 → 落到 except_block
+7. except_block: 恢复 fs:[0]，清栈，弹 &quot;main __except&quot;
+</code></pre>
+<h2>附：常用异常码</h2>
+<p>| 异常码 | 宏名 | 含义 | |--------|------|------| | 0xC0000005 | STATUS_ACCESS_VIOLATION | 访问违例（空指针等） | | 0xC0000094 | STATUS_INTEGER_DIVIDE_BY_ZERO | 整数除零 | | 0x80000003 | STATUS_BREAKPOINT | 断点异常（int 3） | | 0x80000004 | STATUS_SINGLE_STEP | 单步异常（TF 触发） | | 0xE06D7363 | C++ Exception | C++ throw 触发（'msc'） |</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>程序结构与系统 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">程序结构与系统</h1>
+<div class="meta"><span class="cat">16 位汇编</span></div>
+<article>
+<h1>程序结构与系统</h1>
+<h2>子程序与栈帧</h2>
+<p>8086 的子程序机制围绕栈工作，<code>CALL</code> 压入返回地址，<code>RET</code> 弹出并跳回。调用约定（Calling Convention）是函数调用者与被调用者之间的一份<strong>二进制级契约</strong>，约定了参数如何传递、栈由谁清理、返回值如何存放、寄存器谁负责保存。</p>
+<h3>为什么要保存返回地址</h3>
+<p>如果不保存返回地址，用 <code>JMP</code> 跳转只能再加一个 <code>JMP</code> 跳回来，但是标号定死了，第二次跳转的时候就跳不回来了。</p>
+<pre><code>
+mov bp, sp
+add sp, 2  ; 会被虚拟机污染，可以调回去再释放
+jmp word ptr [bp]
+</code></pre>
+<p>但是代价有点大——为了保存返回地址，消耗了大量寄存器、大量标号。如果由 CPU 自动保存就可以省很多事。<code>CALL</code> 就是帮我们压栈，<code>RET</code> 就是回去。概念上等价于 <code>PUSH 下一条指令地址</code> + <code>JMP 目标</code>，但 IP 寄存器不能直接通过 MOV 或 POP 操作——IP 只能通过跳转指令（JMP/CALL/RET/INT 等）间接修改。</p>
+<p>其实 <code>CALL</code> 也是控制转移指令，跟 <code>JMP</code> 一样也是 <code>CALL 偏移量（字节数）</code>。</p>
+<h3>CALL</h3>
+<p>段内调用（近调用）：</p>
+<pre><code>
+CALL label      ; 直接调用，label 在同一段内
+CALL reg        ; 间接调用，目标地址在寄存器中
+CALL [mem]      ; 间接调用，目标地址在内存中
+</code></pre>
+<p>执行时只压入 IP：</p>
+<pre><code>
+SP = SP - 2
+[SP] = IP（下一条指令的地址）
+IP = 目标地址
+</code></pre>
+<p>段间调用（远调用）：</p>
+<pre><code>
+CALL FAR PTR label
+CALL FAR [mem]
+</code></pre>
+<p>同时压入 CS 和 IP，顺序是先 CS 后 IP（IP 在栈顶）：</p>
+<pre><code>
+SP = SP - 2 ; [SP] = CS
+SP = SP - 2 ; [SP] = IP
+CS:IP = 目标地址
+</code></pre>
+<h3>RET</h3>
+<pre><code>
+RET             ; 近返回，弹出 IP
+RET n           ; 近返回后再 SP = SP + n，用于清理参数
+</code></pre>
+<p>远返回需要与远调用配对：</p>
+<pre><code>
+RETF            ; 远返回，弹出 IP 再弹出 CS
+RETF n
+</code></pre>
+<p><code>RET n</code> 的 n 是字节数，用于<strong>调用者压栈参数后由被调用者清栈</strong>的约定（类似 stdcall）。例如压了 2 个字参数（4 字节），则 <code>RET 4</code>。</p>
+<h3>子程序的标准框架</h3>
+<pre><code>
+my_proc PROC
+    push bp
+    mov  bp, sp      ; 建立栈帧
+    ; 此时栈布局：BP+0=旧BP, BP+2=返回地址, BP+4=第一个参数, BP+6=第二个参数
+    push ax          ; 保存要用到的寄存器（注意：保存后若用 SP 访问参数，偏移会变化）
+    push bx
+    ; 推荐做法：在 PUSH 保存寄存器之前先访问参数，或直接用 BP 计算偏移
+
+    pop  bx
+    pop  ax
+    pop  bp
+    ret
+my_proc ENDP
+</code></pre>
+<p>BP 的作用是固定一个"帧基址"。SP 在子程序里会随 PUSH/POP 浮动，而 BP 不变，所以通过 <code>[BP+偏移]</code> 访问参数和局部变量是稳定的。</p>
+<h3>栈帧布局（近调用，调用者压参数）</h3>
+<pre><code>
+高地址
+┌─────────────────┐
+│   参数 2        │ [BP+6]
+│   参数 1        │ [BP+4]
+│   返回地址(IP)  │ [BP+2]
+│   旧 BP         │ [BP+0]  ← BP 指向这里
+│   局部变量...   │ [BP-2], [BP-4]...
+└─────────────────┘
+低地址 (SP 在此附近)
+</code></pre>
+<p>远调用时返回地址占 4 字节（IP+CS），第一个参数在 <code>[BP+6]</code>。</p>
+<h3>几个关键细节</h3>
+<p><strong>CALL 不影响标志位</strong>，RET 也不影响。</p>
+<p><strong>SP 必须对齐</strong>。CALL 前后 SP 的值必须保持一致，否则 RET 弹出的不是返回地址，程序直接飞掉。这是 8086 子程序调试时最常见的崩溃原因——PUSH 和 POP 数量不匹配。</p>
+<p><strong>寄存器保存约定</strong>。8086 没有强制的 ABI，但通常约定子程序保存 BP、SI、DI，而 AX、BX、CX、DX 可以自由使用（调用者不依赖其保留值）。</p>
+<p><strong>递归可以用</strong>，因为每次 CALL 都会在栈上分配新的返回地址和栈帧，天然支持嵌套。限制只有栈空间大小。</p>
+<p><strong>段内 vs 段间的选择</strong>在汇编时确定。如果子程序在同一代码段，用近调用；跨段用远调用，并且 <code>PROC</code> 定义时要标注 <code>FAR</code>：</p>
+<pre><code>
+my_proc PROC FAR
+    ...
+    RETF
+my_proc ENDP
+</code></pre>
+<h2>调用约定</h2>
+<h3>核心差异：16位 vs 32位</h3>
+<p>| 项目 | 32位 x86 | 16位 8086 | |---|---|---| | 寄存器宽度 | 32位（EAX、ESP、EBP） | 16位（AX、SP、BP） | | 参数宽度 | DWORD = 4字节 | WORD = 2字节 | | 段寄存器 | 基本不用管（平坦内存） | 强制参与，近/远调用行为不同 | | 返回地址大小 | 近调用4字节，远调用6字节（CS 2B + EIP 4B） | 近调用2字节，远调用4字节 | | 调用约定 | stdcall/cdecl/fastcall | 只有近/远两种，无标准名称 | | fastcall | ECX/EDX传参 | <strong>不存在</strong>，无寄存器传参约定 | | Win32 API | stdcall为主 | <strong>不存在</strong>，对应DOS INT 21h | | 可变参数 | cdecl | 同样需要调用者清栈 |</p>
+<h3>两种调用类型总览</h3>
+<p>| 调用类型 | 参数宽度 | 返回地址占用 | 第一个参数偏移 | 谁清栈 | <code>ret</code> 形式 | |---|---|---|---|---|---| | 近调用（NEAR） | WORD = 2字节 | 2字节（只有IP） | <code>[BP+04h]</code> | 调用者或被调用者均可 | <code>RETN</code> / <code>RETN N</code> | | 远调用（FAR） | WORD = 2字节 | 4字节（IP+CS） | <code>[BP+06h]</code> | 调用者或被调用者均可 | <code>RETF</code> / <code>RETF N</code> |</p>
+<h3>栈帧布局详解</h3>
+<p>近调用，两个参数：</p>
+<pre><code>
+高地址
+┌──────────────┐
+│   参数2      │ [BP+06h]
+│   参数1      │ [BP+04h]
+│   返回地址   │ [BP+02h]  ← CALL 压入的 IP（2字节）
+│   旧 BP      │ [BP+00h]  ← BP 指向这里
+│   局部变量1  │ [BP-02h]
+│   局部变量2  │ [BP-04h]
+└──────────────┘  ← SP 在这里
+低地址
+</code></pre>
+<p>远调用，两个参数：</p>
+<pre><code>
+高地址
+┌──────────────┐
+│   参数2      │ [BP+08h]
+│   参数1      │ [BP+06h]
+│   返回地址CS │ [BP+04h]  ← CALL FAR 压入的 CS
+│   返回地址IP │ [BP+02h]  ← CALL FAR 压入的 IP（IP在栈顶）
+│   旧 BP      │ [BP+00h]  ← BP 指向这里
+│   局部变量1  │ [BP-02h]
+│   局部变量2  │ [BP-04h]
+└──────────────┘  ← SP 在这里
+低地址
+</code></pre>
+<h3>标准栈帧构建步骤</h3>
+<p>1. 调用者 <code>PUSH</code> 参数（从右到左） 2. <code>CALL</code> 指令将返回地址压栈（<strong>近调用压IP，远调用压CS再压IP</strong>） 3. 被调用者 <code>PUSH BP</code> 保存旧基址 4. 被调用者 <code>MOV BP, SP</code> 建立新帧基址 5. 被调用者 <code>SUB SP, N</code> 分配局部变量空间 6. 函数体执行 7. 被调用者 <code>MOV SP, BP</code> / <code>POP BP</code> 恢复 8. 被调用者 <code>RETN N</code>（近+被调用者清栈）或调用者 <code>ADD SP, N</code>（调用者清栈）</p>
+<h3>谁清栈</h3>
+<p><strong>被调用者清栈（类似 stdcall）</strong>：函数内部用 <code>RETN N</code> 或 <code>RETF N</code> 一步完成返回和清栈，调用者无需任何操作。</p>
+<pre><code>
+; 调用者
+push param2
+push param1
+call my_proc
+; 返回后 SP 已恢复，不需要操作
+
+; 被调用者（近调用，两个WORD参数 = 4字节）
+my_proc PROC
+    push bp
+    mov  bp, sp
+    ; ... 函数体 ...
+    pop  bp
+    retn 4          ; 返回 + SP += 4，清掉两个参数
+my_proc ENDP
+</code></pre>
+<p><strong>调用者清栈（类似 cdecl）</strong>：函数只做 <code>RETN</code>，调用者之后手动 <code>ADD SP, N</code>。适用于<strong>参数个数不固定</strong>的情况。</p>
+<pre><code>
+; 调用者
+push param3
+push param2
+push param1
+call my_varfunc
+add  sp, 6          ; 调用者清栈：3个WORD = 6字节
+
+; 被调用者
+my_varfunc PROC
+    push bp
+    mov  bp, sp
+    ; ... 函数体 ...
+    pop  bp
+    retn            ; 只返回，不清栈
+my_varfunc ENDP
+</code></pre>
+<h3>RETN N / ADD SP, N 中 N 的计算</h3>
+<pre><code>
+N = 参数个数 × 2（每个WORD参数占2字节）
+
+1个参数 → N = 2
+2个参数 → N = 4
+3个参数 → N = 6
+4个参数 → N = 8
+</code></pre>
+<p>如果参数是双字（DX:AX对，32位数），每个参数占4字节，需手动累加实际字节数。</p>
+<h3>fastcall 不存在</h3>
+<p>8086 的通用寄存器（AX/BX/CX/DX）全部有隐含用途：</p>
+<p>| 寄存器 | 隐含用途 | |---|---| | AX | <code>MUL</code>/<code>DIV</code>/<code>IN</code>/<code>OUT</code>，返回值 | | CX | <code>LOOP</code>，串操作计数 | | DX | <code>MUL</code>/<code>DIV</code>，I/O端口，高位扩展 | | BX | 间接寻址基址 |</p>
+<p>没有空闲寄存器形成标准的寄存器传参约定，<strong>所有参数都走栈</strong>。</p>
+<h3>Win32 API → DOS INT 21h</h3>
+<p>8086 下没有 Win32 API，系统调用通过 <strong>DOS INT 21h</strong> 实现，使用寄存器传参，不涉及栈和调用约定：</p>
+<pre><code>
+; 32位（stdcall，压栈传参）：
+push 0
+push offset szTitle
+push offset szMsg
+push 0
+call MessageBoxA@16     ; 函数内部 ret 16
+
+; 16位（DOS中断，寄存器传参）：
+mov  ah, 09h            ; 功能号 → AH
+mov  dx, offset szMsg   ; 字符串地址 → DX（需 $ 结尾）
+int  21h                ; 无需清栈
+</code></pre>
+<h3>完整子程序示例</h3>
+<p>将两个参数相加，结果存 AX（近调用，被调用者清栈，类似 stdcall）：</p>
+<pre><code>
+; 调用方式：
+;   push param2
+;   push param1
+;   call AddTwo
+
+AddTwo PROC NEAR
+    push bp
+    mov  bp, sp          ; 建立栈帧
+
+    mov  ax, [bp+04h]    ; 取参数1
+    add  ax, [bp+06h]    ; 加参数2，结果在 AX
+
+    pop  bp
+    retn 4               ; 返回 + 清掉2个WORD参数
+AddTwo ENDP
+</code></pre>
+<p>带局部变量的子程序：</p>
+<pre><code>
+MyProc PROC NEAR
+    push bp
+    mov  bp, sp
+    sub  sp, 04h         ; 申请2个局部变量（2×2字节）
+    push cx              ; 保存寄存器环境
+
+    mov  cx, [bp+04h]    ; 取参数1
+    mov  [bp-02h], cx    ; 存入局部变量1
+
+    mov  cx, [bp+06h]    ; 取参数2
+    mov  [bp-04h], cx    ; 存入局部变量2
+
+    mov  ax, [bp-02h]    ; 准备返回值（AX = 局部变量1）
+
+    pop  cx              ; 恢复寄存器环境
+    mov  sp, bp          ; 释放局部变量空间
+    pop  bp              ; 恢复旧BP
+    retn 4               ; 返回 + 清栈
+MyProc ENDP
+</code></pre>
+<p>标准栈帧销毁顺序：<code>POP CX</code>（恢复寄存器）→ <code>MOV SP, BP</code>（释放局部变量）→ <code>POP BP</code>（恢复栈底）→ <code>RETN 4</code>（返回+清栈）。<strong>顺序不能改</strong>，错了栈就乱了。</p>
+<h2>中断系统</h2>
+<p>8086 的中断系统是 CPU 响应内外部事件的标准机制，软件中断、硬件中断、异常三条路最终殊途同归，都走同一套"压栈保存现场→查表跳转→IRET恢复"的流程。</p>
+<h3>三条指令</h3>
+<p><strong>INT n</strong> — 软件中断，n 是 0~255 的中断号。执行时依次做：</p>
+<pre><code>
+FLAGS 压栈
+CS    压栈
+IP    压栈（下一条指令的地址）
+IF = 0（关闭可屏蔽中断）
+TF = 0（关闭单步）
+跳转到中断向量表第 n 项所指的地址
+</code></pre>
+<p>共压 6 字节（FLAGS 2 字节 + CS 2 字节 + IP 2 字节），这是和普通 <code>CALL FAR</code> 的关键区别——多压了一个 FLAGS。</p>
+<p><strong>INTO</strong> — 溢出中断，等价于：</p>
+<pre><code>
+; 伪代码
+if OF == 1 then INT 4
+</code></pre>
+<p>OF 为 0 时是空操作。专门配合有符号运算使用，放在 <code>ADD</code>/<code>SUB</code> 之后检测溢出。</p>
+<p><strong>IRET</strong> — 中断返回，是 <code>INT</code> 的逆操作：</p>
+<pre><code>
+IP    弹出
+CS    弹出
+FLAGS 弹出（IF、TF 随之恢复）
+</code></pre>
+<p><strong>只有 <code>IRET</code> 能正确从中断返回</strong>，普通 <code>RETF</code> 不恢复 FLAGS，导致 IF/TF 状态错乱。</p>
+<h3>中断向量表</h3>
+<p>8086 在物理地址 <code>0000:0000</code> 到 <code>0000:03FF</code> 存放 256 个中断向量，每个向量占 4 字节（IP 低字 + CS 高字），共 1KB。</p>
+<pre><code>
+物理地址 0x000：INT 0  的 IP（低字）
+物理地址 0x002：INT 0  的 CS（高字）
+物理地址 0x004：INT 1  的 IP
+物理地址 0x006：INT 1  的 CS
+...
+物理地址 0x3FC：INT FFh 的 IP
+物理地址 0x3FE：INT FFh 的 CS
+</code></pre>
+<p>查表公式：<code>向量地址 = n × 4</code></p>
+<p>CPU 收到中断号 n 后，从 <code>0000:[n×4]</code> 取 IP，从 <code>0000:[n×4+2]</code> 取 CS，组成目标地址。</p>
+<h3>栈帧布局</h3>
+<p><code>INT n</code> 执行后，中断服务程序（ISR）入口处的栈：</p>
+<pre><code>
+高地址
+┌──────────────┐
+│   FLAGS      │ ← INT 压入
+│   CS         │ ← INT 压入
+│   IP         │ ← INT 压入，SP 指向这里
+└──────────────┘
+低地址
+</code></pre>
+<p>如果 ISR 内部还用了 <code>PUSH BP / MOV BP, SP</code> 建栈帧：BP+0=旧BP，BP+2=IP，BP+4=CS，BP+6=FLAGS，参数偏移从 <code>[BP+08h]</code> 开始（返回地址 IP+CS 共 4 字节 + FLAGS 2 字节 + 旧 BP 2 字节）。</p>
+<h3>常用中断号</h3>
+<p>| 中断号 | 来源 | 用途 | |--------|------|------| | <code>INT 00h</code> | CPU 异常 | 除零错误 | | <code>INT 01h</code> | CPU 异常 | 单步调试（TF=1时每条指令后触发） | | <code>INT 02h</code> | 硬件 NMI | 不可屏蔽中断（内存奇偶错等） | | <code>INT 03h</code> | CPU 异常 | 断点（<code>0xCC</code>，调试器用） | | <code>INT 04h</code> | CPU 异常 | 溢出（配合 <code>INTO</code>） | | <code>INT 08h</code> | 硬件 IRQ0 | 系统定时器（8253，约18.2Hz） | | <code>INT 09h</code> | 硬件 IRQ1 | 键盘 | | <code>INT 10h</code> | BIOS | 视频服务 | | <code>INT 16h</code> | BIOS | 键盘服务 | | <code>INT 21h</code> | DOS | DOS 系统调用（最常用） |</p>
+<h3>中断优先级和分类</h3>
+<pre><code>
+不可屏蔽（NMI，INT 2）   ← 最高优先级，IF=0也响应
+      ↓
+内部异常（除零、溢出、单步、断点）
+      ↓
+可屏蔽硬件中断（INTR 引脚，IF=1才响应）
+      ↓
+软件中断（INT n）         ← 最低优先级
+</code></pre>
+<p><code>CLI</code>（IF=0）只能屏蔽可屏蔽硬件中断，NMI 和内部异常无论如何都会响应。</p>
+<h3>几个关键细节</h3>
+<p><strong><code>INT n</code> 与 <code>CALL FAR</code> 的区别</strong>：<code>CALL FAR</code> 只压 CS:IP，<code>INT n</code> 额外压 FLAGS 并关闭 IF/TF。所以中断服务程序必须用 <code>IRET</code> 而不是 <code>RETF</code> 返回。</p>
+<p><strong>IF 在 <code>INT</code> 执行时自动清零</strong>。这意味着 ISR 执行期间默认不会被其他可屏蔽中断打断。如果需要允许嵌套中断，ISR 内部显式执行 <code>STI</code> 重新开中断。</p>
+<p><strong><code>INT 03h</code> 的特殊编码</strong>：断点中断有单字节编码 <code>0xCC</code>，普通 <code>INT n</code> 是两字节（<code>0xCD n</code>）。调试器用 <code>0xCC</code> 替换目标地址的第一个字节来设置断点，命中后再恢复原字节，这就是软件断点的实现原理。</p>
+<p><strong>单步陷阱（TF）</strong>：<code>INT</code> 执行时 TF 清零，所以 ISR 本身不会被单步。调试器通过设置 TF=1 让 CPU 每执行一条指令就触发 <code>INT 1</code>，调试器的 <code>INT 1</code> 处理程序负责显示寄存器状态。</p>
+<h2>DOS 功能调用</h2>
+<p>DOS 功能调用是 8086 程序与操作系统交互的标准接口，全部通过 <code>INT 21h</code> 触发，用 AH 寄存器传功能号，其余寄存器按功能不同传参数，返回值通常在 AX。</p>
+<h3>调用约定</h3>
+<pre><code>
+mov ah, 功能号      ; 必须
+mov 其他寄存器, 参数 ; 按具体功能要求
+int 21h             ; 触发
+; 返回值在 AX 或指定寄存器
+; CF=1 表示出错，AX 存错误码
+</code></pre>
+<p>DOS 功能调用不走栈传参，全程寄存器传递，没有清栈问题。</p>
+<h3>典型用法</h3>
+<pre><code>
+; 输出单个字符（功能 02h），字符在 DL
+mov ah, 02h
+mov dl, &#x27;A&#x27;
+int 21h
+
+; 输出字符串（功能 09h），字符串以 $ 结尾，地址在 DX
+mov ah, 09h
+mov dx, offset msg
+int 21h
+
+; 读键盘（功能 01h），字符返回在 AL
+mov ah, 01h
+int 21h             ; AL = 输入字符
+
+; 程序退出（功能 4Ch），返回码在 AL
+mov ah, 4Ch
+mov al, 0
+int 21h
+</code></pre>
+<h3>几个关键细节</h3>
+<p><strong>字符串终止符不同</strong>：09h 输出用 <code>$</code> 结尾，文件名用 <code>\0</code>（ASCIIZ）结尾，0Ah 读入后数据区末尾是 <code>0Dh</code>（回车）。三种格式混用时最容易出错。</p>
+<p><strong>标准句柄</strong>：DOS 预定义了五个句柄，程序启动时直接可用：</p>
+<p>| 句柄 | 含义 | |---|---| | 0 | 标准输入（键盘） | | 1 | 标准输出（屏幕） | | 2 | 标准错误 | | 3 | 标准辅助设备 | | 4 | 标准打印机 |</p>
+<p>用 40h 写句柄 1 等价于在屏幕输出，写句柄 2 输出错误信息，这两个在重定向时行为不同。</p>
+<p><strong>DS 必须指向正确的段</strong>：09h 和 0Ah 用 DS:DX 寻址，如果 DS 不指向数据段，读写的是错误的内存。<code>.COM</code> 程序 DS=CS=ES=SS 天然对齐，<code>.EXE</code> 程序需要在入口手动设置 DS。</p>
+<p><strong>4Ch 之前不需要关闭句柄</strong>：DOS 在 4Ch 时会自动关闭所有打开的文件句柄。但养成显式关闭的习惯更好，特别是写操作后未关闭可能导致缓冲区未刷新丢数据。</p>
+<h2>BIOS 与 DOS 启动流程</h2>
+<p>这是从"机器通电"到"DOS 命令提示符出现"的完整链条，分成几个阶段交接。</p>
+<h3>通电复位</h3>
+<p>CPU 通电后，内部逻辑强制将寄存器设为固定初始值：</p>
+<pre><code>
+CS = FFFFh
+IP = 0000h
+</code></pre>
+<p>物理地址 = <code>FFFFh × 16 + 0000h = FFFF0h</code></p>
+<p>这个地址在 ROM 的最顶端，只有 16 字节空间，放的是一条远跳转指令 <code>JMP FAR</code>，跳到 BIOS 主体代码的真正入口。这 16 字节叫做<strong>复位向量</strong>。</p>
+<h3>POST（加电自检）</h3>
+<p>BIOS 主体接管后，第一件事是 POST（Power-On Self Test）：</p>
+<p><strong>CPU 自检</strong>：执行几条基本指令验证 ALU 和寄存器是否正常。</p>
+<p><strong>内存检测</strong>：从低地址到高地址逐字节写入再读回，确认 RAM 可用容量和完整性。早期 BIOS 会在屏幕左上角显示内存计数，就是这一步。</p>
+<p><strong>芯片组初始化</strong>：配置 8237 DMA 控制器、8259 中断控制器、8253 定时器。其中 8259 把硬件 IRQ 映射到中断向量：</p>
+<pre><code>
+IRQ0（定时器）  → INT 08h
+IRQ1（键盘）    → INT 09h
+IRQ2            → INT 0Ah
+...
+IRQ7            → INT 0Fh
+</code></pre>
+<p><strong>显卡初始化</strong>：检测显卡类型（MDA/CGA/EGA），初始化显示模式，之后才能在屏幕上显示内容。</p>
+<p><strong>其他硬件</strong>：键盘控制器、软驱控制器、串并口等逐一检测。</p>
+<p>POST 出错时，因为显卡可能还没初始化，BIOS 用<strong>蜂鸣声</strong>报错（不同厂商蜂鸣码含义不同），这也是为什么硬件故障时电脑会"哔哔叫"。</p>
+<h3>中断向量表初始化</h3>
+<p>POST 完成后，BIOS 在物理地址 <code>0000:0000</code> 建立中断向量表，填写 256 个条目：</p>
+<pre><code>
+0000:0000  INT 00h 向量（除零）
+0000:0004  INT 01h 向量（单步）
+0000:0008  INT 02h 向量（NMI）
+...
+0000:0040  INT 10h 向量（视频服务）→ 指向 BIOS ROM 中的视频例程
+0000:0058  INT 16h 向量（键盘服务）→ 指向 BIOS ROM 中的键盘例程
+...
+0000:0084  INT 21h 向量           → 此时还是空的，由 DOS 后续填写
+</code></pre>
+<p>BIOS 自己实现 INT 10h（视频）、INT 13h（磁盘）、INT 16h（键盘）等服务例程，把它们的地址写进向量表，之后这些服务就可以用了。</p>
+<h3>BIOS 数据区（BDA）</h3>
+<p>BIOS 在 <code>0040:0000</code>（物理地址 <code>0400h</code>）保留 256 字节作为 BIOS 数据区，存放运行时状态：</p>
+<pre><code>
+0040:0013  内存大小（KB）
+0040:001A  键盘缓冲区头指针
+0040:001C  键盘缓冲区尾指针
+0040:001E  键盘缓冲区（32字节，循环队列）
+0040:006C  定时器计数（INT 08h 每次+1，约18.2Hz）
+0040:0049  当前显示模式
+0040:004A  屏幕列数
+</code></pre>
+<p>这块区域是 BIOS 与上层软件共享状态的唯一渠道，DOS 和应用程序可以直接读写它。</p>
+<h3>引导加载（Bootstrap）</h3>
+<p>BIOS 完成初始化后，按照 CMOS 中配置的启动顺序（软驱→硬盘，或反过来）依次尝试每个设备，寻找可启动介质。</p>
+<p>判断标准：读取设备第 0 磁道第 0 扇区（MBR，512字节），检查最后两个字节是否为 <code>55h AAh</code>（引导签名）。</p>
+<pre><code>
+扇区最后两字节：
+偏移 1FEh = 55h
+偏移 1FFh = AAh
+→ 这是合法引导扇区
+</code></pre>
+<p>找到后，BIOS 把这 512 字节加载到物理地址 <code>0000:7C00h</code>，然后：</p>
+<pre><code>
+JMP 0000:7C00h    ; 控制权交给引导扇区代码
+</code></pre>
+<p>BIOS 的使命到此结束，后续完全由引导扇区代码负责。</p>
+<h3>引导扇区（MBR/Boot Sector）</h3>
+<p>以 DOS 为例，引导扇区是 DOS 格式化磁盘时写入的，它的任务：</p>
+<p><strong>读取 DOS 系统文件</strong>：在根目录找 <code>IO.SYS</code>（或 <code>IBMBIO.COM</code>）和 <code>MSDOS.SYS</code>（或 <code>IBMDOS.COM</code>），用 INT 13h 磁盘服务把它们加载进内存。</p>
+<p><strong>检查文件顺序</strong>：早期 DOS 要求这两个文件必须是根目录的前两个条目且连续存放，格式不对直接报 "Non-system disk"。</p>
+<pre><code>
+; 引导扇区伪代码逻辑
+检查根目录前两个条目是否是 IO.SYS 和 MSDOS.SYS
+如果不是 → 输出 &quot;Non-System Disk&quot; → 停机
+如果是   → 用 INT 13h 把 IO.SYS 加载到 0070:0000
+          → JMP 0070:0000
+</code></pre>
+<h3>DOS 加载过程</h3>
+<p><strong>IO.SYS</strong>（硬件抽象层）接管后：初始化设备驱动，把 BIOS 的 INT 13h 磁盘服务包装成 DOS 的块设备接口，建立 DOS 自己的设备驱动链。</p>
+<p><strong>MSDOS.SYS</strong>（DOS 内核）加载后：把 INT 21h 向量指向自己的服务入口——从这一刻起，<code>INT 21h</code> 才真正可用。同时建立文件分配表（FAT）缓存、内存分配表（MCB 链）、文件控制块（FCB）结构。</p>
+<p><strong>处理 CONFIG.SYS</strong>：</p>
+<pre><code>
+DEVICE=HIMEM.SYS
+FILES=30
+BUFFERS=20
+</code></pre>
+<p>每一行都在 DOS 内核初始化期间执行，加载驱动或设置参数。</p>
+<p><strong>加载 COMMAND.COM</strong>：DOS 内核最后加载命令解释器。COMMAND.COM 分两部分：常驻部分留在内存，暂驻部分可被覆盖（大程序运行后返回 DOS 时重新加载）。COMMAND.COM 处理 <code>AUTOEXEC.BAT</code>，执行其中的命令，最终显示：</p>
+<pre><code>
+C:\&gt;_
+</code></pre>
+<h3>完整链条</h3>
+<pre><code>
+通电
+  → CPU 跳 FFFF0h（复位向量）
+    → BIOS POST（自检硬件）
+      → 初始化中断向量表（INT 10h/13h/16h等）
+        → 建立 BIOS 数据区（0040:0000）
+          → 读 MBR，检查 55AAh 签名
+            → 加载 MBR 到 7C00h，跳转执行
+              → 引导扇区加载 IO.SYS
+                → IO.SYS 初始化硬件驱动
+                  → MSDOS.SYS 建立 DOS 内核，接管 INT 21h
+                    → 处理 CONFIG.SYS
+                      → 加载 COMMAND.COM
+                        → 处理 AUTOEXEC.BAT
+                          → C:\&gt;
+</code></pre>
+<p>每一级只做自己分内的事，然后把控制权向下传。BIOS 不知道 DOS 是什么，引导扇区不知道 COMMAND.COM 是什么，各层之间只通过约定好的接口（固定地址、固定格式、固定中断号）交接。</p>
+<h3>直接调用 BIOS 中断</h3>
+<p>应用程序可以直接调用 BIOS 封装的函数（不同主板品牌不同）。BIOS 中断是固化在 ROM 里的一组服务例程，通过中断向量表对外暴露接口。应用程序和 DOS 本身都可以直接调用，是硬件抽象的第一层。</p>
+<p><strong>BIOS 中断与 DOS 中断的分工</strong>：BIOS 中断直接操作硬件，没有缓冲、没有文件系统概念；DOS 中断（INT 21h）在 BIOS 之上加了缓冲、路径解析、设备抽象。DOS 的磁盘文件操作最终调用 INT 13h，键盘输入最终调用 INT 16h。</p>
+<pre><code>
+; 改分辨率
+xor ax, ax
+int 10h
+; 所有功能都很底层
+</code></pre>
+<h2>学习路线：从 8086 到现代逆向</h2>
+<p>从逆向和底层安全方向看，BIOS 中断和 DOS 功能调用的实用价值有限，但它们建立了底层直觉：中断是怎么回事、调用约定为什么这么设计、栈帧为什么长这样。</p>
+<p>值得深挖的路线：</p>
+<pre><code>
+Win32 API（user32/kernel32）
+    → ntdll.dll（Native API）
+        → SYSCALL 指令
+            → Windows 内核（ntoskrnl）
+                → 驱动模型（WDM/WDF）
+</code></pre>
+<p>以及围绕这条线的东西——PE 格式、IAT/EAT、调用约定（x64 的 fastcall 四寄存器约定）、异常处理（SEH/VEH）、反调试技术、加壳原理。</p>
+<p>现在这个阶段继续把 8086 打扎实，之后过渡到 x86-32 和 x86-64，直接对接 IDA/Ghidra 的实际使用，会比较顺。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

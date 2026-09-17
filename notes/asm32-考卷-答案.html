@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>32位汇编综合考卷 - 参考答案 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">32位汇编综合考卷 - 参考答案</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>32位汇编综合考卷 - 参考答案</h1>
+<hr>
+<h2>一、选择题答案</h2>
+<p>1. <strong>B</strong> - __stdcall（Win32 API标准约定，被调用者清栈） 2. <strong>A</strong> - 调用者（__cdecl最大特点是调用者清栈，支持可变参数） 3. <strong>B</strong> - ECX, EDX（__fastcall前两个参数走寄存器，其余压栈） 4. <strong>B</strong> - 线程环境块（TEB，FS:[0]是SEH链头，FS:[30h]是PEB） 5. <strong>B</strong> - PUSH EBP（保存调用方的帧基址是第一步） 6. <strong>B</strong> - 字符串函数遇到NULL会截断（strcpy等C字符串函数以\0结尾，遇到NULL停止复制） 7. <strong>C</strong> - PAGE_EXECUTE_READWRITE（Shellcode需要执行权限） 8. <strong>A</strong> - BeingDebugged（PEB+0x02，被调试时值为1） 9. <strong>B</strong> - 替换指令首字节为0xCC（INT 3，软中断断点） 10. <strong>B</strong> - 4个（DR0~DR3，x86架构限制） 11. <strong>A</strong> - FS:[0]（SEH链表头指针在TEB偏移0处） 12. <strong>B</strong> - 5字节（E9 + 4字节rel32偏移） 13. <strong>B</strong> - 目标地址 - (JMP指令地址 + 5)（rel32是相对于下一条指令的偏移） 14. <strong>B</strong> - 链接时找不到符号（C++的name mangling导致符号名不匹配） 15. <strong>A</strong> - 不生成函数序言和尾声代码（naked函数体完全由程序员控制）</p>
+<hr>
+<h2>二、填空题答案</h2>
+<p>1. <strong>__stdcall</strong>、<strong>EAX</strong></p>
+<p>2. <strong>ret N</strong>、<strong>参数</strong></p>
+<p>3. <strong>+0x0C</strong>、<strong>第三个模块</strong>（或：遍历链表、跳过前两个模块）</p>
+<p>4. <strong>unsigned char</strong>、<strong>1</strong>、<strong>0~255</strong></p>
+<p>5. <strong>导出表（Export Directory）</strong>、<strong>AddressOfFunctions</strong>（或：导出函数地址表）</p>
+<p>6. <strong>步入</strong>、<strong>步过</strong></p>
+<p>7. <strong>DR0~DR7调试</strong>、<strong>断点地址</strong>、<strong>控制和状态信息</strong></p>
+<p>8. <strong>0（ExceptionContinueExecution）</strong>、<strong>1（ExceptionContinueSearch）</strong></p>
+<p>9. <strong>trampoline/跳板</strong>、<strong>无限递归</strong>（或：原始指令丢失）</p>
+<p>10. <strong>.obj</strong>、<strong>.obj</strong>、<strong>链接器（linker）</strong></p>
+<hr>
+<h2>三、判断题答案</h2>
+<p>1. <strong>√</strong> - 寄存器传参避免了内存访问，减少栈操作</p>
+<p>2. <strong>×</strong> - EBX是被调用者保存寄存器（Callee-Saved），需要在函数内保存恢复</p>
+<p>3. <strong>√</strong> - Shellcode注入到任意地址，不能依赖硬编码的绝对地址</p>
+<p>4. <strong>√</strong> - VirtualAlloc在系统级分配，VirtualFree释放；HeapAlloc/HeapFree是堆管理</p>
+<p>5. <strong>√</strong> - INT 3改写代码段，可通过CRC校验、内存扫描等方式检测</p>
+<p>6. <strong>√</strong> - 硬件断点支持读、写、执行断点，软件断点只能断执行</p>
+<p>7. <strong>√</strong> - SEH是链表结构，新注册的挂在链头，异常时从链头开始遍历</p>
+<p>8. <strong>√</strong> - Trampoline包含代码（原始指令+跳转），必须有执行权限</p>
+<p>9. <strong>√</strong> - C语言没有name mangling，extern "C"是C++用来禁用名称修饰</p>
+<p>10. <strong>×</strong> - MSVC 64位不支持内联汇编，需要单独.asm文件或使用intrinsic</p>
+<hr>
+<h2>四、简答题答案</h2>
+<h3>1. __stdcall和__cdecl的区别</h3>
+<p><strong>主要区别：</strong></p>
+<p>| 对比项 | __stdcall | __cdecl | |--------|-----------|---------| | <strong>清栈方</strong> | 被调用者 | 调用者 | | <strong>ret形式</strong> | ret N（N=参数字节数） | ret | | <strong>可变参数</strong> | 不支持 | 支持 | | <strong>代码体积</strong> | 小（清栈代码只在被调用者一处） | 大（每个调用点都清栈） |</p>
+<p><strong>为什么可变参数只能用__cdecl：</strong></p>
+<p>可变参数函数（如<code>printf(fmt, ...)</code>）在编译时不知道参数个数，被调用者无法确定清栈字节数（ret N中的N无法确定）。只有调用者知道实际传了几个参数，所以必须由调用者清栈。</p>
+<p><strong>示例：</strong></p>
+<pre><code>
+printf(&quot;%d %s&quot;, 123, &quot;hello&quot;);  // 调用者知道传了3个参数（fmt + 2个可变参数）
+// 调用者生成：call printf; add esp, 12（清理3个DWORD）
+</code></pre>
+<h3>2. 通过PEB获取kernel32.dll基址</h3>
+<p><strong>完整路径：</strong></p>
+<pre><code>
+FS:[30h] → PEB → PEB_LDR_DATA (偏移+0x0C)
+         → InInitializationOrderModuleList
+         → 第1个模块（ntdll.dll）
+         → 第2个模块（kernel32.dll）
+         → DllBase字段 → kernel32基址
+</code></pre>
+<p><strong>为什么不能硬编码：</strong></p>
+<p>1. <strong>ASLR（地址空间布局随机化）</strong>：Windows Vista+启用ASLR后，kernel32每次加载到的地址都不同 2. <strong>不同系统版本</strong>：XP/Win7/Win10的kernel32基址各不相同 3. <strong>32位/64位差异</strong>：同一系统下32位和64位进程的地址空间完全独立</p>
+<p>硬编码地址只能在特定环境工作，Shellcode需要通用性，必须动态获取。</p>
+<h3>3. 软件断点和硬件断点对比</h3>
+<p><strong>软件断点（INT 3）：</strong></p>
+<ul>
+<li><strong>原理</strong>：替换目标地址首字节为0xCC（INT 3指令），触发异常时调试器接管，恢复原字节，单步执行，再写回0xCC</li>
+<li><strong>优点</strong>：数量无限制，实现简单</li>
+<li><strong>缺点</strong>：修改代码段内存，可被CRC校验、内存扫描检测；不能断ROM/只读内存</li>
+</ul>
+<p><strong>硬件断点（DR0~DR7）：</strong></p>
+<ul>
+<li><strong>原理</strong>：在DR0~DR3中写入地址，DR7配置触发条件（执行/读/写），CPU硬件监控，触发时产生调试异常</li>
+<li><strong>优点</strong>：不修改内存，无法被代码检测；支持数据断点（内存读写断点）</li>
+<li><strong>缺点</strong>：数量限制（最多4个）；可被反调试代码读取DR寄存器检测</li>
+</ul>
+<p><strong>选择建议</strong>：</p>
+<ul>
+<li>普通调试用软件断点（方便快捷）</li>
+<li>反调试保护强的程序用硬件断点</li>
+<li>监控数据变化必须用硬件断点</li>
+</ul>
+<h3>4. Inline Hook为什么需要trampoline</h3>
+<p><strong>问题分析：</strong></p>
+<p>Hook后的执行流：</p>
+<pre><code>
+调用者 → [MessageBoxA入口被改为JMP hook_func]
+      → hook_func执行
+      → 需要调用原始MessageBoxA？
+</code></pre>
+<p><strong>直接调用的问题：</strong></p>
+<p>如果在hook_func中直接<code>call MessageBoxA</code>，会跳到MessageBoxA入口，而入口已经被改成<code>JMP hook_func</code>，形成无限递归：</p>
+<pre><code>
+hook_func → call MessageBoxA
+          → JMP hook_func
+          → call MessageBoxA
+          → JMP hook_func
+          → （死循环）
+</code></pre>
+<p><strong>Trampoline的作用：</strong></p>
+<p>1. <strong>保存原始指令</strong>：将MessageBoxA入口被覆盖的5字节（或更多）复制到trampoline 2. <strong>跳回后续代码</strong>：在trampoline末尾跳转到MessageBoxA+5，绕过hook入口 3. <strong>调用trampoline</strong>：hook_func调用trampoline地址，等同于调用原始MessageBoxA</p>
+<p><strong>结构：</strong></p>
+<pre><code>
+; MessageBoxA原始入口（已被hook）：
+76A50000: E9 FB 0F BA 89    jmp 00401000  ; 跳到hook_func
+
+; Trampoline：
+00402000: 8B FF             mov edi, edi   ; 原始指令1
+00402002: 55                push ebp       ; 原始指令2
+00402003: 8B EC             mov ebp, esp   ; 原始指令3
+00402005: E9 F6 EF 65 76    jmp 76A50005   ; 跳回MessageBoxA+5
+</code></pre>
+<hr>
+<h2>五、代码阅读题答案</h2>
+<h3>1. 函数分析</h3>
+<ul>
+<li><strong>调用约定</strong>：__stdcall（ret 8，被调用者清栈8字节=2个参数）</li>
+<li><strong>参数个数</strong>：2个（[ebp+8]和[ebp+0Ch]）</li>
+<li><strong>局部变量空间</strong>：16字节（sub esp, 10h）</li>
+<li><strong>函数功能</strong>：计算两个参数的和，存入局部变量[ebp-4]，返回该和值</li>
+</ul>
+<p><strong>等价C代码：</strong></p>
+<pre><code>
+int __stdcall Add(int a, int b) {
+    int result = a + b;
+    return result;
+}
+</code></pre>
+<h3>2. Shellcode分析</h3>
+<ul>
+<li><strong>目的</strong>：实现位置无关代码（PIC），动态获取当前执行地址（EIP）</li>
+<li><strong>为什么不能直接mov</strong>：Shellcode注入到任意地址，编译时的<code>offset data</code>是相对于原始编译基址的，注入后失效。必须通过<code>call/pop</code>技巧获取运行时EIP</li>
+<li><strong>EBX最终指向</strong>：data标签的运行时地址</li>
+</ul>
+<p><strong>原理：</strong></p>
+<pre><code>
+call get_eip          ; 压入返回地址（下一条指令地址）到栈
+get_eip:
+pop ebx               ; EBX = 当前get_eip标签地址
+add ebx, offset_to_data  ; EBX += 相对偏移 → data的运行时地址
+</code></pre>
+<p>这是经典的GetPC（Program Counter）技巧，32位Shellcode必备。</p>
+<hr>
+<h2>六、编程题答案</h2>
+<pre><code>
+.386
+.model flat, stdcall
+option casemap:none
+
+.code
+
+MaxOfThree proc a:DWORD, b:DWORD, c:DWORD
+    push ebp
+    mov ebp, esp
+
+    mov eax, a              ; EAX = a
+    cmp eax, b              ; 比较 a 和 b
+    jge @check_c            ; 如果 a &gt;= b，检查c
+    mov eax, b              ; 否则 EAX = b
+
+@check_c:
+    cmp eax, c              ; 比较当前最大值和c
+    jge @done               ; 如果 &gt;= c，已经是最大值
+    mov eax, c              ; 否则 EAX = c
+
+@done:
+    pop ebp
+    ret 12                  ; stdcall清栈：3个参数 × 4字节 = 12
+
+MaxOfThree endp
+
+end
+</code></pre>
+<p><strong>评分标准：</strong></p>
+<ul>
+<li>建立栈帧（push ebp; mov ebp, esp）：2分</li>
+<li>比较逻辑正确（找出最大值）：5分</li>
+<li>ret 12（stdcall清理12字节）：2分</li>
+<li>返回值在EAX：1分</li>
+</ul>
+<p><strong>优化版本（使用CMOV指令，P6+）：</strong></p>
+<pre><code>
+MaxOfThree proc a:DWORD, b:DWORD, c:DWORD
+    mov eax, a
+    mov edx, b
+    cmp eax, edx
+    cmovl eax, edx          ; 如果 a &lt; b，EAX = b
+    mov edx, c
+    cmp eax, edx
+    cmovl eax, edx          ; 如果 max(a,b) &lt; c，EAX = c
+    ret 12
+MaxOfThree endp
+</code></pre>
+<hr>
+<h2>七、综合分析题答案</h2>
+<h3>1. 计算跳转指令机器码（5分中的2分）</h3>
+<p><strong>计算过程：</strong></p>
+<pre><code>
+目标地址（hook函数）：0x00401000
+JMP指令地址：0x76A50000
+rel32 = 目标地址 - (JMP地址 + 5)
+      = 0x00401000 - 0x76A50005
+      = 0x899B0FFB  （补码表示的负数）
+</code></pre>
+<p><strong>机器码（小端序）：</strong></p>
+<pre><code>
+E9 FB 0F 9B 89
+</code></pre>
+<ul>
+<li>E9：JMP rel32操作码</li>
+<li>FB 0F 9B 89：0x899B0FFB的小端序表示</li>
+</ul>
+<h3>2. Trampoline内容（2分）</h3>
+<pre><code>
+; Trampoline @ 0x00402000
+00402000: 8B FF             mov edi, edi   ; 原始指令1（2字节）
+00402002: 55                push ebp       ; 原始指令2（1字节）
+00402003: 8B EC             mov ebp, esp   ; 原始指令3（2字节）
+00402005: E9 F6 EF 65 76    jmp 0x76A50005 ; 跳回MessageBoxA+5
+</code></pre>
+<p><strong>要点：</strong></p>
+<ul>
+<li>复制被覆盖的5字节原始指令</li>
+<li>末尾跳转回MessageBoxA+5（绕过hook入口）</li>
+<li>计算：0x76A50005 - (0x00402005 + 5) = 0x7664EFF6</li>
+</ul>
+<h3>3. MOV EAX, 1的hook问题（2分）</h3>
+<p><strong>答案：没有问题</strong></p>
+<p><code>B8 01 00 00 00</code>是一条完整的5字节指令，指令边界对齐，直接覆盖不会切断指令。</p>
+<p><strong>但需注意：</strong></p>
+<ul>
+<li>这条指令被完全覆盖，trampoline中需要包含这5字节</li>
+<li>如果后续指令有跳转到MessageBoxA+1~+4的情况（非常罕见），会跳入JMP指令中间，导致CPU解码错误</li>
+</ul>
+<h3>4. 包含RET的hook问题（2分）</h3>
+<p><strong>答案：不能安全hook</strong></p>
+<pre><code>
+8B 44 24 04    mov eax, [esp+4]  ; 4字节
+C3             ret                ; 1字节
+</code></pre>
+<p><strong>问题：</strong></p>
+<ul>
+<li>前5字节包含一条完整的RET指令</li>
+<li>如果覆盖这5字节，RET被破坏，函数无法正常返回</li>
+<li>Trampoline执行<code>mov eax, [esp+4]</code>后遇到被破坏的RET，会继续执行后续代码（本应返回）</li>
+</ul>
+<p><strong>解决方案：</strong></p>
+<ul>
+<li>识别到短函数（含RET），选择hook更靠后的位置</li>
+<li>或者在trampoline中手动重建返回逻辑（复杂）</li>
+</ul>
+<h3>5. 多线程Hook安全性（2分）</h3>
+<p><strong>问题：原子性缺失</strong></p>
+<p>写入5字节不是原子操作：</p>
+<pre><code>
+时刻T1：写入 E9（JMP操作码）
+时刻T2：线程B执行到此，读到 E9 + 旧的4字节偏移 → 跳到错误地址 → 崩溃
+时刻T3：写入完整的rel32偏移
+</code></pre>
+<p><strong>解决方案：</strong></p>
+<p>1. <strong>暂停所有线程</strong>：</p>
+<pre><code>
+   SuspendThread(hThread);  // 暂停其他线程
+   WriteProcessMemory(...); // 写入hook
+   ResumeThread(hThread);   // 恢复线程
+</code></pre>
+<p>2. <strong>原子替换（热补丁技术）</strong>：</p>
+<ul>
+<li>先在目标函数前插入2字节短跳转槽位：<code>EB F9</code>（jmp $-5）</li>
+<li>在函数-5位置写入长跳转：<code>E9 xx xx xx xx</code></li>
+<li>最后原子修改函数入口2字节为<code>EB F9</code>（跳到-5处的长跳转）</li>
+<li>2字节写入在x86上是原子的（对齐的WORD写入）</li>
+</ul>
+<p>3. <strong>硬件断点替代</strong>（临时hook）：</p>
+<ul>
+<li>设置DR0为目标函数地址，DR7配置执行断点</li>
+<li>异常处理器中劫持执行流</li>
+<li>不修改代码段，无原子性问题</li>
+</ul>
+<hr>
+<h2>知识点覆盖清单</h2>
+<h3>✅ 01-基础与环境</h3>
+<ul>
+<li>MASM工具链（ml.exe/link.exe）</li>
+<li>汇编与链接流程</li>
+<li>.obj/.lib文件格式</li>
+<li>includelib机制</li>
+</ul>
+<h3>✅ 02-调用约定与寄存器</h3>
+<ul>
+<li>四种调用约定（stdcall/cdecl/fastcall/pascal）</li>
+<li>寄存器分类（Caller-Saved/Callee-Saved）</li>
+<li>栈帧结构（EBP/ESP/参数/局部变量）</li>
+<li>标志位传递与控制流</li>
+</ul>
+<h3>✅ 03-指令集速查</h3>
+<ul>
+<li>数据传送指令（MOV/PUSH/POP/LEA）</li>
+<li>算术指令（ADD/SUB/MUL/DIV/CMP）</li>
+<li>位运算（AND/OR/XOR/SHL/SHR）</li>
+<li>控制转移（JMP/CALL/RET/Jcc）</li>
+</ul>
+<h3>✅ 04-Shellcode</h3>
+<ul>
+<li>unsigned char数组存储</li>
+<li>VirtualAlloc/VirtualProtect</li>
+<li>PEB遍历获取kernel32</li>
+<li>导出表解析（AddressOfFunctions/AddressOfNames）</li>
+<li>位置无关代码（PIC）技巧</li>
+</ul>
+<h3>✅ 05-混合编程</h3>
+<ul>
+<li>C调用汇编（extern/proto）</li>
+<li>汇编调用C（extrn/invoke）</li>
+<li>extern "C"与name mangling</li>
+<li>__declspec(naked)裸函数</li>
+<li>内联汇编（__asm块）</li>
+</ul>
+<h3>✅ 06-调试与异常</h3>
+<ul>
+<li>OllyDbg界面与快捷键</li>
+<li>软件断点（INT 3）原理</li>
+<li>硬件断点（DR0~DR7）</li>
+<li>SEH异常处理链（FS:[0]）</li>
+<li>反调试技术（IsDebuggerPresent/PEB.BeingDebugged）</li>
+</ul>
+<h3>✅ 07-作业实战</h3>
+<ul>
+<li>Inline Hook原理</li>
+<li>Trampoline构建</li>
+<li>相对跳转计算（rel32）</li>
+<li>指令边界对齐</li>
+<li>多线程Hook安全性</li>
+</ul>
+<p><strong>考卷覆盖率：100%</strong></p>
+<p>建议复习路径：先做考卷 → 对照答案 → 标记错题 → 回到对应笔记章节深入学习 → 重做错题！</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

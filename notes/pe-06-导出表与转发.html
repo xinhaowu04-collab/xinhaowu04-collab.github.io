@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>导出表与函数转发 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">导出表与函数转发</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>导出表与函数转发</h1>
+<p>导出表（Export Table）描述一个 PE 映像向外提供的符号，最常见于 DLL，但 EXE 同样可以拥有导出表。</p>
+<p>| 对象 | 回答的问题 | |---|---| | 导入表 | 当前程序需要哪些外部 DLL 和函数 | | 导出表 | 当前模块向其他模块提供哪些函数或数据 |</p>
+<h2>导出表结构与三张核心表</h2>
+<p>PE 文件总体布局：</p>
+<pre><code>
+IMAGE_DOS_HEADER
+MS-DOS Stub
+IMAGE_NT_HEADERS（Signature + IMAGE_FILE_HEADER + IMAGE_OPTIONAL_HEADER32 + DataDirectory[]）
+IMAGE_SECTION_HEADER[]
+SectionData[]
+Extra Data / Overlay（若存在）
+</code></pre>
+<p>导出表入口位于 <code>OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT]</code>（索引 0），<code>VirtualAddress</code> 是导出目录 RVA，<code>Size</code> 是范围字节数。</p>
+<p>注意：数据目录通常使用 RVA，但安全目录（证书目录）是特例，其"地址"具有文件偏移语义。</p>
+<p>真正的导出表头：</p>
+<pre><code>
+typedef struct _IMAGE_EXPORT_DIRECTORY {
+    DWORD Characteristics;
+    DWORD TimeDateStamp;
+    WORD  MajorVersion;
+    WORD  MinorVersion;
+    DWORD Name;                  // 模块名称字符串 RVA
+    DWORD Base;                  // 导出序号基准
+    DWORD NumberOfFunctions;     // EAT 项数
+    DWORD NumberOfNames;         // 有名称的导出数量
+    DWORD AddressOfFunctions;    // EAT RVA，DWORD 数组
+    DWORD AddressOfNames;        // 名称 RVA 数组的 RVA，DWORD 数组
+    DWORD AddressOfNameOrdinals; // 名称对应 EAT 下标数组的 RVA，WORD 数组
+} IMAGE_EXPORT_DIRECTORY, *PIMAGE_EXPORT_DIRECTORY;
+</code></pre>
+<p><code>Base</code>、<code>NumberOfFunctions</code>、<code>NumberOfNames</code>、<code>AddressOfFunctions</code>、<code>AddressOfNames</code>、<code>AddressOfNameOrdinals</code> 是核心字段；其余为版本/时间戳/名称等元数据，不参与名称/序号解析主链。这些字段在文件中都可被修改，但修改核心计数、RVA 或 <code>Name</code> 可能改变解析结果，甚至导致文件无法解析。</p>
+<p>三张核心表：</p>
+<p>| 表 | 元素大小 | 内容 | |---|---:|---| | 函数地址表 EAT（<code>AddressOfFunctions</code>） | <code>DWORD</code> | 函数 RVA、数据 RVA、空洞 0 或转发字符串 RVA | | 名称指针表（<code>AddressOfNames</code>） | <code>DWORD</code> | 导出名称字符串的 RVA | | 名称序号表（<code>AddressOfNameOrdinals</code>） | <code>WORD</code> | 对应名称的 EAT 下标 |</p>
+<h3>按序号查找</h3>
+<pre><code>
+EAT 下标 = Ordinal - Base
+函数 RVA = AddressOfFunctions[EAT 下标]
+</code></pre>
+<p>边界：EAT 下标必须 <code>< NumberOfFunctions</code>；EAT 项为 0 是序号空洞，不对应有效导出。人为指定的导出序号不连续时，<code>Base</code> 到最大序号之间仍要保留 EAT 下标位置，因此出现填 0 的空洞，造成空间浪费。</p>
+<h3>按名称查找</h3>
+<p>名称表顺序与 EAT 顺序不是同一套索引，不能直接用"名称表下标"访问 EAT。正确链路：</p>
+<pre><code>
+函数名 → 在 AddressOfNames 中找到下标 i
+→ AddressOfNameOrdinals[i] 得 EAT 下标
+→ AddressOfFunctions[EAT 下标] = 函数 RVA
+→ 序号 = Base + EAT 下标
+</code></pre>
+<p>名称指针表通常按字典序组织，可以二分查找；课堂演示代码用遍历加 <code>strcmp</code>。</p>
+<h3>序号与名称的关系</h3>
+<ul>
+<li><strong>所有非空 EAT 项都有序号：<code>Ordinal = Base + EATIndex</code>；只有部分 EAT 项额外拥有名称。</strong></li>
+<li>"名称导出"和"序号导出"不是严格二选一：有名称的函数也可按序号获取；没有名称映射的非空 EAT 项才是"仅按序号导出"。</li>
+<li><code>NumberOfFunctions</code> 是 EAT 槽位数量（可能含 0 空洞），<code>NumberOfNames</code> 是名称表/名称序号表的有效项数量。建完整导出列表应以 <code>NumberOfFunctions</code> 遍历 EAT，再用名称表给相应行补名字；只遍历 <code>NumberOfNames</code> 会漏掉仅按序号导出的项。</li>
+</ul>
+<h3>课堂示意示例</h3>
+<p>以下三张表来自课堂代码注释，为示意数据（与后文实测数据数值不同，结构关系一致）：</p>
+<pre><code>
+EAT：        0:0x1000  1:0x100B  2:0x6030  3:0x581F→&quot;user32.MessageBoxA&quot;  4:0x580A→&quot;kernel32.#388&quot;
+名称表：     0:ExitProcess  1:MsgBox  2:MyAdd  3:g_num
+名称序号表： 0→4  1→3  2→0  3→2
+</code></pre>
+<p>| 名称 | EAT 下标 | EAT 内容 | 结论 | |---|---:|---|---| | <code>ExitProcess</code> | 4 | <code>0x580A</code> | 转发到 <code>kernel32.#388</code> | | <code>MsgBox</code> | 3 | <code>0x581F</code> | 转发到 <code>user32.MessageBoxA</code> | | <code>MyAdd</code> | 0 | <code>0x1000</code> | 普通 RVA | | <code>g_num</code> | 2 | <code>0x6030</code> | 名字暗示为数据导出，需实际 DLL 确认 | | 无名称 | 1 | <code>0x100B</code> | 仅按序号导出的候选项 |</p>
+<p>小例子：<code>Base = 1</code>，<code>AddressOfNames[0] → "Demo"</code>，<code>AddressOfNameOrdinals[0] = 1</code>，<code>AddressOfFunctions[1] = 0x5678</code>，则 Demo 的 EAT 下标为 1、导出序号为 <code>1 + 1 = 2</code>、函数 RVA 为 <code>0x5678</code>。</p>
+<h3>易错点</h3>
+<p>| 误区 | 正解 | |---|---| | <code>DataDirectory[0]</code> 就是完整导出表 | 它只是含 RVA 和 Size 的入口，先定位再读 <code>IMAGE_EXPORT_DIRECTORY</code> | | <code>AddressOfNameOrdinals[i]</code> 是最终导出序号 | 它是 EAT 下标，最终序号是 <code>Base + 下标</code> | | <code>DataDirectory.Size</code> 可作函数循环次数 | 它是字节范围，循环上限应为 <code>NumberOfFunctions</code> | | EAT 项一定是函数代码 RVA | 也可能是数据导出、0 空洞或转发字符串 RVA |</p>
+<h2>函数转发与手工 MyGetProcAddress</h2>
+<p>函数转发（Forwarded Export）指 EAT 项不直接指向本模块代码，而是指向导出目录中的字符串：</p>
+<pre><code>
+库名.函数名   例如 user32.MessageBoxA
+库名.#序号    例如 kernel32.#388
+</code></pre>
+<p>判断条件（半开区间）：</p>
+<pre><code>
+ExportRVA &lt;= FunctionRVA &lt; ExportRVA + ExportSize
+</code></pre>
+<p>普通导出时 <code>真实函数 VA = 模块基址 + 函数 RVA</code>；转发导出时该位置是字符串，不能当函数调用，必须：读转发字符串 → 拆成目标 DLL + 目标名称/序号 → 加载目标 DLL → 在目标 DLL 中重复导出解析，直到得到普通函数 RVA。</p>
+<p><code>return MyGetProcAddress(hDll, FuncName);</code> 属于递归——函数尚未返回时又调用自身；运行效果就是换目标 DLL 和名称后重新执行一遍解析流程。终止条件是遇到普通函数 RVA：<code>return (FARPROC)((char*)hModule + Rva);</code></p>
+<p>调用栈示例：</p>
+<pre><code>
+第1层：MyGetProcAddress(MyDll, &quot;MsgBox&quot;)  发现 &quot;user32.MessageBoxA&quot;
+第2层：MyGetProcAddress(user32, &quot;MessageBoxA&quot;)  找到普通代码 RVA，返回真实地址
+第1层：直接把第2层结果返回给原调用者
+</code></pre>
+<h3>解析步骤</h3>
+<p>验证 PE 头（<code>'ZM'</code> 是小端下 <code>MZ</code> 的整数写法，<code>0x00004550</code> 对应 <code>PE\0\0</code>）：</p>
+<pre><code>
+IMAGE_DOS_HEADER* DosHeader = (IMAGE_DOS_HEADER*)hModule;
+if (DosHeader-&gt;e_magic != &#x27;ZM&#x27;) {
+    return NULL;
+}
+IMAGE_NT_HEADERS* NtHeader =
+    (IMAGE_NT_HEADERS*)((char*)hModule + DosHeader-&gt;e_lfanew);
+if (NtHeader-&gt;Signature != 0x00004550) {
+    return NULL;
+}
+</code></pre>
+<p>定位导出表和三张表（前提是 <code>hModule</code> 指向已加载模块）：</p>
+<pre><code>
+IMAGE_DATA_DIRECTORY* Directory =
+    &amp;NtHeader-&gt;OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+IMAGE_EXPORT_DIRECTORY* ExportTable =
+    (IMAGE_EXPORT_DIRECTORY*)((char*)hModule + Directory-&gt;VirtualAddress);
+DWORD* AddressOfFunctions = (DWORD*)((char*)hModule + ExportTable-&gt;AddressOfFunctions);
+DWORD* AddressOfNames     = (DWORD*)((char*)hModule + ExportTable-&gt;AddressOfNames);
+WORD*  AddressOfNameOrdinals = (WORD*)((char*)hModule + ExportTable-&gt;AddressOfNameOrdinals);
+</code></pre>
+<p>按序号查询（<code>HIWORD(lpProcName) == 0</code> 表示低 16 位携带序号）：</p>
+<pre><code>
+DWORD index = LOWORD(lpProcName) - ExportTable-&gt;Base;
+if (index &gt;= ExportTable-&gt;NumberOfFunctions) {
+    return NULL;
+}
+return (FARPROC)((char*)hModule + AddressOfFunctions[index]);
+</code></pre>
+<p>按名称查询并处理转发：</p>
+<pre><code>
+for (DWORD i = 0; i &lt; ExportTable-&gt;NumberOfNames; ++i) {
+    const char* currentName = (char*)hModule + AddressOfNames[i];
+    if (strcmp(currentName, lpProcName) != 0) {
+        continue;
+    }
+    DWORD eatIndex = AddressOfNameOrdinals[i];
+    DWORD functionRva = AddressOfFunctions[eatIndex];
+    if (functionRva &gt;= Directory-&gt;VirtualAddress &amp;&amp;
+        functionRva &lt; Directory-&gt;VirtualAddress + Directory-&gt;Size) {
+        // 读取 &quot;DLL.Function&quot; 或 &quot;DLL.#Ordinal&quot;，加载目标 DLL 并递归解析
+    } else {
+        return (FARPROC)((char*)hModule + functionRva);
+    }
+}
+</code></pre>
+<p>转发字符串中 <code>.</code> 之后以 <code>#</code> 开头则按序号再次查询，否则按函数名再次查询：</p>
+<pre><code>
+if (*FuncName == &#x27;#&#x27;) {
+    DWORD order = strtoul(FuncName + 1, NULL, 10);
+    return MyGetProcAddress(hDll, (LPCSTR)order);
+}
+return MyGetProcAddress(hDll, FuncName);
+</code></pre>
+<h3>课堂代码的边界问题</h3>
+<p>1. <code>LoadLibraryA</code> 只负责获得目标模块，不能把转发字符串自动变成函数指针，仍需继续解析导出表。 2. 范围判断应用半开区间：课堂代码写 <code>Rva <= ExportRVA + Size</code>，严谨写法是 <code>< ExportRVA + Size</code>，末端地址不属于范围。 3. 课堂代码按序号分支没有处理转发：若按序号查到的 EAT 项指向转发字符串，直接返回 <code>hModule + RVA</code> 会把字符串地址当函数地址。完整实现应让两个分支最终进入统一的"普通 RVA / 转发 RVA"判断。 4. 转发链可能不止一层，甚至出现循环转发（<code>A.Func → B.Func → A.Func</code>）：防御性实现应考虑最大深度或已访问集合，课堂代码未实现。 5. 若最终仍调用系统 <code>GetProcAddress</code>，系统会处理许多兼容细节；课堂用递归 <code>MyGetProcAddress</code> 是为了演示自己完成解析。</p>
+<h2>HideApiCall 与 EAT Hook</h2>
+<p>课堂函数 <code>HideApiCall()</code> 的实质不是"让 API 从系统消失"，而是在当前进程内修改 <code>USER32!MessageBoxA</code> 的 EAT 项，使之后通过导出表解析得到的地址变成自定义 <code>Show</code>——这是 <strong>EAT Hook</strong>（修改提供方模块的 Export Address Table）。</p>
+<p>| 项目 | EAT Hook | IAT Hook | |---|---|---| | 修改位置 | 导出模块的 EAT | 某个调用模块的 IAT | | 主要影响 | 后续按导出表解析的结果（如 <code>GetProcAddress</code> 查询） | 已通过该 IAT 槽调用的路径 | | 已保存的函数指针 | 通常不会自动改变 | 若调用走被改 IAT，则受影响 | | 作用范围 | 当前进程中该映像视图的解析路径 | 通常限于被修改的导入模块/槽位 | | 检测思路 | 内存 EAT 与可信 EAT 对比 | IAT 目标与预期模块/导出对比 |</p>
+<p>EAT 保存 RVA，要让 <code>GetProcAddress(user32, "MessageBoxA")</code> 返回 <code>Show</code>，写入值为 <code>Show 的 VA - user32 模块基址</code>；解析时 <code>基址 + (Show VA - 基址) = Show VA</code>。<code>VirtualProtect</code> 暂时让 EAT 页可写，改完恢复原保护；<code>g_OldRva</code> 保存原值供 <code>UnHideApiCall()</code> 恢复现场。</p>
+<p>核心流程：</p>
+<pre><code>
+HMODULE hModule = LoadLibraryA(&quot;USER32&quot;);
+// 解析 user32 导出表，遍历名称表找到 &quot;MessageBoxA&quot;
+DWORD* eatEntry = &amp;AddressOfFunctions[AddressOfNameOrdinals[i]];
+
+DWORD oldProtect = 0;
+VirtualProtect(eatEntry, 0x1000, PAGE_READWRITE, &amp;oldProtect);
+g_OldRva = *eatEntry;
+*eatEntry = (DWORD)Show - (DWORD)hModule;
+VirtualProtect(eatEntry, 0x1000, oldProtect, &amp;oldProtect);
+</code></pre>
+<p>注意：课堂代码中该指针变量名叫 <code>Rva</code>，它实际是"EAT 项在内存中的地址"（<code>DWORD*</code>），<code>*Rva</code> 才是 EAT 中保存的函数 RVA，命名容易误导。</p>
+<p>恢复现场：</p>
+<pre><code>
+VirtualProtect(eatEntry, 0x1000, PAGE_READWRITE, &amp;oldProtect);
+*eatEntry = g_OldRva;
+VirtualProtect(eatEntry, 0x1000, oldProtect, &amp;oldProtect);
+</code></pre>
+<p>课堂 <code>Show</code> 原为 <code>void __stdcall Show(int,int,int,int)</code>，为匹配调用者声明的 <code>int (__stdcall*)(int,int,int,int)</code>，应改为返回 <code>int</code> 并 <code>return 0</code>。</p>
+<h3>IAT 反查</h3>
+<p>"已知函数地址，反向查找所属模块及函数名称"：</p>
+<pre><code>
+IAT 中的运行时地址 → 找地址落在哪个已加载模块 → 解析该模块导出表
+→ 与普通导出函数地址匹配 → 得到候选模块名/函数名
+</code></pre>
+<p>函数转发、多个导出名称共享地址、Hook、导出变量、"地址落在函数中间而非入口"都会造成歧义。防守分析时应同时保留：原始导入名称（若还存在）、转发链、最终实现模块与地址。</p>
+<h3>易错点</h3>
+<p>| 说法 | 条件与修正 | |---|---| | <code>HideApiCall</code> 会隐藏所有 MessageBoxA 调用 | 不会。不改已填好的 IAT 或已保存的函数指针，只影响之后按 EAT 解析的路径 | | 它修改了系统磁盘 DLL | 课堂代码改的是当前进程内存映像，不改磁盘文件，其他进程不受影响 | | EAT Hook 等于 IAT Hook | 修改对象、作用范围和观察时机都不同 | | 返回地址在模块外就一定恶意 | 合法函数转发最终会落到其他模块，必须先识别转发链 | | 返回地址在模块内就一定正常 | 攻击者可能指向模块内部跳板或代码洞，简单范围检查会漏报 | | 导出表一定比导入表可靠 | 导入描述符可被擦除伪造，EAT 也可被改，二者都不是绝对可信，应建独立基线 |</p>
+<h3>分层检测思路</h3>
+<pre><code>
+第 1 层：地址范围检查（返回地址是否落在预期模块）→ 发现明显重定向
+第 2 层：内存 EAT 与可信 EAT 逐项比较 → 发现模块内部跳板型 EAT 修改
+第 3 层：函数入口代码/最终控制流检查 → 发现 EAT 未改但入口被改的 Inline Hook
+</code></pre>
+<p>ASLR 通常不妨碍比较 EAT 原始 RVA，但转发项必须单独识别；热补丁、合法安全产品 Hook、磁盘文件是否可信都可能影响结论。</p>
+<h2>磁盘 PE 与内存映像的地址边界</h2>
+<p>| 地址 | 含义 | 使用场景 | |---|---|---| | RVA | 相对映像基址的偏移 | 数据目录、EAT、名称表、序号表中的地址 | | VA | 进程虚拟地址 | 已加载模块中访问结构和函数 | | FOA | 文件中的偏移 | 从磁盘文件字节中读取结构 |</p>
+<pre><code>
+VA  = 实际模块基址 + RVA
+FOA = Section.PointerToRawData + (RVA - Section.VirtualAddress)
+若 RVA &lt; SizeOfHeaders，则 FOA = RVA
+</code></pre>
+<p><code>MyGetProcAddress</code> 接收 <code>HMODULE</code>（已被加载器按内存布局映射），可直接 <code>hModule + RVA</code>；Qt 工具读的是 <code>QByteArray m_fileData</code>（磁盘原始布局），不能把 RVA 直接当下标，也不能用首选 <code>ImageBase + RVA</code> 构造可解引用指针——必须先转 FOA。</p>
+<p>数值示例（示意）：导出目录 RVA <code>0x3000</code>、Size <code>0x0200</code>，<code>.edata</code> 节 <code>VirtualAddress = 0x3000</code>、<code>PointerToRawData = 0x0A00</code>，则导出表 FOA = <code>0x0A00 + (0x3000 - 0x3000) = 0x0A00</code>，用 <code>m_fileData.constData() + 0x0A00</code> 读取。首选 <code>ImageBase = 0x00400000</code> 时首选 VA 为 <code>0x00403000</code>，但受 ASLR 影响，磁盘工具算出的首选 VA 不一定是实际运行时 VA。</p>
+<p>转换函数核心思路：</p>
+<pre><code>
+if (rva &lt; m_ntHander.OptionalHeader.SizeOfHeaders) {
+    foa = rva;
+    return true;
+}
+for (const auto&amp; section : m_sections) {
+    if (rva &gt;= section.VirtualAddress &amp;&amp;
+        rva &lt; section.VirtualAddress + section.SizeOfRawData) {
+        foa = section.PointerToRawData + (rva - section.VirtualAddress);
+        return true;
+    }
+}
+return false;
+</code></pre>
+<h3>易错点</h3>
+<p>1. 字段名叫 <code>VirtualAddress</code> 不等于绝对 VA，数据目录中它保存 RVA。 2. <code>ImageBase + RVA</code> 只得到 VA，不得到文件指针；文件解析必须先得 FOA。 3. <code>RvaToFov</code> 中的 <code>Fov</code> 是项目命名，概念上指 FOA，建议统一命名。 4. 文件型解析节范围看 <code>SizeOfRawData</code>（文件中真实可读字节数），不能拿对齐值当文件长度。 5. 函数 RVA 不一定可转换为代码 FOA：转发导出指向字符串、0 是空洞、导出数据可能在非代码节。 6. <code>RvaToFov</code> 原为 <code>void</code> 时转换失败会留下旧值，用于导出解析前应改成 <code>bool</code> 并在失败时停止。</p>
+<h2>导出表解析流程与实测示例</h2>
+<p>解析顺序：</p>
+<pre><code>
+DataDirectory[0]
+→ IMAGE_EXPORT_DIRECTORY
+→ EAT（按 NumberOfFunctions 建全部结果）
+→ Names + NameOrdinals（回填名称和名称 RVA）
+→ 判断转发器
+</code></pre>
+<p>必须先遍历 EAT：<code>NumberOfFunctions</code> 决定完整 EAT 长度，名称表只覆盖部分导出；纯序号导出没有名称，但仍有 EAT 下标和导出序号。<code>NameOrdinals</code> 是 <code>WORD</code>，表示 EAT 下标而非最终序号；EAT target 可能是函数、变量、转发字符串或 0 空槽。</p>
+<p>转发判断（AND 条件，缺一不可，不能写成 OR）：</p>
+<pre><code>
+functionRva != 0
+&amp;&amp; functionRva &gt;= ExportRVA
+&amp;&amp; functionRva &lt; ExportRVA + ExportSize
+</code></pre>
+<p>结果结构体：</p>
+<pre><code>
+struct ExportFunctionInfo
+{
+    DWORD eatIndex;
+    DWORD eatEntryFoa;
+    DWORD ordinal;
+    DWORD functionRva;
+    DWORD nameRva;
+    QString name;
+    QString forwarder;
+};
+</code></pre>
+<p>读取字符串用 <code>fileData.constData() + nameFoa</code>，不能把 <code>nameFoa</code> 整数强转成 <code>char*</code>；<code>nameRva</code> 保存 Names 表中的原始 RVA，不保存转换后的 FOA。前端 EAT 下标和导出序号用十进制（<code>QString::number</code>），EAT 项 FOA、函数 RVA、名称 RVA 用十六进制。</p>
+<p>注意：<code>NameOrdinals</code> 必须按 <code>WORD</code> 读取；<code>QString</code> 空值用空对象初始化，不要用整数 0；<code>QVector</code> 必须 <code>resize</code> 或 <code>append</code> 后才能按下标写入。</p>
+<p>实测数据（样例 DLL，导出目录起点 FOA <code>0x41A0</code>）：</p>
+<p>| 字段 | FOA | 值 | |---|---:|---:| | Characteristics | 0x41A0 | 0 | | TimeDateStamp | 0x41A4 | 0x6A697AE9 | | MajorVersion | 0x41A8 | 0 | | MinorVersion | 0x41AA | 0 | | Name | 0x41AC | 0x57F8 | | Base | 0x41B0 | 0x3E8 | | NumberOfFunctions | 0x41B4 | 6 | | NumberOfNames | 0x41B8 | 4 | | AddressOfFunctions | 0x41BC | 0x57C8 | | AddressOfNames | 0x41C0 | 0x57E0 | | AddressOfNameOrdinals | 0x41C4 | 0x57F0 |</p>
+<p>EAT 解析结果（<code>Base = 0x3E8 = 1000</code>）：</p>
+<p>| EAT 下标 | EAT 项 FOA | 导出序号 | target RVA | 名称 RVA | 名称 | 转发器 | |---:|---:|---:|---:|---:|---|---| | 0 | 0x41C8 | 1000 | 0x1000 | 0x5836 | MyAdd | 空 | | 1 | 0x41CC | 1001 | 0x1011 | 无 | 空 | 空 | | 2 | 0x41D0 | 1002 | 0x6030 | 0x583C | g_num | 空 | | 3 | 0x41D4 | 1003 | 0x5823 | 0x581C | MsgBox | user32.MessageBoxA | | 4 | 0x41D8 | 1004 | 0 | 无 | 空 | 空 | | 5 | 0x41DC | 1005 | 0x580E | 0x5802 | ExitProcess | kernel32.#388 |</p>
+<p><code>g_num</code> 是导出变量；<code>MsgBox</code> 和 <code>ExitProcess</code> 是转发导出；EAT 下标 1 是仅序号导出，下标 4 是空槽。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

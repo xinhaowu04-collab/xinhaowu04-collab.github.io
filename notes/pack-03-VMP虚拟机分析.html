@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VMP 虚拟机分析 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">VMP 虚拟机分析</h1>
+<div class="meta"><span class="cat">壳与脱壳</span></div>
+<article>
+<h1>VMP 虚拟机分析</h1>
+<p>环境：Windows 11 x64 主机、x32dbg 调试器、VMProtect 3.5.1 保护的 32 位控制台 crackme。目标是 32 位程序运行在 64 位 Windows 上，进程属于 WOW64。文中地址和解密常数均来自本次样本，不可直接套到别的样本。</p>
+<h2>分析目标与源码范围</h2>
+<p>最初卡在反调试阶段，老师提示「源码是公开的，可以从源码下手」。「从源码下手」不是先把整个 VMProtect 工程编译出来，而是用源码回答三个问题：</p>
+<p>1. 样本启动时具体检查了哪些调试状态； 2. 这些检查走普通 <code>ntdll</code> API，还是直接系统调用； 3. 调试器插件为什么显示注入成功，却仍可能过不了反调试。</p>
+<p>从 <code>SetupImage()</code> 源码中抽取的用户态核心链路：</p>
+<pre><code>
+解析系统调用号
+    → PEB-&gt;BeingDebugged
+    → ProcessDebugPort
+    → ProcessDebugObjectHandle
+    → ThreadHideFromDebugger
+</code></pre>
+<p>删减原则：保持原版语句、判断顺序和变量用法，只删除与核心链路无关的代码；不以能够单独编译为目标；注释改成中文。它应称为「原版源码摘录」，既不是可编译的最小项目，也不是教学重写。</p>
+<p>删减边界：</p>
+<p>1. 保留 <code>sc_close</code>、<code>sc_query_information_process</code>、<code>sc_set_information_thread</code> 的解析； 2. 保留 WOW64 下对系统调用号的截断和参数编码； 3. 保留 <code>LOADER_OPTION_CHECK_DEBUGGER</code> 下的四个核心检查； 4. 保留普通 API 回退分支，系统调用号解析失败时会走这里； 5. 删除无关的映像加载、解密、重定位、导入修复等加载器业务； 6. 完整性检查、异常类反调试等暂未逐行分析的部分只登记，不假装已分析完。</p>
+<p>直接盯着加壳后的入口单步，会同时面对重叠指令、虚拟机初始化、滚动密钥和反调试异常。源码先提供一张检查清单，再回到动态调试逐项验证。但源码只能说明「可能有哪些路径」，实际走哪条仍要由寄存器、返回值和断点命中确认。</p>
+<p>容易误解的点：</p>
+<p>| 容易误解的说法 | 修正 | |---|---| | 「源码公开，所以不用动态分析了」 | 源码只帮助列出机制；实际分支、系统调用号和插件覆盖情况仍需动态确认 | | 「删减版就是重新写个同功能示例」 | 保留原版代码仅删无关内容；教学重写会改变源码结构，不能冒充原版删减 | | 「不考虑编译，所以代码顺序可以随便改」 | 可以缺少声明和外围上下文，但核心语句的顺序、条件和异常判断应保持原版 | | 「只剩四项，因此原版只有四种反调试」 | 四项只是优先抽取的用户态核心；完整源码还有异常、断点、硬件调试寄存器、完整性等检查 |</p>
+<h2>系统调用号与 WOW64</h2>
+<p>原版代码先从一份复制出来的 <code>ntdll</code> 中查找函数，再从函数入口解析系统调用号：</p>
+<pre><code>
+sc_query_information_process = LoaderParseSyscall(
+    LoaderGetProcAddress(
+        (HMODULE)copy_ntdll,
+        reinterpret_cast&lt;const char *&gt;(FACE_NT_QUERY_INFORMATION_PROCESS_NAME),
+        true));
+
+sc_set_information_thread = LoaderParseSyscall(
+    LoaderGetProcAddress(
+        (HMODULE)copy_ntdll,
+        reinterpret_cast&lt;const char *&gt;(FACE_NT_SET_INFORMATION_THREAD_NAME),
+        true));
+</code></pre>
+<p>| 变量 | 对应系统服务 | 反调试用途 | |---|---|---| | <code>sc_query_information_process</code> | <code>NtQueryInformationProcess</code> | 查询当前进程的调试端口和调试对象 | | <code>sc_set_information_thread</code> | <code>NtSetInformationThread</code> | 对当前线程设置 <code>ThreadHideFromDebugger</code> | | <code>sc_close</code> | <code>NtClose</code> | 四项核心之外，被后续异常行为检查和 WOW64 编码条件使用 |</p>
+<p><code>LoaderGetProcAddress</code> 是 VMProtect 自己实现的导出表查找；<code>LoaderParseSyscall</code> 从函数入口机器码取得系统调用号。<code>copy_ntdll</code> 是从磁盘映射或复制的干净 <code>ntdll</code>，区别于当前进程里可能已被插件 Hook 的那份。</p>
+<p>普通调用路径与直接系统调用路径：</p>
+<pre><code>
+普通：保护代码 → 当前进程 ntdll!NtQueryInformationProcess → 内核
+直接：保护代码 → 自己准备的 syscall stub + 系统调用号 → 内核
+</code></pre>
+<p>用户态反反调试插件常在 <code>ntdll</code> 入口安装 Hook 并伪造无调试器的结果；直接系统调用可完全绕过这些用户态 Hook。因此日志中的「Hook injection successful」只表示插件 DLL 注入并安装了部分 Hook，不代表直接系统调用已被覆盖。</p>
+<p>当 <code>sc_query_information_process</code> 或 <code>sc_set_information_thread</code> 为零时，代码才用 <code>LoaderGetProcAddress</code> 查找普通 API 作为回退。手工绕过的思路之一就是把相关 <code>sc_*</code> 置零，强制程序走较容易 Hook 的普通 API 路径。</p>
+<p>WOW64 编码：</p>
+<pre><code>
+#ifndef _WIN64
+if (is_wow64) {
+    sc_close = static_cast&lt;uint16_t&gt;(sc_close);
+    sc_query_information_process = static_cast&lt;uint16_t&gt;(sc_query_information_process);
+    sc_set_information_thread = static_cast&lt;uint16_t&gt;(sc_set_information_thread);
+}
+#endif
+
+#ifndef _WIN64
+if (is_wow64 &amp;&amp; sc_close) {
+    sc_close |= WOW64_FLAG;
+    sc_set_information_thread |= WOW64_FLAG | (0x02 &lt;&lt; 24);
+    sc_query_information_process |= WOW64_FLAG | (0x03 &lt;&lt; 24);
+}
+#endif
+</code></pre>
+<p>分两步理解：</p>
+<p>1. <code>static_cast<uint16_t></code>：先只保留系统调用号的低 16 位； 2. <code>|=</code>：再在高位加上 VMProtect 的 WOW64 标志和参数类别信息。</p>
+<p>引用的 Windows 10 22H2 分支原始值（来自源码分支，不是本次运行时实测的寄存器值）：</p>
+<p>| 分支 | <code>NtQueryInformationProcess</code> | <code>NtSetInformationThread</code> | |---|---:|---:| | 原生 32 位分支 | <code>0x00B9</code> | <code>0x004D</code> | | x64/WOW64 所用原始 ID | <code>0x0019</code> | <code>0x000D</code> |</p>
+<p>引用的 Win11/WOW64 文章给出的编码结果：</p>
+<pre><code>
+sc_query_information_process = 0x03008019
+sc_set_information_thread    = 0x0200800D
+</code></pre>
+<p>可按「参数类别高位 + WOW64 标志 + 低位系统调用号」来读。文章值只能作为定位参考，当前样本应在赋值后观察变量确认。</p>
+<p>注意：分析中一度只保留 Windows 10 22H2 分支，随后纠正——主机是 Win11，不能把源码分支值当成当前实测值。</p>
+<p>注意：<code>sc_close</code> 虽不是四项核心检查的主角，但原版 <code>if (is_wow64 && sc_close)</code> 用它作为编码条件，机械删除会改变外围逻辑。</p>
+<p>容易误解的点：</p>
+<p>| 说法 | 正确理解 | |---|---| | 「WOW64 就是 32 位」 | WOW64 特指 32 位进程运行在 64 位 Windows 的兼容层中；32 位 Windows 上的 32 位进程不是 WOW64 | | 「<code>_WIN64</code> 表示当前系统是不是 Win64」 | <code>_WIN64</code> 是编译目标宏，表示这份代码是否编译成 64 位程序，不是运行时操作系统版本 | | 「转成 <code>uint16_t</code> 是因为系统调用号永远只有 16 位」 | 是先清掉高位编码，再由 VMProtect 按自己的 WOW64 调用约定重建高位 | | 「Win11 可以删掉所有 Win10 分支」 | 不编译的源码摘录可以省略无关分支；真实程序仍可能依赖动态解析和兼容回退 | | 「直接系统调用就是函数地址」 | <code>sc_*</code> 保存的是调用号或编码后的调用描述，不是普通函数地址 |</p>
+<h2>四项核心反调试</h2>
+<p>核心代码由选项位控制，只有 <code>LOADER_OPTION_CHECK_DEBUGGER</code> 被设置才执行：</p>
+<pre><code>
+if (data.options() &amp; LOADER_OPTION_CHECK_DEBUGGER) {
+    // 各项检查
+}
+</code></pre>
+<p>| 检查 | 信息来源 | 目的 | |---|---|---| | <code>PEB->BeingDebugged</code> | 用户态 PEB 字段 | 快速判断调试标志 | | <code>ProcessDebugPort</code> | <code>NtQueryInformationProcess</code> | 判断进程是否关联调试端口 | | <code>ProcessDebugObjectHandle</code> | <code>NtQueryInformationProcess</code> | 判断进程是否关联调试对象，并检查返回行为是否合理 | | <code>ThreadHideFromDebugger</code> | <code>NtSetInformationThread</code> | 请求内核将当前线程对调试器隐藏 |</p>
+<h3>PEB->BeingDebugged</h3>
+<pre><code>
+if (peb-&gt;BeingDebugged) {
+    LoaderMessage(mtDebuggerFound);
+    return LOADER_ERROR;
+}
+</code></pre>
+<p>进程被常规用户态调试器创建或附加时，<code>BeingDebugged</code> 通常会被设置。它读取快、没有 API 调用，但也最容易被插件修改。</p>
+<h3>清空 Instrumentation Callback</h3>
+<pre><code>
+if (peb-&gt;OSMajorVersion &gt; 6) {
+    PROCESS_INSTRUMENTATION_CALLBACK_INFORMATION info;
+    info.Version = 0;
+    info.Reserved = 0;
+    info.Callback = NULL;
+
+    if (tNtSetInformationProcess *set_information_process =
+        reinterpret_cast&lt;tNtSetInformationProcess *&gt;(
+            LoaderGetProcAddress(
+                ntdll,
+                reinterpret_cast&lt;const char *&gt;(FACE_NT_SET_INFORMATION_PROCESS_NAME),
+                true)))
+        set_information_process(
+            process,
+            ProcessInstrumentationCallback,
+            &amp;info,
+            sizeof(info));
+}
+</code></pre>
+<p>把回调地址设为 <code>NULL</code>，目的是关闭 Windows 10/11 上可用于用户态插桩、监控系统调用返回路径的 Instrumentation Callback。<strong>它不是「调用 <code>NtSetInformationProcess</code> 实现系统调用隐身」</strong>——系统调用绕过用户态 Hook 的能力来自直接系统调用路径，这里是删除一个回调机制，二者不要混为一谈。</p>
+<p><code>peb->OSMajorVersion > 6</code> 覆盖主版本大于 6 的系统，包括 Windows 10 和 Windows 11；源码注释写「Windows 10」只是当时的简写。</p>
+<h3>ProcessDebugPort</h3>
+<pre><code>
+HANDLE debug_object;
+if (NT_SUCCESS(
+        reinterpret_cast&lt;tNtQueryInformationProcess *&gt;(
+            syscall | sc_query_information_process)(
+                process,
+                ProcessDebugPort,
+                &amp;debug_object,
+                sizeof(debug_object),
+                NULL))
+    &amp;&amp; debug_object != 0) {
+    LoaderMessage(mtDebuggerFound);
+    return LOADER_ERROR;
+}
+</code></pre>
+<p>检查的是「当前进程是否被调试设施关联」，不是代码里有没有名为 DebugPort 的字段。只改 PEB 的 <code>BeingDebugged</code> 并不能解除内核为被调试进程建立的关联，多个信息源交叉检查比只查一个字节更难伪造。</p>
+<h3>ProcessDebugObjectHandle</h3>
+<p>直接系统调用路径中的判断较特殊：</p>
+<pre><code>
+debug_object = 0;
+if (NT_SUCCESS(
+        reinterpret_cast&lt;tNtQueryInformationProcess *&gt;(
+            syscall | sc_query_information_process)(
+                process,
+                ProcessDebugObjectHandle,
+                &amp;debug_object,
+                sizeof(debug_object),
+                reinterpret_cast&lt;PULONG&gt;(&amp;debug_object)))
+    || debug_object == 0) {
+    LoaderMessage(mtDebuggerFound);
+    return LOADER_ERROR;
+}
+</code></pre>
+<p>同一块 <code>debug_object</code> 内存既作为输出缓冲区，又作为 <code>ReturnLength</code> 参数。它不仅看「有没有调试对象」，还利用未调试进程在这一信息类上的特定返回状态和参数副作用，识别插件是否进行了过于简单的伪造。</p>
+<p>| 返回现象 | 判断 | |---|---| | 查询成功，并返回有效调试对象 | <code>NT_SUCCESS</code> 为真，报调试器 | | 插件粗暴返回「失败」，同时把输出维持为 0 | <code>debug_object == 0</code>，仍报调试器 | | 无调试器时返回预期失败状态，同时别名参数产生源码期待的非零副作用 | 两个条件均为假，才继续 |</p>
+<p>普通 API 回退路径则较直接：</p>
+<pre><code>
+if (NT_SUCCESS(query_information_process(
+        process,
+        ProcessDebugObjectHandle,
+        &amp;debug_object,
+        sizeof(debug_object),
+        NULL))) {
+    LoaderMessage(mtDebuggerFound);
+    return LOADER_ERROR;
+}
+</code></pre>
+<p>这就是为什么「插件把句柄改成 0」未必够用：保护代码可能同时验证 <code>NTSTATUS</code>、输出参数和 <code>ReturnLength</code> 的组合。</p>
+<h3>ThreadHideFromDebugger</h3>
+<pre><code>
+if (sc_set_information_thread)
+    reinterpret_cast&lt;tNtSetInformationThread *&gt;(
+        syscall | sc_set_information_thread)(
+            thread,
+            ThreadHideFromDebugger,
+            NULL,
+            0);
+else if (tNtSetInformationThread *set_information_thread =
+    reinterpret_cast&lt;tNtSetInformationThread *&gt;(
+        LoaderGetProcAddress(
+            ntdll,
+            reinterpret_cast&lt;const char *&gt;(FACE_NT_SET_INFORMATION_THREAD_NAME),
+            true)))
+    set_information_thread(
+        thread,
+        ThreadHideFromDebugger,
+        NULL,
+        0);
+</code></pre>
+<p>系统调用号存在就直接进内核，否则走普通 <code>ntdll</code> API。成功后，当前线程产生的异常和调试事件可能不再按调试器预期交付，单步、断点和异常控制流会受到影响。</p>
+<h3>分析反调试代码的记录顺序</h3>
+<p>1. 信息类：如 <code>ProcessDebugPort</code>； 2. 调用路径：直接系统调用还是普通 API； 3. 输出缓冲区初值； 4. <code>NTSTATUS</code> 的期望值； 5. 输出值和 <code>ReturnLength</code> 的期望副作用； 6. 被判定为「发现调试器」的布尔条件。</p>
+<p>把逻辑还原为条件表，而不是只给函数名做注释：</p>
+<pre><code>
+BeingDebugged != 0
+    → 发现调试器
+
+DebugPort 查询成功 &amp;&amp; DebugPort != 0
+    → 发现调试器
+
+DebugObjectHandle 查询成功 || 别名输出仍为 0
+    → 发现调试器或发现返回伪造
+
+最后执行 ThreadHideFromDebugger
+    → 隐藏当前线程
+</code></pre>
+<p>手工绕过的思路：</p>
+<p>1. 把 <code>sc_query_information_process</code>、<code>sc_set_information_thread</code> 置零； 2. 强制保护代码走普通 API 回退路径； 3. 在 <code>LoaderGetProcAddress</code> 附近干预 <code>NtQueryInformationProcess</code>、<code>NtSetInformationThread</code>、<code>NtClose</code> 的解析结果。</p>
+<p>注意：修改 <code>[ESP+4]</code> 栈参数的说法必须在实际调用点核对——常见 x86 函数入口中 <code>[ESP]</code> 是返回地址，<code>[ESP+4]</code> 通常是第一个显式参数，不能机械地称为「第二个参数」。</p>
+<p>容易误解的点：</p>
+<p>| 容易误解 | 修正 | |---|---| | <code>NtQueryInformationProcess</code> 是「查某一个东西」 | 它根据 <code>ProcessInformationClass</code> 查询不同信息；本次同一 API 分别查 DebugPort 和 DebugObjectHandle | | 检查 DebugPort 是看「有没有打开调试端口文件」 | 不是文件端口，而是进程与调试设施的内核关联 | | <code>ProcessDebugObjectHandle</code> 只需返回句柄 0 | 原版还检查状态码与参数副作用，粗糙伪造可能反而触发 | | <code>NtSetInformationProcess</code> 这段是在「隐藏系统调用」 | 它清除 Instrumentation Callback；直接系统调用绕 Hook 是另一段机制 | | <code>ThreadHideFromDebugger</code> 会让整个进程彻底不可调试 | 它针对指定线程；插件仍可能拦截或内核层修正 | | 直接系统调用路径与普通 API 路径检查内容完全一样 | 信息类相同，但直接路径的 <code>ProcessDebugObjectHandle</code> 特意加入了返回行为校验 |</p>
+<p>实测状态：已确认源码中存在直接调用与普通 API 回退两条路径；插件成功注入后仍被检测，与直接系统调用绕过 <code>ntdll</code> Hook 的机制相符；原版后部还重复检查过 <code>ProcessDebugPort</code> 和 <code>ThreadHideFromDebugger</code>，说明一次伪造不一定覆盖所有时机。完整源码中的外围机制（内核调试器状态、CRC/补丁完整性、入口 <code>INT3</code> 字节、<code>PAGE_GUARD</code>/<code>PAGE_NOACCESS</code>、无效 <code>CloseHandle(0xDEADC0DE)</code> 的异常行为、DRx/线程上下文、Trap Flag、RDTSC/CPUID 及异常检查）未全部完成动态验证，状态为待继续。</p>
+<h2>ScyllaHide、SharpOD 与 AntiVmp</h2>
+<p>两类工具职责不同，不能混为一谈：</p>
+<p>1. 反反调试插件：让程序看不到调试器，如 ScyllaHide、SharpOD、HyperHide、TitanHide； 2. VMP 分析插件：帮助追踪、收集和分析虚拟机，如 AntiVmp。</p>
+<p>| 工具 | 主要定位 | 与本次 VMP 3.5.1 的关系 | |---|---|---| | ScyllaHide | 用户态反反调试 | 有 <code>VMProtect x86/x64</code> Profile，但直接系统调用可能绕过用户态 Hook | | SharpOD | x32dbg/x64dbg 反反调试插件，部分版本带驱动功能 | v0.6d 更新说明专门提到 VMP 3.5.1；本次实际使用 v0.6b 也通过了样本 | | AntiVmp v1.1 | x32dbg 下的 VMP 3.5.1 分析辅助 | 偏一键分析、跟踪和补丁，不是独立「只隐藏调试器」开关 | | HyperHide | Hypervisor/内核层反反调试 | 能覆盖多种内核可见状态；风险高，只建议隔离 VM | | TitanHide | 通用内核驱动反反调试 | 可覆盖类似检查，但 Win11 兼容性与稳定性需单独验证 |</p>
+<p>ScyllaHide 的 Profile 应按<strong>目标程序和保护类型</strong>选，而不是按主机系统位数选。当前目标是 VMP 保护的 32 位程序，选择 <code>VMProtect x86/x64</code> Profile 合理。</p>
+<p>日志 <code>Hook injection successful, image base 01830000</code> 只说明插件 DLL 已加载并完成它认为成功的 Hook 初始化，不能证明 PEB、直接系统调用、DebugObject、线程隐藏、早期 TLS 或异常路径都已覆盖。</p>
+<p>SharpOD 配置窗口中的选项：</p>
+<pre><code>
+Hide PEB
+Change Caption
+Hide Process
+Fake ParentProcess
+Drag Attach
+Remove EP Break
+Anti_Anti Attach
+Remove DebugPrivileges
+VMP 3.1 (above)
+Protect Drx
+Hook *ZwFunctions
+Ring0: Hook *SSDT / Hook RDTSC
+Restore DbgAccessMask
+Bypass ObjectHook
+</code></pre>
+<p>根据已观察到的检查，最小组合优先考虑：</p>
+<pre><code>
+Hide PEB
+VMP 3.1 (above)
+Hook *ZwFunctions
+Protect Drx    // 只有使用硬件断点或样本检查 DRx 时再开
+</code></pre>
+<p>全选并不等于覆盖更完整。多个插件或多层 Hook 可能重复修改同一 API、异常或调试寄存器，造成崩溃、卡死、错误返回，内核选项甚至可能导致蓝屏。</p>
+<h3>ScyllaHide 使用要点</h3>
+<p>1. 给 32 位目标使用 x32dbg 对应插件； 2. 选择 <code>VMProtect x86/x64</code> Profile； 3. 观察注入日志，但把「注入成功」和「反调试已通过」分开验证； 4. 若仍失败，根据源码逐项判断是 PEB、普通 API、直接系统调用还是异常路径未覆盖。</p>
+<h3>SharpOD 使用要点</h3>
+<p>1. 从作者原帖取得压缩包，文件名为 <code>SharpOD x64 v0.6b-password[123].rar</code>，压缩密码 <code>123</code>； 2. Chrome 曾提示「已屏蔽危险的下载内容」。不要全局关闭安全浏览；应在隔离虚拟机中核对来源、扫描压缩包和解压后的 <code>.dp32</code>、<code>.dp64</code>、<code>.sys</code>； 3. x32dbg 使用 <code>.dp32</code>；包名中的 x64 主要表示适配 x64 系统/调试器套件，不代表只能调试 64 位目标； 4. 不要同时叠加 ScyllaHide 与 SharpOD，先用最小配置验证； 5. 本次最终由 SharpOD v0.6b 成功通过反调试，属于本样本实测结果。</p>
+<p>版本信息：</p>
+<ul>
+<li>原帖标题只显示 v0.6b，但后续楼层有更新；</li>
+<li>v0.6c 更新说明提到 VMP 3.5、<code>ThreadHideFromDebugger</code> 参数、<code>ProcessDebugObjectHandle</code> 第 3/5 参数共用等；</li>
+<li>v0.6d Stable 的说明明确提到 VMP 3.5.1 反调试处理，位于原帖第 5 页 105 楼附近的 <code>SharpOD_x64_v0.6d Stable.zip</code>；</li>
+<li>尽管如此，本次下载并使用的 v0.6b 已能通过这个具体 crackme，<strong>版本号更老不等于对所有样本必定失败</strong>。</li>
+</ul>
+<p>参考资料：</p>
+<ul>
+<li>AntiVmp v1.1：<https://bbs.kanxue.com/thread-289377.htm></li>
+<li>AntiVmp v1.0 beta：<https://bbs.kanxue.com/thread-289086.htm></li>
+<li>Win11/VMP 相关分析：<https://bbs.kanxue.com/thread-286780.htm></li>
+<li>SharpOD 原帖第 5 页：<https://bbs.kanxue.com/thread-218988-5.htm></li>
+<li>HyperHide：<https://github.com/Air14/HyperHide></li>
+<li>TitanHide：<https://github.com/mrexodia/TitanHide></li>
+<li>Chrome 下载拦截说明：<https://support.google.com/chrome/answer/6261569></li>
+</ul>
+<p>容易误解的点：</p>
+<p>| 误解 | 修正 | |---|---| | 「ScyllaHide 注入成功 = 一定过反调试」 | 注入和覆盖是两层结论；直接系统调用、早期检查或返回行为校验仍可能漏掉 | | 「SharpOD 应该全选，成功率最高」 | 全选会扩大冲突面；应按源码证据启用最小集合，再逐项增加 | | 「Bypass ObjectHook 就是处理 ProcessDebugObjectHandle」 | 前者通常指内核对象回调/访问权限，后者是进程信息查询类 | | 「SharpOD x64 不能用于 x32dbg」 | 包中存在 <code>.dp32</code> 时可用于 x32dbg，按插件位数放置 | | 「AntiVmp 就是单独反调试插件」 | 它偏自动分析、跟踪和补丁辅助，不等同于只隐藏调试状态 | | 「浏览器报警一定是病毒，或一定是假报」 | 调试驱动常被识别为 HackTool/Riskware；但若扫描出现 Stealer/RAT/Backdoor，应停止使用并重新核对来源 |</p>
+<p>实测结果：</p>
+<pre><code>
+ScyllaHide：Hook injection successful, image base 01830000
+结果：仍无法通过当前样本的反调试。
+
+SharpOD：实际窗口显示 Ver: 0.6b
+结果：当前样本实测通过，随后进入 VM 入口分析。
+</code></pre>
+<p>推荐配置是根据已看到的源码推导；最终是逐项启用还是组合通过没有完整记录，记为待确认。HyperHide/TitanHide 本次没有实际安装运行，不能写成已验证结果。</p>
+<h2>入口重叠反汇编与 AEP</h2>
+<p>反调试通过后，x32dbg 在入口附近最初显示：</p>
+<pre><code>
+0105FE25  38 49 68                 cmp byte ptr ds:[ecx+68],cl
+0105FE28  63 92 1E 01 E8 50        arpl word ptr ds:[edx+50E8011E],dx
+0105FE2E  5A                       pop edx
+0105FE2F  42                       inc edx
+0105FE30  00 66 0F                 add byte ptr ds:[esi+0F],ah
+0105FE33  B6 46                    mov dh,46
+0105FE35  02 8A 16 81 EE 02        add cl,byte ptr ds:[edx+02EE8116]
+0105FE3B  00 00                    add byte ptr ds:[eax],al
+0105FE3D  00 F6                    add dh,dh
+0105FE3F  EA ...                   jmp far ...
+</code></pre>
+<p>出现 <code>arpl</code>、奇怪的远跳和不合理内存地址，首先应怀疑反汇编起点错位、代码与数据重叠或刻意的反反汇编，而不是立即断言「外面又加了一层加密壳」。</p>
+<p>真实 EIP 是 <code>0105FE27</code>，位于 x32dbg 显示的第一条指令内部。该处字节为 <code>68 63 92 1E 01</code>，重新解码得到：</p>
+<pre><code>
+0105FE27  68 63 92 1E 01    push 011E9263
+</code></pre>
+<p>x86 指令是变长的，同一组字节从不同地址开始可以形成完全不同的指令流。线性反汇编从 <code>0105FE25</code> 开始，就把 <code>0105FE27</code> 的 <code>68</code> 吃进了前一条 <code>cmp</code>；CPU 却只按 EIP 指向的 <code>0105FE27</code> 解码。</p>
+<p><code>push imm32</code> 长度为 5 字节（1 字节 opcode <code>68</code> + 4 字节立即数），小端还原立即数 <code>63 92 1E 01 → 0x011E9263</code>，所以下一条地址是 <code>0105FE27 + 5 = 0105FE2C</code>。这正是按 F7 单步后 EIP 直接来到 <code>0105FE2C</code> 的原因，不是调试器跳过了代码。</p>
+<p>接下来是：</p>
+<pre><code>
+0105FE2C  E8 50 5A 42 00    call 01485881
+</code></pre>
+<p><code>E8</code> 使用相对下一条指令的有符号位移：</p>
+<pre><code>
+下一条地址 = 0105FE31
+rel32      = 00425A50
+目标       = 0105FE31 + 00425A50 = 01485881
+</code></pre>
+<p><code>call</code> 的等价动作：</p>
+<pre><code>
+push 0105FE31
+jmp  01485881
+</code></pre>
+<p>进入 <code>01485881</code> 后的栈布局：</p>
+<pre><code>
+ESP     → 0105FE31    CALL 自动压入的返回地址
+ESP+4   → 011E9263    前一条 PUSH 压入的 VM 参数
+</code></pre>
+<p>入口出现明显乱码时的处理顺序：</p>
+<p>1. 先看真实 EIP，而不是只相信反汇编窗口的行首； 2. 在 EIP 处重新反汇编； 3. 读取原始字节并手算变长指令长度； 4. 对 <code>E8 rel32</code> 用「下一条地址 + 位移」计算目标； 5. 进入目标后检查栈，验证 <code>CALL</code> 返回地址和显式参数是否符合推导； 6. 只有发现另一个完整解压/解密加载器、第二个 OEP 等证据时，才考虑双层壳。</p>
+<p>容易误解的点：</p>
+<p>| 误解 | 修正 | |---|---| | 反汇编窗口显示 <code>arpl</code>、<code>jmp far</code>，说明一定还有第二层壳 | 更常见的原因是错位或重叠指令；先从真实 EIP 重解码 | | 注释里的 <code>edx:EntryPoint</code> 表示 EIP 在 EDX | 通常只是调试器识别出 EDX 的值指向名为 EntryPoint 的地址 | | F7 从 <code>FE27</code> 到 <code>FE2C</code> 是跳转 | <code>push imm32</code> 自身正好 5 字节，是正常顺序执行 | | <code>Push RETADDR</code> 是源码中显式的 <code>push</code> | 它是 <code>CALL</code> 指令的隐式压栈效果 | | <code>E8</code> 后面的四字节就是绝对地址 | 它是相对下一条指令的 <code>rel32</code> 位移 |</p>
+<p>实测数据：</p>
+<pre><code>
+真实 AEP/EIP：0105FE27
+入口参数：    011E9263
+CALL 地址：   0105FE2C
+CALL 下一条： 0105FE31
+CALL 位移：   00425A50
+VM 入口：     01485881
+</code></pre>
+<p>本次现象证明入口处存在重叠/错位反汇编设计；「是否还有额外加密壳」没有独立证据，不能仅凭乱码下结论。</p>
+<h2>VMEntry 初始化与寄存器角色</h2>
+<p>进入 <code>01485881</code> 后，代码先保存宿主机上下文：</p>
+<pre><code>
+01485881  push ebx
+01485882  push edx
+01485883  pushfd
+01485884  push eax
+01485885  push esi
+01485886  push ebp
+01485887  push edi
+01485888  push ecx
+01485889  mov ecx,00890000
+0148588E  push ecx
+0148588F  mov edi,dword ptr ss:[esp+28]
+</code></pre>
+<p>八次保存后又压入模块基址 <code>00890000</code>，此时：</p>
+<pre><code>
+[ESP+24] = 0105FE31    返回地址
+[ESP+28] = 011E9263    VM 入口参数
+</code></pre>
+<p>所以 <code>mov edi,[esp+28]</code> 取得的是 <code>011E9263</code>。</p>
+<p>VMEntry 完成三件事：</p>
+<p>1. 保存原生寄存器和 EFLAGS，建立虚拟机上下文； 2. 把入口参数解码成虚拟字节码地址和初始滚动密钥； 3. 从加密字节码中解出第一个 Handler 的相对地址并跳转。</p>
+<p>入口参数变换：</p>
+<pre><code>
+mov edi,[esp+28]     ; EDI = 011E9263
+dec edi              ; 011E9262
+bswap edi            ; 62921E01
+rol edi,10h          ; 1E016292
+dec edi              ; 1E016291
+ror edi,19h          ; 00B1488F
+add edi,ecx          ; +00890000 = 013A488F
+</code></pre>
+<p>随后：</p>
+<pre><code>
+mov ebp,esp
+sub esp,0C0h
+mov ebx,edi
+mov edx,00890000
+sub ebx,edx
+</code></pre>
+<p>得到 <code>EBX = 013A488F - 00890000 = 00B1488F</code>。<code>sub esp,0C0h</code> 为虚拟寄存器/临时区预留 <code>0xC0</code> 字节，<code>EBP</code> 用作虚拟栈指针，<code>ESP</code> 附近作为虚拟寄存器区。</p>
+<p>第一个 Handler 的地址不是明文读取，而是解密相对偏移：</p>
+<pre><code>
+lea esi,dword ptr ds:[014858B0]
+mov eax,dword ptr ds:[edi]
+add edi,4
+xor eax,ebx
+add eax,655C3CA0
+bswap eax
+sub eax,76CD7325
+bswap eax
+xor ebx,eax
+add esi,eax
+jmp esi
+</code></pre>
+<p>流程：</p>
+<pre><code>
+从 [EDI] 取 4 字节密文
+    → 用 EBX 和多组算术/位变换解出 Handler 相对增量
+    → EBX ^= 增量，更新滚动密钥
+    → ESI = 014858B0 + 增量
+    → jmp ESI，进入第一个 Handler
+</code></pre>
+<p>当前样本的寄存器角色表：</p>
+<p>| 寄存器 | 当前 VM 中观察到的角色 | |---|---| | <code>EDI</code> | 加密虚拟字节码指针，即 VIP | | <code>EBP</code> | 虚拟栈指针，即 VSP | | <code>ESP</code> | 虚拟寄存器/临时区的基准 | | <code>EBX</code> | 滚动解密密钥 | | <code>ESI</code> | 当前或下一 Native Handler 地址 | | <code>EAX/ECX/EDX</code> | 操作数、解密增量和临时计算 |</p>
+<p>进入每个 Handler 时记录 <code>Handler 地址、EDI、EBX、EBP、ESI</code>，离开前再记录一次，就能分开回答：当前虚拟指令消费了多少字节、虚拟栈如何变化、解出的下一 Handler 增量是多少、滚动密钥如何更新。</p>
+<p>容易误解的点：</p>
+<p>| 误解 | 修正 | |---|---| | <code>EDI</code> 是普通 PE 的 OEP | 当前它是 VM 加密字节码指针 | | <code>ESI</code> 指向下一条虚拟指令数据 | <code>ESI</code> 指向要执行的原生 Handler；虚拟字节码由 <code>EDI</code> 读取 | | <code>sub eax,user32.76CD7325</code> 调用了 user32 | 只是调试器把立即数 <code>0x76CD7325</code> 符号化成了落在 user32 地址范围的名字；仍是立即数运算 | | <code>sub esp,C0</code> 是普通局部变量，与 VM 无关 | 在这里它用于构造 VM 的虚拟寄存器/临时上下文 | | 第一 Handler 地址在表里明文保存 | 当前是由 VMEntry 从 <code>[EDI]</code> 读取密文并解出相对增量 |</p>
+<p>实测数据：</p>
+<pre><code>
+模块基址常数：00890000
+入口参数：    011E9263
+解码后 VIP： 013A488F
+初始 EBX：    00B1488F
+Handler 基准：014858B0
+</code></pre>
+<h2>Handler 结构与滚动密钥</h2>
+<p>观察到的普通 Handler 大多由两部分组成：虚拟指令语义核心 + 解密下一 Handler 并跳转的调度尾。</p>
+<p>典型 <code>VM_PopVR32</code>：</p>
+<pre><code>
+mov edx,dword ptr ss:[ebp]       ; 从虚拟栈弹出 DWORD
+add ebp,4
+
+movzx eax,byte ptr ds:[edi]      ; 读取加密的虚拟寄存器偏移
+add edi,1
+xor al,bl
+rol al,6
+xor al,C4
+ror al,6
+xor bl,al                        ; 更新低 8 位滚动密钥
+mov dword ptr ss:[esp+eax],edx   ; 写入虚拟寄存器区
+
+mov ecx,dword ptr ds:[edi]       ; 读取下一 Handler 的加密增量
+add edi,4
+xor ecx,ebx
+ror ecx,13h
+xor ecx,3C164F4E
+rol ecx,0Fh
+not ecx
+xor ebx,ecx                     ; 更新完整滚动密钥
+add esi,ecx                     ; 当前 Handler + delta
+jmp esi                         ; 跳到下一 Native Handler
+</code></pre>
+<p>近似伪代码：</p>
+<pre><code>
+value = VPop32();
+reg_offset = decrypt_byte(*VIP++, key);
+VReg[reg_offset] = value;
+
+delta = decrypt_dword(*(uint32_t *)VIP, key);
+VIP += 4;
+key ^= delta;
+handler = handler + delta;
+goto handler;
+</code></pre>
+<p>当前结构是直接线程化的链式调度：每个普通 Handler 完成自身语义后，自己解密并计算下一 Handler，而不是统一返回一个中心 Dispatcher：</p>
+<pre><code>
+VMEntry 解出 H1
+    → H1：执行语义，解出 delta2，跳到 H2
+    → H2：执行语义，解出 delta3，跳到 H3
+    → H3：执行语义，解出 delta4，跳到后续 Handler 或 VMExit
+</code></pre>
+<p>关键区别：</p>
+<pre><code>
+EDI → 加密虚拟字节码
+ESI → 原生 Handler 代码地址
+</code></pre>
+<p>Handler 不是「去 ESI 取下一条虚拟指令」。它先从 <code>[EDI]</code> 读取本条指令的操作数，再从后续 <code>[EDI]</code> 读取下一 Handler 选择信息的密文，解出相对增量，更新 <code>ESI</code>，最后跳转。它也不是一次解密两条完整虚拟指令：当前指令的操作数、下一条指令的 Handler 选择值分两步解；下一条指令自己的操作数要进入下一 Handler 后才解密。</p>
+<p>滚动密钥使解密具有前后依赖：</p>
+<pre><code>
+VMEntry 解出 H1
+H1 使用当前 EBX 解操作数和 H2，并更新 EBX
+H2 使用更新后的 EBX 解操作数和 H3
+……
+</code></pre>
+<p>没有正确的 <code>EDI + EBX + ESI</code> 状态，通常不能从字节码中间随便开始离线解码。</p>
+<p>分析一个 Handler 按两层拆：</p>
+<p>1. 虚拟语义：只看它对 VSP、虚拟寄存器、内存、标志位做了什么； 2. 调度尾：记录它如何消费字节码、更新密钥、计算下一个 Handler。</p>
+<p>然后整理成「虚拟指令 → 等价汇编 → 合并后的业务语义」，例如：</p>
+<pre><code>
+VM_PopVR32
+    → value = [VSP]; VSP += 4; VReg[index] = value
+    → 等价于把虚拟栈顶保存到某个虚拟寄存器
+</code></pre>
+<p>某个 Handler 尾部跳回同一个原生入口，不必立即判断死循环：只要 <code>EDI</code>、<code>EBP</code> 或 <code>EBX</code> 已改变，同一段原生代码仍可处理下一份虚拟数据，例如连续执行多个 <code>PopVR32</code>。</p>
+<p>实测中曾在不同位置看到相同的 <code>$+... FF E6 jmp esi</code>，后一处跳回同一段 <code>VM_PopVR32</code> 起点，原因就是下一条虚拟指令仍为同一语义且 <code>EDI/EBP/EBX</code> 已更新。</p>
+<p>还观察到共享跳板：</p>
+<pre><code>
+010531B9  lea edx,dword ptr ss:[esp+60]
+010531BD  cmp ebp,edx
+010531BF  jnbe 010531E7
+010531E7  jmp esi
+</code></pre>
+<p>它更像 push 类 Handler 使用的 VSP 边界检查跳板。到达它之前 Handler 已经算好了 <code>ESI</code>，因此它不是覆盖所有虚拟指令的总 Dispatcher，固定在 <code>010531E7</code> 下断只能捕获一部分路径。</p>
+<p>容易误解的点：</p>
+<p>| 误解 | 修正 | |---|---| | 每个 Handler 的调度代码完全字节相同 | 职责相似，但解密常数、位变换、寄存器和跳转形式可能不同 | | 所有 Handler 都必定有同一套尾巴 | 只对「大多数普通 Handler」成立；VMExit、异常或特殊 Handler 可能不同 | | <code>jmp esi</code> 就是公共 Dispatcher | 它只是最终的间接跳转指令；真正的目标计算分散在各 Handler 内 | | 下一 Handler 地址没有解密 | <code>xor/rol/ror/not</code> 等就是解密过程，结果是相对增量而非完整指令字节 | | Handler 跳回自己就是无限循环 | 若 VM 状态已改变，它可能是在复用同一语义 Handler | | 找不到固定表就无法分析 | 可以动态构造「地址—语义」映射并按语义去重；固定明文表不是必要条件 |</p>
+<h2>Handler 表与语义归类</h2>
+<p>传统解释器可能有明文表 <code>jmp dword ptr [HandlerTable + opcode*4]</code>，本次 trace 没有观察到这种固定的 opcode→Handler 表。「找 Handler 表」更现实的含义是由分析者动态建立：</p>
+<p>| Handler 地址 | 语义名称 | 消费字节数 | VSP 变化 | 备注 | |---|---|---|---|---| | 某地址 | <code>VM_Add32</code> | 待具体尾部确认 | 按语义变化 | 可能存在多个克隆地址 |</p>
+<p>由于 VMProtect 会克隆/变形 Handler，不应只按地址计数，更应按归一化后的语义去重。</p>
+<p>直接线程化结构里没有一个固定地址能抓住所有 Handler，但所有已执行的 native 指令仍要被 CPU 执行，因此可以让调试器逐条 Trace，只在执行到机器码 <code>FF E6</code>（<code>jmp esi</code>）时记录。<code>FF E6</code> 在内存中是小端 WORD，即 <code>word(cip) == 0xE6FF</code>。这不是在固定地址下断，而是在整个执行路径中识别指令模式。</p>
+<h3>条件跟踪记录全部 Native 指令</h3>
+<p>x32dbg「条件跟踪步进」填写：</p>
+<pre><code>
+暂停条件：0
+日志文本：{p:cip} {i:cip}
+日志条件：1
+命令：留空
+最大单步次数：500、5000 或 10000
+模块筛选器：仅用户
+</code></pre>
+<p>若要恢复虚拟指令的具体操作数，日志中必须包含寄存器：</p>
+<pre><code>
+{p:cip} {i:cip} EAX={p:eax} EBX={p:ebx} ECX={p:ecx} \
+EDX={p:edx} EBP={p:ebp} EDI={p:edi} ESI={p:esi}
+</code></pre>
+<p>「运行跟踪」记录更详细的寄存器/内存变化，体积更大，但比纯文本地址更适合恢复立即数和虚拟寄存器偏移。跟踪时使用 Trace Into，Trace Over 可能把内部 Handler 调用或跳转整体跨过。</p>
+<h3>只记录 jmp esi</h3>
+<pre><code>
+暂停条件：0
+日志文本：HandlerTail={p:cip} NextHandler={p:esi} {i:cip}
+日志条件：word(cip)==E6FF
+</code></pre>
+<p>调试器仍逐条执行每条 native 指令，只是只在 <code>jmp esi</code> 处打印日志：日志精简了，但执行速度仍受逐条 Trace 限制。</p>
+<h3>500 步 Trace 的语义归类</h3>
+<p>本次 500 条 native 指令中识别出 25 次完整 Handler 实例、7 类语义，没有出现 <code>VMExit</code>：</p>
+<p>| 语义 | 观察到的原生地址 | 次数 | 核心作用 | |---|---|---:|---| | <code>VM_PushImm32</code> | <code>01380EC1</code>、<code>0145EDF6</code>、<code>013B3A25</code> | 3 | 解密 DWORD 立即数并压入 VSP | | <code>VM_PushVR32</code> | <code>00FC6373</code>、<code>01020ED3</code> | 2 | 读取虚拟寄存器 DWORD 并压栈 | | <code>VM_Add32</code> | <code>00F941DC</code>、<code>0138726A</code>、<code>01382EB7</code>、<code>01494E34</code>、<code>014657E5</code>、<code>013753E4</code>、<code>014307FC</code> | 7 | 两个虚拟栈 DWORD 相加，并保存结果/EFLAGS | | <code>VM_PopVR32</code> | <code>0107CF55</code>、<code>01039341</code>、<code>0138CA4A</code>、<code>0102B355</code>、<code>01438C65</code>、<code>0146D0E8</code>、<code>0143B1AC</code>、<code>00FB8144</code> | 8 | 虚拟栈顶写入虚拟寄存器 | | <code>VM_ReadMem32</code> | <code>01356723</code>、<code>0148C9D2</code> | 2 | 把 VSP 顶部地址替换为该地址处 DWORD | | <code>VM_PushVSP</code> | <code>0148FFF2</code>、<code>01028659</code> | 2 | 把旧 VSP 值压入虚拟栈 | | <code>VM_NAND32</code> | <code>01400DE9</code> | 1 | 计算 NAND 语义并保存结果/标志 |</p>
+<p>25 条虚拟指令顺序：</p>
+<pre><code>
+01 PushImm32   02 PushVR32   03 Add32      04 PopVR32    05 ReadMem32
+06 Add32       07 PopVR32    08 Add32      09 PopVR32    10 PushVSP
+11 PushImm32   12 PushImm32  13 PushVR32   14 Add32      15 PopVR32
+16 ReadMem32   17 Add32      18 PopVR32    19 Add32      20 PopVR32
+21 NAND32      22 PopVR32    23 Add32      24 PopVR32    25 PushVSP
+</code></pre>
+<p>核心语义伪代码：</p>
+<pre><code>
+// PushImm32
+VSP -= 4;
+*(uint32_t *)VSP = decrypted_imm32;
+
+// PushVR32
+VSP -= 4;
+*(uint32_t *)VSP = VReg[decrypted_offset];
+
+// PopVR32
+VReg[decrypted_offset] = *(uint32_t *)VSP;
+VSP += 4;
+
+// ReadMem32
+*(uint32_t *)VSP = <strong>(uint32_t </strong>)VSP;
+
+// PushVSP
+old_vsp = VSP;
+VSP -= 4;
+*(uint32_t *)VSP = old_vsp;
+
+// NAND32
+result = ~(a &amp; b);   // 等价于 (~a) | (~b)
+</code></pre>
+<p>注意：<code>VM_Add32</code> 常见行为是把结果和 EFLAGS 都留在虚拟栈上。它后面紧跟 <code>PopVR32</code> 时，后者可能是在保存 EFLAGS，而不一定是把算术结果保存到寄存器；没有具体 VSP/寄存器状态时不能提前下结论。</p>
+<p>容易误解的点：</p>
+<p>| 误解 | 修正 | |---|---| | 25 个地址就是 25 种 Handler | 归一化后只有 7 类语义，说明存在克隆和变形 | | 找到 <code>010531E7 jmp esi</code> 就能收集全部 Handler | 500 步中只有部分 push 类路径经过共享跳板，其他 Handler 直接 <code>jmp esi</code> | | 只记录反汇编文本就能完整还原原始 x86 | 文本中没有进入时寄存器和解密结果，无法恢复立即数和虚拟寄存器偏移 | | 500 步没出现 VMExit，说明 VM 没有出口 | 只能说明这 500 条 native 指令还没走到出口 | | <code>NAND32</code> 的 <code>~a \| ~b</code> 与 <code>~(a&b)</code> 不同 | 由德摩根定律，两者相等 | | 条件日志只打印 <code>jmp esi</code>，调试器就不用执行中间指令 | 条件跟踪仍逐条执行，只是减少了输出量 |</p>
+<p>实测结论：500 条 native 指令 → 25 次完整 Handler 实例 → 归一化为 7 类虚拟语义；本段没有 <code>VMExit</code>，仍处在同一个 VM 块中；共享跳板 <code>010531E7</code> 在这段 trace 中只覆盖部分 Handler；日志没有完整寄存器快照，立即数、虚拟寄存器编号和最终业务汇编仍为待确认。</p>
+<h2>长程序分析策略</h2>
+<p>控制台 crackme 的虚拟化路径很长，逐条 F7 并手工翻译每个克隆 Handler 会把时间耗在重复的 VM 框架代码上。更有效的目标不是翻译完整个 VM 的每条 native 指令，而是：</p>
+<pre><code>
+收集并归一化独特 Handler 语义
+    + 定位输入到成功/失败分支的数据流
+    + 只翻译相关 VM 块
+</code></pre>
+<p>地址级去重没有处理 Handler 克隆；全程序线性翻译也没有利用 crackme 的目标特征。验证程序最终必然存在「输入 → 变换/比较 → 条件结果 → 成功或失败输出」，因此可以先从输入缓冲区、比较结果、成功/失败字符串或 VMExit 边界切入，反向缩小需要翻译的虚拟指令范围。</p>
+<p><code>VMExit</code> 是 VM 块边界，不应自动解释为一次 <code>call</code> 或业务 API。只有把出口前后的原生栈、参数和控制流连起来，才能还原业务汇编。</p>
+<p>推荐路线：</p>
+<p>1. VMEntry 只完整手算一次，确认 <code>EDI/EBX/EBP/ESI</code> 角色； 2. 用条件 Trace 收集 Handler 进入与跳转； 3. 按「虚拟语义」去重，建立自己的 Handler 字典； 4. 记录 <code>EDI/EBX/EBP</code>，恢复当前虚拟操作数； 5. 寻找 <code>VMExit</code>，把虚拟块划分开； 6. 从输入缓冲区、比较、失败输出附近做数据切片； 7. 对相关块执行「虚拟指令 → 等价汇编 → 合并语义」； 8. AntiVmp 可用于自动收集和分类，但人工抽查关键 Handler，避免把插件输出直接当结论。</p>
+<p>整理给老师的提问：</p>
+<p>整理给老师的提问，较严谨的版本是：使用 SharpOD 通过反调试后，从 VMEntry 进入第一个 Handler。目前观察到的大多数常规 Handler 都由「本条虚拟语义 + 滚动密钥解密下一 Handler 相对地址 + <code>jmp esi</code>」组成，属于分散式链式调度；没有观察到固定公共 Dispatcher，也没有看到传统的明文 opcode→Handler 表。程序较长，逐条单步建表和翻译效率很低。请问更合适的路线，是用条件 Trace/脚本动态收集并按语义去重 Handler，还是先通过输入缓冲区、成功失败分支和 VMExit 定位校验路径，只翻译相关 VM 块？</p>
+<p>容易误解的点：</p>
+<p>| 误解 | 修正 | |---|---| | 「所有 Handler 都确定包含同一调度」 | 目前只能说「大多数已观察到的常规 Handler」；VMExit 和特殊 Handler 需保留例外 | | 「没有公共 Dispatcher 就只能手工 F7 到底」 | 可以按指令模式 Trace、记录运行状态，并以数据流切片缩小范围 | | 「找 Handler 表是最终目标」 | 表只是辅助；真正目标是理解验证路径的虚拟语义和分支条件 | | 「AntiVmp 一键分析后就不需要学习」 | 插件节省重复收集工作，但仍需人工验证寄存器、操作数和关键业务块 | | 「程序长，所以必须翻译所有虚拟指令」 | 对 crackme 优先翻译输入到判定分支的相关路径 |</p>
+<p>实测状态：已确认当前样本没有观察到固定公共调度点；500 步 trace 证明同一语义可对应多个原生地址；尚未遇到 <code>VMExit</code>，25 条虚拟指令还未合并成最终业务汇编；下一阶段重点从「继续扩充地址表」转向「补寄存器状态 + 找验证数据流」。</p>
+<h2>控制台输入定位与失败实验纠正</h2>
+<p>目标是控制台程序，原先针对窗口程序的 <code>GetDlgItemTextA/W</code>、<code>GetWindowTextA/W</code> 等输入断点不适用。控制台输入可能经过：</p>
+<pre><code>
+kernelbase!ReadConsoleA/W
+kernelbase!ReadFile
+ucrtbase/msvcrt!scanf
+ucrtbase/msvcrt!fgets
+ntdll!NtReadFile
+ntdll!NtDeviceIoControlFile
+静态链接 CRT 或自定义输入逻辑
+</code></pre>
+<p>实际没有命中最初猜测的 API 断点，说明不能只靠函数名猜路径。最稳的方法是在程序等待输入时暂停，查看调用栈：无论内部经过哪个 CRT/Kernel API，输入函数最终都要返回到 crackme 自己的模块继续校验。给调用栈中第一个属于 <code>crackme3_pack</code> 的返回地址下软件断点，就能停在「输入刚返回、校验将开始」的位置。</p>
+<p>堆和栈地址只对本次进程实例有效；程序重启后 ASLR、堆分配、栈布局和 VMP 工作区都可能变化。</p>
+<h3>同一次运行流程</h3>
+<p>1. 让程序停在等待输入的界面，先不要按回车； 2. 在调试器中暂停； 3. 打开 Call Stack，找到第一个返回到 <code>crackme3_pack</code> 模块的地址； 4. 在该返回地址下软件断点； 5. 继续运行，输入唯一字符串并回车； 6. 输入函数返回后立即断下，此时校验尚未走远； 7. 在同一个进程执行全内存搜索； 8. 对当前搜索结果设置硬件访问断点； 9. 继续运行，观察谁读取或复制输入； 10. 如果先停在系统库/CRT 的复制逻辑，跟踪目标缓冲区，直到命中 crackme 或 VM 相关代码。</p>
+<h3>findallmem</h3>
+<p>本次命令：</p>
+<pre><code>
+findallmem 0,51374D324B395834
+</code></pre>
+<p>含义：从地址 0 开始，扫描当前进程的全部可搜索内存区域，寻找指定字节序列。输入字符串 <code>Q7M2K9X4</code> 的 ASCII 字节：</p>
+<pre><code>
+Q  7  M  2  K  9  X  4
+51 37 4D 32 4B 39 58 34
+</code></pre>
+<p>若程序使用 UTF-16，还要搜索：</p>
+<pre><code>
+51 00 37 00 4D 00 32 00 4B 00 39 00 58 00 34 00
+</code></pre>
+<p>结果出现在 References/引用视图，不一定显示在当前 Dump 窗口，可用 <code>? ref.count()</code> 查看结果数量。手工在 Dump 中「二进制搜索」通常只搜索当前选中的内存区或页面；<code>findallmem</code> 跨模块、堆、栈、私有映射区搜索，所以手工搜索可能找不到而它能找到。</p>
+<h3>异常日志</h3>
+<pre><code>
+DLL已载入：76A20000 C:\Windows\SysWOW64\imm32.dll
+INT3 断点“入口断点”于 0105FE27
+
+EXCEPTION_DEBUG_INFO:
+    dwFirstChance: 1
+    ExceptionCode: 80000004 (EXCEPTION_SINGLE_STEP)
+    ExceptionAddress: 01391FF2
+
+DLL已载入：76FC0000 C:\Windows\SysWOW64\sechost.dll
+</code></pre>
+<p><code>0x80000004</code> 是单步异常。VMP 可能把它作为故意的控制流/反调试机制；硬件断点也依赖单步异常。因此只能在确认当前不是自己设置的 DRx 命中时，临时选择一次「运行并传递异常」，不能把所有 <code>0x80000004</code> 永久忽略。</p>
+<h3>失败实验：旧地址硬件断点假命中</h3>
+<p>搜索结果：</p>
+<pre><code>
+地址 = 018C5FF0    反汇编 = push ecx
+地址 = 015AFB3C    反汇编 = push ecx
+</code></pre>
+<p><code>push ecx</code> 只是把以 <code>0x51</code>（ASCII <code>Q</code>）开头的数据当作代码解码的显示结果，不代表输入成了代码。</p>
+<p>随后重启程序并在旧地址设置断点，命中：</p>
+<pre><code>
+01376A94  mov edx,dword ptr ss:[ebp]
+01376A98  add ebp,4
+01376A9E  xor edx,ebx
+01376AA0  not edx
+01376AA2  bswap edx
+</code></pre>
+<p>当时一度把它当成「读取输入」的证据，后来被实验否定。正确结论：旧的堆/栈地址在新进程中已不再代表原输入缓冲区，硬件断点命中了新的 VMP 工作数据或无关内存。<strong>这是假命中，不能用于推导校验算法。</strong></p>
+<p>动态地址必须按类别区分：</p>
+<p>| 地址类型 | 重启后能否直接复用 | |---|---| | 模块内地址，已换算成「模块基址 + RVA」 | ASLR 后重新计算通常可复用 | | 堆地址 | 通常不可复用 | | 栈地址 | 通常不可复用 | | VMP 私有工作区 | 需重新确认内存映射，不能凭旧值复用 |</p>
+<p>容易误解的点：</p>
+<p>| 误解 | 修正 | |---|---| | <code>findallmem</code> 找到的位置反汇编为 <code>push ecx</code>，说明输入成了代码 | 字节 <code>0x51</code> 既是 ASCII <code>Q</code> 也是 <code>push ecx</code>；数据窗口被反汇编不代表它真是代码 | | 搜到地址后重启程序，原地址仍是输入缓冲区 | 堆、栈和私有区地址通常不稳定；必须在同一次进程运行中搜索和下断 | | 输入回车后报错，再搜索也一定能找校验代码 | 此时校验可能已结束，只能看到残留副本；应在输入函数返回前后提前布置断点 | | <code>EXCEPTION_SINGLE_STEP</code> 一定是 VMP 反调试 | 硬件断点命中也产生它，必须结合 DRx、EIP 和日志判断 | | 两个搜索结果都是原始输入缓冲区 | 可能分别是控制台/CRT 缓冲区、程序副本或 VMP 工作区，需要看访问者和内存归属 |</p>
+<h2>当天结论与下一步</h2>
+<p>当天从「过不了反调试」推进到「进入 VM、确认入口解码和 Handler 链式调度、完成一段 trace 的语义去重」，但还没有恢复最终口令算法，也没有翻译到成功/失败分支。</p>
+<p>最关键的三次认知变化：</p>
+<p>1. 从「插件注入成功却仍被检测」转为用源码解释直接系统调用和返回行为校验； 2. 从「入口乱码可能是另一层壳」转为用真实 EIP 和字节长度证明重叠反汇编； 3. 从「找一个固定断点抓所有 Handler」转为认识分散式链式调度，并按语义去重。</p>
+<p>下一次实验顺序：</p>
+<p>1. 保持已能通过反调试的最小插件配置，不再随意叠加插件； 2. 在同一次运行中定位控制台输入返回地址； 3. 输入唯一字符串后立刻 <code>findallmem</code>； 4. 对当前地址设置硬件访问断点并确认内存区域归属； 5. 条件 Trace 日志加入全部关键寄存器； 6. 继续扩充「Handler 语义字典」，但不重复翻译克隆； 7. 找到 VMExit 或输入比较相关块； 8. 按「虚拟指令 → 等价汇编 → 合并语义」恢复验证路径； 9. 每个结论至少用一次栈、寄存器或内存变化验证。</p>
+<p>注意区分几组「不等于」：</p>
+<ul>
+<li>「过了反调试」不等于「已经脱壳」，当前仍在 VMP 虚拟机中；</li>
+<li>「能识别 Handler 名称」不等于「已恢复业务逻辑」，还缺具体操作数和数据流；</li>
+<li>「找到许多 Handler 地址」不等于「找到了传统 Handler 表」；</li>
+<li>「插件能自动分析」不等于插件输出永远正确，关键路径仍要人工核对；</li>
+<li>「今天没有得到口令」不等于没有进展；入口、寄存器角色、调度模型和 7 类语义是后续切片的基础。</li>
+</ul>
+<p>| 项目 | 当天状态 | |---|---| | ScyllaHide 注入 | 成功，但未通过样本全部反调试 | | SharpOD v0.6b | 本样本实测通过 | | AEP 重叠反汇编 | 已用原始字节和 EIP 解释 | | VMEntry 参数解码 | 已手算到 <code>EDI=013A488F</code>、<code>EBX=00B1488F</code> | | 调度模型 | 已确认大多数普通 Handler 自行解密下一地址并 <code>jmp esi</code> | | 固定公共 Dispatcher | 当前未观察到 | | 固定明文 Handler 表 | 当前未观察到 | | 500 步语义分类 | 25 个实例、7 类语义 | | VMExit | 尚未遇到 | | 输入地址硬件断点 | 旧地址跨进程复用导致假命中，方案已纠正 | | 最终校验算法 | 待分析 |</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

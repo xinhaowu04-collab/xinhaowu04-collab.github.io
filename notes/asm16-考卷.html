@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16位汇编综合考卷 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">16位汇编综合考卷</h1>
+<div class="meta"><span class="cat">16 位汇编</span></div>
+<article>
+<h1>16位汇编综合考卷</h1>
+<p><strong>姓名：________  日期：________  总分：100分</strong></p>
+<hr>
+<h2>一、选择题（每题2分，共30分）</h2>
+<p>1. 8086 CPU的物理地址是多少位？</p>
+<ul>
+<li>A. 8位</li>
+<li>B. 16位</li>
+<li>C. 20位</li>
+<li>D. 32位</li>
+</ul>
+<p>2. 8086的指令预取队列缓冲器大小是多少字节？</p>
+<ul>
+<li>A. 4字节</li>
+<li>B. 6字节</li>
+<li>C. 8字节</li>
+<li>D. 16字节</li>
+</ul>
+<p>3. 下列哪条指令会清空指令预取队列？</p>
+<ul>
+<li>A. MOV AX, BX</li>
+<li>B. ADD AX, 1</li>
+<li>C. JMP LABEL</li>
+<li>D. INC CX</li>
+</ul>
+<p>4. 8086中哪个寄存器不能作为间接寻址的基址寄存器？</p>
+<ul>
+<li>A. BX</li>
+<li>B. BP</li>
+<li>C. CX</li>
+<li>D. SI</li>
+</ul>
+<p>5. PSP（程序段前缀）的前两个字节是什么？</p>
+<ul>
+<li>A. 90 90</li>
+<li>B. CD 20</li>
+<li>C. 4D 5A</li>
+<li>D. EB 00</li>
+</ul>
+<p>6. 下列哪个标志位不受INC和DEC指令影响？</p>
+<ul>
+<li>A. ZF</li>
+<li>B. SF</li>
+<li>C. CF</li>
+<li>D. OF</li>
+</ul>
+<p>7. 8086中MUL指令执行8位乘法时，结果存放在哪里？</p>
+<ul>
+<li>A. AL</li>
+<li>B. AX</li>
+<li>C. DX:AX</li>
+<li>D. AH:AL</li>
+</ul>
+<p>8. 下列哪条指令不能用于清零AX寄存器？</p>
+<ul>
+<li>A. MOV AX, 0</li>
+<li>B. XOR AX, AX</li>
+<li>C. SUB AX, AX</li>
+<li>D. AND AX, 0</li>
+</ul>
+<p>9. MOVSB指令的源地址默认使用哪个段寄存器？</p>
+<ul>
+<li>A. CS</li>
+<li>B. DS</li>
+<li>C. ES</li>
+<li>D. SS</li>
+</ul>
+<p>10. 8086实模式下，逻辑地址0DAB:0100对应的物理地址是？</p>
+<ul>
+<li>A. 0DAB0100H</li>
+<li>B. 0DBB0H</li>
+<li>C. 0EAB0H</li>
+<li>D. 1DAB0H</li>
+</ul>
+<p>11. 下列哪条指令在8086中是单字节编码？</p>
+<ul>
+<li>A. NOP</li>
+<li>B. MOV AX, BX</li>
+<li>C. ADD AX, 1</li>
+<li>D. JMP NEAR PTR LABEL</li>
+</ul>
+<p>12. CBW指令的功能是什么？</p>
+<ul>
+<li>A. 将AL符号扩展到AX</li>
+<li>B. 将AX符号扩展到DX:AX</li>
+<li>C. 清除AL的高4位</li>
+<li>D. 交换AH和AL</li>
+</ul>
+<p>13. TEST AX, AX指令主要影响哪个标志位来判断AX是否为0？</p>
+<ul>
+<li>A. CF</li>
+<li>B. ZF</li>
+<li>C. SF</li>
+<li>D. OF</li>
+</ul>
+<p>14. 下列哪个寄存器是LOOP指令隐含使用的计数器？</p>
+<ul>
+<li>A. AX</li>
+<li>B. BX</li>
+<li>C. CX</li>
+<li>D. DX</li>
+</ul>
+<p>15. 8086中，CS寄存器可以作为哪条指令的目的操作数？</p>
+<ul>
+<li>A. MOV</li>
+<li>B. PUSH</li>
+<li>C. POP</li>
+<li>D. 以上都不可以</li>
+</ul>
+<hr>
+<h2>二、填空题（每空1分，共20分）</h2>
+<p>1. 8086的EU部件负责________和________，BIU部件负责________和________。</p>
+<p>2. 物理地址的计算公式是：物理地址 = ________ × 16 + ________。</p>
+<p>3. 8086有________个通用寄存器，________个段寄存器。</p>
+<p>4. AX寄存器可以分为两个8位寄存器：________ 和 ________。</p>
+<p>5. BP寄存器默认配合________ 段寄存器使用，主要用于访问________。</p>
+<p>6. XLAT指令的功能是：AL ← ________:[________ + ________]。</p>
+<p>7. ADC指令在执行加法时会额外加上________ 标志位的值。</p>
+<p>8. 16位除法DIV CX执行后，商存放在________ 寄存器，余数存放在________ 寄存器。</p>
+<p>9. SHR是________ 右移，SAR是________ 右移。</p>
+<p>10. 字符串操作指令中，________ 标志位控制SI和DI的递增或递减方向。</p>
+<hr>
+<h2>三、判断题（每题1分，共10分）</h2>
+<p>1. 8086中，同一个物理地址只能对应一个逻辑地址。（  ）</p>
+<p>2. MOV指令可以实现内存到内存的直接传送。（  ）</p>
+<p>3. PUSH和POP指令每次操作都是以字（16位）为单位。（  ）</p>
+<p>4. JMP指令执行后不会影响任何标志位。（  ）</p>
+<p>5. CMP指令会修改目的操作数的值。（  ）</p>
+<p>6. LODSB指令执行后会自动影响ZF标志位。（  ）</p>
+<p>7. LEA指令会访问内存读取数据。（  ）</p>
+<p>8. IN和OUT指令访问的是内存地址空间。（  ）</p>
+<p>9. HLT指令执行后CPU会进入死循环。（  ）</p>
+<p>10. 8086实模式下，所有代码都运行在Ring 0特权级。（  ）</p>
+<hr>
+<h2>四、简答题（每题5分，共20分）</h2>
+<p>1. 请简述8086中段内直接转移（JMP NEAR）和段内间接转移（JMP AX）的区别，并说明各自的使用场景。</p>
+<p><br><br><br></p>
+<p>2. 解释为什么<code>SUB AX, AX</code>和<code>XOR AX, AX</code>都能清零AX寄存器，但编译器更喜欢用<code>XOR</code>？</p>
+<p><br><br><br></p>
+<p>3. 说明在16位有符号除法前为什么必须使用CWD或CBW指令进行符号扩展？如果不进行符号扩展会发生什么？</p>
+<p><br><br><br></p>
+<p>4. 请解释MZ文件格式和COM文件格式的主要区别（至少列举3点）。</p>
+<p><br><br><br></p>
+<hr>
+<h2>五、代码阅读题（每题5分，共10分）</h2>
+<h3>1. 机器码解析</h3>
+<p>已知机器码：<code>83 C3 7F</code></p>
+<p>请写出：</p>
+<ul>
+<li>对应的汇编指令：________________</li>
+<li>opcode是：________</li>
+<li>ModR/M字节是：________</li>
+<li>立即数是：________</li>
+<li>这条指令使用了符号扩展吗？________</li>
+</ul>
+<h3>2. 代码段分析</h3>
+<pre><code>
+MOV CX, 10
+MOV SI, OFFSET BUFFER
+CLD
+LODSB
+CMP AL, &#x27;A&#x27;
+JE FOUND
+LOOP NEXT
+</code></pre>
+<p>回答以下问题：</p>
+<ul>
+<li>这段代码的功能是：________________</li>
+<li>CX寄存器的作用是：________________</li>
+<li>如果改用<code>REPNE SCASB</code>实现，需要修改哪些部分？________________</li>
+</ul>
+<hr>
+<h2>六、编程题（共10分）</h2>
+<p>编写8086汇编代码实现以下功能：</p>
+<p>将内存中DS:SI指向的10个字节数据复制到ES:DI指向的位置，要求： 1. 使用字符串操作指令 2. 使用REP前缀 3. 设置正确的方向标志</p>
+<pre><code>
+; 你的代码：
+
+
+
+
+
+
+
+
+
+
+</code></pre>
+<hr>
+<h2>七、综合分析题（共10分）</h2>
+<h3>题目：花指令分析与对抗</h3>
+<p>已知以下代码片段：</p>
+<pre><code>
+    JMP SHORT LABEL1
+    DB 0B8H              ; 脏字节
+LABEL1:
+    MOV AX, 1234H
+    ADD AX, BX
+</code></pre>
+<p>回答以下问题：</p>
+<p>1. 这段代码使用了什么反逆向技术？（2分）</p>
+<p><br></p>
+<p>2. 线性扫描反汇编器会如何错误地解析这段代码？请写出错误的反汇编结果。（3分）</p>
+<p><br><br></p>
+<p>3. CPU实际执行时会如何处理这段代码？（2分）</p>
+<p><br><br></p>
+<p>4. 如果要清除这个花指令，应该如何操作？（3分）</p>
+<p><br><br></p>
+<hr>
+<p><strong>答题结束，请仔细检查！</strong></p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

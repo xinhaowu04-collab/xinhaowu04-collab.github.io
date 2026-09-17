@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shellcode：PEB 链与导出表解析 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">Shellcode：PEB 链与导出表解析</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>Shellcode：PEB 链与导出表解析</h1>
+<p>shellcode 没有 IAT、没有 .data 段，要在任意内存地址运行，靠一条完整链路定位 API 地址：<code>PEB → Ldr → 模块链表 → 导出表</code>。</p>
+<h2>TEB 与 PEB 结构</h2>
+<p><strong>TEB（Thread Environment Block，线程环境块）</strong> 是每个线程独有的结构体，记录线程的运行时状态信息，好比每个线程的"个人信息本"。<strong>PEB（Process Environment Block，进程环境块）</strong> 是每个进程独有的结构体，记录进程全局信息，好比进程的"户口本"。</p>
+<p>二者是 Windows 在用户态暴露给进程/线程的核心管理结构，shellcode 通过遍历 PEB 内部的模块链表实现动态定位 API 地址。关系链：<code>TEB → PEB → Ldr → 模块链表</code>。</p>
+<h3>TEB 内存布局</h3>
+<p>x86 下 TEB 的 <strong>+0x30 偏移处</strong>存放着指向 PEB 的指针，这是从线程环境块进入进程环境块的关键桥梁：</p>
+<pre><code>
+TEB 内存布局（x86）：
++0x00: 异常处理链（SEH 链表头）
++0x04: 栈顶
++0x08: 栈底
+...
++0x18: TEB 自身地址
+...
++0x30: PEB 指针    ← 关键：通过它跳转到 PEB
+</code></pre>
+<ul>
+<li>每个线程有自己独立的 TEB</li>
+<li>x86 下通过 <strong>FS 段寄存器</strong>访问：<code>FS:[偏移]</code></li>
+<li>x64 下改用 <strong>GS 段寄存器</strong>（PEB 偏移变为 +0x60）</li>
+</ul>
+<h3>PEB 内存布局</h3>
+<p>PEB 的 +0x0C 偏移处存放着 <code>PEB_LDR_DATA*</code> 指针，它指向模块链表，是后续遍历所有已加载 DLL 的入口：</p>
+<pre><code>
+typedef struct _PEB {
+    BYTE  InheritedAddressSpace;    // +0x00
+    BYTE  ReadImageFileExecOptions; // +0x01
+    BYTE  BeingDebugged;            // +0x02  ← 反调试常用
+    BYTE  Spare;                    // +0x03
+    VOID* Mutant;                   // +0x04
+    VOID* ImageBaseAddress;         // +0x08  ← exe 基地址
+    PEB_LDR_DATA* Ldr;              // +0x0C  ← 模块链表入口
+    // ...
+} PEB;
+</code></pre>
+<h3>完整访问链路</h3>
+<pre><code>
+FS 段寄存器（指向当前线程 TEB）
+  → TEB +0x30 → PEB 地址
+    → PEB +0x0C → Ldr（PEB_LDR_DATA）
+      → 模块链表 → kernel32 基地址
+</code></pre>
+<p>关键要点：</p>
+<ul>
+<li><code>fs:[30h]</code> 取出的是 PEB 的<strong>地址</strong>，不是 PEB 结构体本身</li>
+<li>内核在创建线程时把 TEB 地址加载到 FS，线程切换时 FS 自动切换，所以 <code>fs:[30h]</code> 永远是<strong>当前线程</strong>的 PEB</li>
+<li>一个进程只有一个 PEB，但可以有多个 TEB（多线程）</li>
+<li>PEB 地址每次进程启动都不同（<strong>ASLR</strong>），必须通过 <code>fs:[30h]</code> 动态获取，无法硬编码</li>
+</ul>
+<h3>获取 PEB 地址</h3>
+<pre><code>
+mov eax, fs:[30h]   ; x86：eax = PEB 地址
+mov rax, gs:[60h]   ; x64：rax = PEB 地址（偏移不同）
+</code></pre>
+<p>对应的 C 内联函数分别是 <code>__readfsdword(0x30)</code> 和 <code>__readgsqword(0x60)</code>。</p>
+<p><strong>assume fs:nothing（MASM 专用）：</strong></p>
+<pre><code>
+assume fs:nothing
+</code></pre>
+<p>这是给 MASM 编译器看的声明，不生成任何机器码。作用：告诉汇编器"FS 没有关联我程序里定义的任何段，别报警告，直接生成指令"。不写的话，MASM 看到 <code>mov eax, fs:[30h]</code> 会警告 <code>fs</code> 没有关联任何段。</p>
+<h2>PEB_LDR_DATA 与模块链表</h2>
+<p><code>PEB_LDR_DATA</code> 是 PEB 中用来管理已加载模块（EXE 和 DLL）的核心数据结构，PEB 偏移 <code>+0x0C</code> 处的 <code>Ldr</code> 指针指向该结构体：</p>
+<pre><code>
+typedef struct _PEB_LDR_DATA {
+    ULONG     Length;                              // +0x00
+    BOOLEAN   Initialized;                         // +0x04
+    PVOID     SsHandle;                            // +0x08
+    LIST_ENTRY InLoadOrderModuleList;              // +0x0C
+    LIST_ENTRY InMemoryOrderModuleList;            // +0x14
+    LIST_ENTRY InInitializationOrderModuleList;    // +0x1C  ← shellcode 常用
+} PEB_LDR_DATA;
+</code></pre>
+<p>结构中包含<strong>三条双向链表</strong>，每条链表串联所有已加载模块的 <code>LDR_DATA_TABLE_ENTRY</code>，区别在于排序依据不同：</p>
+<p>|链表|偏移|排列依据|特点| |---|---|---|---| |<code>InLoadOrderModuleList</code>|+0x0C|加载顺序|谁先加载谁在前| |<code>InMemoryOrderModuleList</code>|+0x14|内存地址顺序|按基址从小到大| |<code>InInitializationOrderModuleList</code>|+0x1C|初始化顺序|DllMain 调用顺序|</p>
+<h3>为什么用 InInitializationOrderModuleList</h3>
+<p>Windows 内核加载 DLL 时会依次调用每个 DLL 的入口点（DllMain），<code>InInitializationOrderModuleList</code> 严格按照这个<strong>初始化顺序</strong>排列，顺序在所有 Windows 版本中稳定，因此第一条有效的用户态 DLL 通常是 <code>kernel32.dll</code>（紧随 <code>ntdll.dll</code> 之后）。shellcode 利用这个稳定性来定位 kernel32 基址。</p>
+<p>注意：该链表不含 exe 自身节点，ntdll.dll 是第 1 个节点、kernel32.dll 通常是第 2 个节点，位于链表头部附近，遍历次数少。</p>
+<h3>嵌入式链表</h3>
+<p>链表由 <code>LIST_ENTRY</code> 双向循环链表节点构成：</p>
+<pre><code>
+typedef struct _LIST_ENTRY {
+    LIST_ENTRY* Flink;   // 指向下一个节点
+    LIST_ENTRY* Blink;   // 指向上一个节点
+} LIST_ENTRY;            // 共 8 字节（32位）
+</code></pre>
+<p>关键设计是<strong>嵌入式链表</strong>：<code>LIST_ENTRY</code> 不独立存在，而是嵌入到 <code>LDR_DATA_TABLE_ENTRY</code> 结构体的某个字段中。链表头的 <code>Flink</code> 指向第一个模块节点的 <code>InInitializationOrderLinks</code>，而不是指向结构体开头。</p>
+<p>遍历顺序：链表头 → ntdll → kernel32 → … → 回到链表头（循环）。当遍历到的节点地址等于链表头地址（即 <code>PEB_LDR_DATA.InInitializationOrderModuleList</code> 的地址）时，说明已经遍历完一圈。</p>
+<h3>取链表头地址</h3>
+<pre><code>
+mov eax, fs:[30h]       ; eax = PEB 地址
+mov eax, [eax + 0Ch]    ; eax = PEB.Ldr → PEB_LDR_DATA 地址
+mov eax, [eax + 1Ch]    ; eax = InInitializationOrderModuleList.Flink
+                        ;     = 第一个模块的 InInitializationOrderLinks 地址
+</code></pre>
+<p><code>[eax + 1Ch]</code> 读取的是 <code>InInitializationOrderModuleList</code> 的第一个字段（Flink），即链表第一个节点的地址。</p>
+<h2>LDR_DATA_TABLE_ENTRY 详解</h2>
+<p><code>LDR_DATA_TABLE_ENTRY</code> 是 Windows 内核为进程内每个已加载 DLL 分配的数据结构，可以视为 <strong>DLL 的户口本</strong>。它完整记录了一个模块的全部元信息，包括<strong>基地址（DllBase）</strong>、<strong>入口点</strong>、<strong>镜像大小</strong>、<strong>完整路径</strong>和<strong>文件名</strong>，并通过三个 <code>LIST_ENTRY</code> 链节挂入 <code>PEB_LDR_DATA</code> 中的不同链表。</p>
+<pre><code>
+typedef struct _LDR_DATA_TABLE_ENTRY {
+    LIST_ENTRY InLoadOrderLinks;              // +0x00  加载顺序链表挂钩
+    LIST_ENTRY InMemoryOrderLinks;            // +0x08  内存顺序链表挂钩
+    LIST_ENTRY InInitializationOrderLinks;    // +0x10  初始化顺序链表挂钩
+    VOID*      DllBase;                       // +0x18  DLL 基地址
+    VOID*      EntryPoint;                    // +0x1C  DllMain 地址
+    ULONG      SizeOfImage;                   // +0x20  内存中的大小
+    UNICODE_STRING FullDllName;               // +0x24  完整路径
+    UNICODE_STRING BaseDllName;               // +0x2C  文件名（如 KERNEL32.DLL）
+} LDR_DATA_TABLE_ENTRY;
+</code></pre>
+<h3>偏移计算（以 InInitializationOrderLinks 为基准）</h3>
+<p>遍历时寄存器指向 <code>InInitializationOrderLinks</code>（结构体偏移 +0x10），所有字段需要以该字段的地址为基准计算偏移：</p>
+<p>|字段|结构体绝对偏移|相对 eax（InInitializationOrderLinks）偏移| |---|---|---| |InInitializationOrderLinks|+0x10|+0x00（eax 指向此处）| |DllBase|+0x18|<strong>+0x08</strong>| |EntryPoint|+0x1C|+0x0C| |SizeOfImage|+0x20|+0x10| |FullDllName.Length|+0x24|+0x14| |FullDllName.Buffer|+0x28|+0x18| |BaseDllName.Length|+0x2C|+0x1C| |BaseDllName.Buffer|+0x30|+0x20|</p>
+<p>内存直观布局：</p>
+<pre><code>
+LDR_DATA_TABLE_ENTRY 内存布局（32位）：
+地址        内容
+0x????00   [InLoadOrderLinks.Flink]        +0x00
+0x????04   [InLoadOrderLinks.Blink]        +0x04
+0x????08   [InMemoryOrderLinks.Flink]      +0x08
+0x????0C   [InMemoryOrderLinks.Blink]      +0x0C
+0x????10   [InInitializationOrderLinks.Flink]  ← eax 指向这里
+0x????14   [InInitializationOrderLinks.Blink]
+0x????18   [DllBase]                       ← eax + 0x08
+0x????1C   [EntryPoint]
+0x????20   [SizeOfImage]
+0x????24   [FullDllName.Length / MaximumLength]
+0x????28   [FullDllName.Buffer]
+0x????2C   [BaseDllName.Length / MaximumLength]
+0x????30   [BaseDllName.Buffer]
+</code></pre>
+<h3>DllBase 与 UNICODE_STRING</h3>
+<p><code>DllBase</code> 是 DLL 被加载到进程地址空间后的<strong>起始虚拟地址</strong>，相当于该模块在内存中的"门牌号"。有了 DllBase，才能进一步按照 PE 格式解析导出表，定位目标函数地址。</p>
+<pre><code>
+typedef struct _UNICODE_STRING {
+    USHORT Length;        // 字符串的字节长度（不含结尾空字符）
+    USHORT MaximumLength; // 缓冲区最大字节长度
+    PWSTR  Buffer;        // 指向实际宽字符的指针
+} UNICODE_STRING;
+</code></pre>
+<ul>
+<li><code>BaseDllName</code> 为此类型，存储 Unicode 宽字符串（每个字符 2 字节）</li>
+<li>示例：<code>KERNEL32.DLL</code> 的 Length = 12 字符 × 2 字节 = <strong>24 = 0x18</strong></li>
+</ul>
+<h3>汇编访问示例</h3>
+<pre><code>
+; eax = InInitializationOrderLinks 地址
+mov esi, [eax + 08h]              ; esi = DllBase
+mov ebx, [eax + 20h]              ; ebx = BaseDllName.Buffer 指针
+movzx ecx, word ptr [eax + 1Ch]   ; ecx = BaseDllName.Length（字节数）
+</code></pre>
+<h2>遍历链表找 kernel32 基地址</h2>
+<p>kernel32.dll 的加载地址随系统版本甚至每次启动而变化（ASLR）。通过遍历 PEB 中的模块链表动态定位 kernel32 基地址，是 shellcode 实现跨 Windows 版本兼容的核心技术。</p>
+<p>|系统|kernel32 基地址| |---|---| |Windows XP SP3|0x7C800000| |Windows 7|0x75630000| |Windows 10|0x74B70000|</p>
+<p>不能依赖硬编码地址的原因：<strong>ASLR</strong> 使每次加载基址不同；不同 Windows 版本内核布局差异巨大；安全更新和补丁也会改变加载地址。</p>
+<p>查找链路：通过 <strong>PEB → Ldr → InInitializationOrderModuleList</strong> 链表，从 ntdll.dll 开始遍历，找到 kernel32.dll 后取出其 DllBase 字段即为基地址。</p>
+<pre><code>
+fs:[30h] → PEB → +0x0C → PEB_LDR_DATA → +0x1C → InInitializationOrderModuleList.Flink
+  → ntdll → Flink → kernel32 → +0x08 → DllBase
+</code></pre>
+<h3>完整汇编代码</h3>
+<pre><code>
+assume fs:nothing
+
+; ===== 第一步：取 PEB 地址 =====
+mov eax, fs:[30h]       ; eax = PEB 地址（从 TEB+0x30 取）
+
+; ===== 第二步：取 Ldr 指针 =====
+mov eax, [eax + 0Ch]    ; eax = PEB.Ldr → PEB_LDR_DATA 地址
+
+; ===== 第三步：取链表头 =====
+mov eax, [eax + 1Ch]    ; eax = InInitializationOrderModuleList.Flink
+                        ;     = 第一个模块(ntdll)的 InInitializationOrderLinks 地址
+
+; ===== 第四步：遍历找 kernel32 =====
+find_k32:
+    mov esi, [eax + 08h]              ; esi = 当前模块 DllBase
+    mov ebx, [eax + 20h]              ; ebx = BaseDllName.Buffer（名字指针）
+    movzx ecx, word ptr [eax + 1Ch]   ; ecx = BaseDllName.Length（字节长度）
+    cmp ecx, 18h                      ; &quot;KERNEL32.DLL&quot; = 12字符×2 = 0x18
+    jne next_mod
+    cmp word ptr [ebx], 004Bh         ; 首字符是 &#x27;K&#x27;？（Unicode，004B = &#x27;K&#x27;）
+    je found_k32
+next_mod:
+    mov eax, [eax]      ; eax = Flink → 下一个模块的 InInitializationOrderLinks
+    jmp find_k32
+
+found_k32:
+    ; esi = kernel32.dll 基地址
+</code></pre>
+<h3>比对技巧</h3>
+<p><code>eax</code> 指向 <code>InInitializationOrderLinks</code>（结构体偏移 +0x10），字段访问偏移 = 结构体绝对偏移 − 0x10，例如 DllBase：0x18 − 0x10 = 0x08，即 <code>[eax + 08h]</code>。</p>
+<p><strong>KERNEL32.DLL 长度为何是 0x18：</strong> Windows 内核用 Unicode（UTF-16 LE）存储字符串，每个字符占 2 字节，<code>"KERNEL32.DLL"</code> = 12 个字符 × 2 字节 = 24 字节 = 0x18。先比较长度，长度不对直接跳过，避免不必要的字符串比较，提高遍历效率。</p>
+<p><strong><code>mov eax, [eax]</code> 的含义：</strong> <code>LIST_ENTRY</code> 结构的第一个字段就是 Flink，所以 <code>[eax]</code> 读出来的就是链表中下一个模块的 <code>InInitializationOrderLinks</code> 地址，等价于 C 的 <code>eax = eax->Flink</code>。</p>
+<h2>PE 导出表与按名字查找</h2>
+<p>找到 kernel32 基地址后，下一步在它的导出表里按名字查找 <code>GetProcAddress</code>。PE 导出表是 PE 文件数据目录的第一项（<code>DataDirectory[0]</code>），记录 DLL 向外暴露的导出函数信息——<code>GetProcAddress</code> 和链接器隐式导入，实际就是在查找导出表。</p>
+<p>导出表的核心由三个并行数组组成：</p>
+<ul>
+<li><strong>AddressOfFunctions</strong>（导出地址表 EAT）：函数入口 RVA 数组</li>
+<li><strong>AddressOfNames</strong>：函数名字符串指针（RVA）数组</li>
+<li><strong>AddressOfNameOrdinals</strong>：名字到地址表的<strong>序号映射</strong>数组</li>
+</ul>
+<p>其中 <code>AddressOfNames[i]</code> 和 <code>AddressOfNameOrdinals[i]</code> 使用相同的下标 <code>i</code>，描述<strong>同一个函数</strong>；<code>AddressOfFunctions[ordinal]</code> 才是该函数的入口 RVA。</p>
+<h3>三数组协作关系</h3>
+<pre><code>
+AddressOfNames          AddressOfNameOrdinals      AddressOfFunctions
+  Name[0] (GetProcAddress)  Ordinal[0] = 2           Func[0] (LoadLibraryA)
+  Name[1] (LoadLibraryA)    Ordinal[1] = 0           Func[1] (VirtualAlloc)
+  Name[2] (VirtualAlloc)    Ordinal[2] = 1           Func[2] (GetProcAddress)
+       ↓ i=0                     ↓ ordinal=2              ↓
+  匹配到下标 0  →  Ordinal[0]=2  →  Func[2] = GetProcAddress 地址
+</code></pre>
+<h3>按名字查找的流程</h3>
+<pre><code>
+1. 遍历 AddressOfNames，逐个比较函数名字符串
+2. 匹配成功后记下下标 i
+3. ordinal = AddressOfNameOrdinals[i]
+4. funcRVA = AddressOfFunctions[ordinal]
+5. funcVA = funcRVA + ImageBase
+</code></pre>
+<p>shellcode 场景中操作的是<strong>已加载到内存的 DLL</strong>，不是磁盘文件。Windows 加载器已完成文件偏移到虚拟地址的映射，因此内存中直接 <code>RVA + ImageBase = VA</code>，无需转文件偏移（磁盘文件才需要根据节表做 RVA-to-Offset 转换）。</p>
+<h3>0x78 偏移的由来</h3>
+<p>从 PE 签名（<code>e_lfanew</code> 指向的位置）开始计算到 <code>DataDirectory[0]</code>：</p>
+<pre><code>
+PE 签名        4 字节
+File Header   20 字节
+Optional Header 前 0x60 字节
+─────────────────────────
+总计：4 + 20 + 96 = 120 = 0x78
+</code></pre>
+<p>若从<strong>可选头起始</strong>算则是 <code>0x60</code>，两者指向同一个位置，不要混淆。</p>
+<h3>小端序字符串比对</h3>
+<p>内存中 <code>"GetProcAddress"</code> 的字节序列：</p>
+<pre><code>
+47 65 74 50 72 6F 63 41 ...
+G  e  t  P  r  o  c  A ...
+</code></pre>
+<p>按 DWORD（4 字节）读取时，小端序（低字节在低地址）决定了比较常数的写法：</p>
+<p>|偏移|内存字节|DWORD 值|汇编中写法| |---|---|---|---| |[0]|47 65 74 50|<code>0x50746547</code>|<code>"GetP"</code> → <code>50746547h</code>| |[4]|72 6F 63 41|<code>0x41636F72</code>|<code>"rocA"</code> → <code>41636f72h</code>|</p>
+<h3>定位导出表</h3>
+<pre><code>
+; esi = kernel32 基地址
+mov eax, [esi + 3Ch]    ; e_lfanew（PE头偏移，从 DOS Header 读）
+add eax, esi            ; PE头实际地址（VA）
+mov eax, [eax + 78h]    ; 导出表 RVA（DataDirectory[0]，从PE签名算偏移0x78）
+add eax, esi            ; 导出表实际地址（VA）
+</code></pre>
+<h3>获取三个关键数组</h3>
+<pre><code>
+mov ebx, [eax + 1Ch]
+add ebx, esi            ; AddressOfFunctions（EAT）：函数地址数组
+mov ecx, [eax + 20h]
+add ecx, esi            ; AddressOfNames：函数名字符串指针数组
+mov edx, [eax + 24h]
+add edx, esi            ; AddressOfNameOrdinals：名字对应序号数组
+</code></pre>
+<h3>完整实现：查找 GetProcAddress</h3>
+<pre><code>
+xor edi, edi                        ; 计数器 = 0
+find_gp:
+    mov eax, [ecx + edi*4]          ; 第 edi 个名字的 RVA（DWORD，x4）
+    add eax, esi                    ; 名字字符串实际地址
+    cmp dword ptr [eax], 50746547h  ; 比对 &quot;GetP&quot;（小端序）
+    jne nxt
+    cmp dword ptr [eax + 4], 41636f72h ; 比对 &quot;rocA&quot;
+    jne nxt
+    ; 找到了
+    movzx eax, word ptr [edx + edi*2]  ; 取序号（WORD，x2）
+    mov eax, [ebx + eax*4]             ; 用序号找函数地址 RVA
+    add eax, esi                        ; GetProcAddress 实际地址
+    jmp got_gp
+nxt:
+    inc edi
+    jmp find_gp
+</code></pre>
+<h2>附录：WinDbg 结构体定义</h2>
+<p>以下为在 WinDbg 中使用 <code>dt</code> 命令导出的真实结构体定义。</p>
+<h3>_TEB</h3>
+<pre><code>
+0:000&gt; dt _TEB
+ntdll!_TEB
+   +0x000 NtTib            : _NT_TIB
+   +0x01c EnvironmentPointer : Ptr32 Void
+   +0x020 ClientId         : _CLIENT_ID
+   +0x028 ActiveRpcHandle  : Ptr32 Void
+   +0x02c ThreadLocalStoragePointer : Ptr32 Void
+   +0x030 ProcessEnvironmentBlock : Ptr32 _PEB
+   +0x034 LastErrorValue   : Uint4B
+   +0x038 CountOfOwnedCriticalSections : Uint4B
+   +0x03c CsrClientThread  : Ptr32 Void
+   +0x040 Win32ThreadInfo  : Ptr32 Void
+   +0x044 User32Reserved   : [26] Uint4B
+   +0x0ac UserReserved     : [5] Uint4B
+   +0x0c0 WOW32Reserved    : Ptr32 Void
+   +0x0c4 CurrentLocale    : Uint4B
+   +0x0c8 FpSoftwareStatusRegister : Uint4B
+   +0x0cc ReservedForDebuggerInstrumentation : [16] Ptr32 Void
+   +0x10c SystemReserved1  : [21] Ptr32 Void
+   +0x160 HeapFlsData      : Ptr32 Void
+   +0x164 RngState         : [4] Uint4B
+   +0x174 PlaceholderCompatibilityMode : Char
+   +0x175 PlaceholderHydrationAlwaysExplicit : UChar
+   +0x176 PlaceholderReserved : [10] Char
+   +0x180 ProxiedProcessId : Uint4B
+   +0x184 _ActivationStack : _ACTIVATION_CONTEXT_STACK
+   +0x19c WorkingOnBehalfTicket : [8] UChar
+   +0x1a4 ExceptionCode    : Int4B
+   +0x1a8 ActivationContextStackPointer : Ptr32 _ACTIVATION_CONTEXT_STACK
+   +0x1ac InstrumentationCallbackSp : Uint4B
+   +0x1b0 InstrumentationCallbackPreviousPc : Uint4B
+   +0x1b4 InstrumentationCallbackPreviousSp : Uint4B
+   +0x1b8 InstrumentationCallbackDisabled : UChar
+   +0x1b9 SpareBytes       : [23] UChar
+   +0x1d0 TxFsContext      : Uint4B
+   +0x1d4 GdiTebBatch      : _GDI_TEB_BATCH
+   +0x6b4 RealClientId     : _CLIENT_ID
+   +0x6bc GdiCachedProcessHandle : Ptr32 Void
+   +0x6c0 GdiClientPID     : Uint4B
+   +0x6c4 GdiClientTID     : Uint4B
+   +0x6c8 GdiThreadLocalInfo : Ptr32 Void
+   +0x6cc Win32ClientInfo  : [62] Uint4B
+   +0x7c4 glDispatchTable  : [233] Ptr32 Void
+   +0xb68 glReserved1      : [29] Uint4B
+   +0xbdc glReserved2      : Ptr32 Void
+   +0xbe0 glSectionInfo    : Ptr32 Void
+   +0xbe4 glSection        : Ptr32 Void
+   +0xbe8 glTable          : Ptr32 Void
+   +0xbec glCurrentRC      : Ptr32 Void
+   +0xbf0 glContext        : Ptr32 Void
+   +0xbf4 LastStatusValue  : Uint4B
+   +0xbf8 StaticUnicodeString : _UNICODE_STRING
+   +0xc00 StaticUnicodeBuffer : [261] Wchar
+   +0xe0c DeallocationStack : Ptr32 Void
+   +0xe10 TlsSlots         : [64] Ptr32 Void
+   +0xf10 TlsLinks         : _LIST_ENTRY
+   +0xf18 Vdm              : Ptr32 Void
+   +0xf1c ReservedForNtRpc : Ptr32 Void
+   +0xf20 DbgSsReserved    : [2] Ptr32 Void
+   +0xf28 HardErrorMode    : Uint4B
+   +0xf2c Instrumentation  : [9] Ptr32 Void
+   +0xf50 ActivityId       : _GUID
+   +0xf60 SubProcessTag    : Ptr32 Void
+   +0xf64 PerflibData      : Ptr32 Void
+   +0xf68 EtwTraceData     : Ptr32 Void
+   +0xf6c WinSockData      : Ptr32 Void
+   +0xf70 GdiBatchCount    : Uint4B
+   +0xf74 CurrentIdealProcessor : _PROCESSOR_NUMBER
+   +0xf74 IdealProcessorValue : Uint4B
+   +0xf74 ReservedPad0     : UChar
+   +0xf75 ReservedPad1     : UChar
+   +0xf76 ReservedPad2     : UChar
+   +0xf77 IdealProcessor   : UChar
+   +0xf78 GuaranteedStackBytes : Uint4B
+   +0xf7c ReservedForPerf  : Ptr32 Void
+   +0xf80 ReservedForOle   : Ptr32 Void
+   +0xf84 WaitingOnLoaderLock : Uint4B
+   +0xf88 SavedPriorityState : Ptr32 Void
+   +0xf8c ReservedForCodeCoverage : Uint4B
+   +0xf90 ThreadPoolData   : Ptr32 Void
+   +0xf94 TlsExpansionSlots : Ptr32 Ptr32 Void
+   +0xf98 MuiGeneration    : Uint4B
+   +0xf9c IsImpersonating  : Uint4B
+   +0xfa0 NlsCache         : Ptr32 Void
+   +0xfa4 pShimData        : Ptr32 Void
+   +0xfa8 HeapData         : Uint4B
+   +0xfac CurrentTransactionHandle : Ptr32 Void
+   +0xfb0 ActiveFrame      : Ptr32 _TEB_ACTIVE_FRAME
+   +0xfb4 FlsData          : Ptr32 Void
+   +0xfb8 PreferredLanguages : Ptr32 Void
+   +0xfbc UserPrefLanguages : Ptr32 Void
+   +0xfc0 MergedPrefLanguages : Ptr32 Void
+   +0xfc4 MuiImpersonation : Uint4B
+   +0xfc8 CrossTebFlags    : Uint2B
+   +0xfc8 SpareCrossTebBits : Pos 0, 16 Bits
+   +0xfca SameTebFlags     : Uint2B
+   +0xfca SafeThunkCall    : Pos 0, 1 Bit
+   +0xfca InDebugPrint     : Pos 1, 1 Bit
+   +0xfca HasFiberData     : Pos 2, 1 Bit
+   +0xfca SkipThreadAttach : Pos 3, 1 Bit
+   +0xfca WerInShipAssertCode : Pos 4, 1 Bit
+   +0xfca RanProcessInit   : Pos 5, 1 Bit
+   +0xfca ClonedThread     : Pos 6, 1 Bit
+   +0xfca SuppressDebugMsg : Pos 7, 1 Bit
+   +0xfca DisableUserStackWalk : Pos 8, 1 Bit
+   +0xfca RtlExceptionAttached : Pos 9, 1 Bit
+   +0xfca InitialThread    : Pos 10, 1 Bit
+   +0xfca SessionAware     : Pos 11, 1 Bit
+   +0xfca LoadOwner        : Pos 12, 1 Bit
+   +0xfca LoaderWorker     : Pos 13, 1 Bit
+   +0xfca SkipLoaderInit   : Pos 14, 1 Bit
+   +0xfca SkipFileAPIBrokering : Pos 15, 1 Bit
+   +0xfcc TxnScopeEnterCallback : Ptr32 Void
+   +0xfd0 TxnScopeExitCallback : Ptr32 Void
+   +0xfd4 TxnScopeContext  : Ptr32 Void
+   +0xfd8 LockCount        : Uint4B
+   +0xfdc WowTebOffset     : Int4B
+   +0xfe0 ResourceRetValue : Ptr32 Void
+   +0xfe4 ReservedForWdf   : Ptr32 Void
+   +0xfe8 ReservedForCrt   : Uint8B
+   +0xff0 EffectiveContainerId : _GUID
+   +0x1000 LastSleepCounter : Uint8B
+   +0x1008 SpinCallCount    : Uint4B
+   +0x1010 ExtendedFeatureDisableMask : Uint8B
+   +0x1018 SchedulerSharedDataSlot : Ptr32 Void
+   +0x101c HeapWalkContext  : Ptr32 Void
+   +0x1020 PrimaryGroupAffinity : _GROUP_AFFINITY
+   +0x102c Rcu              : [2] Uint4B
+</code></pre>
+<p>关键字段：<code>+0x030 ProcessEnvironmentBlock : Ptr32 _PEB</code></p>
+<h3>_PEB</h3>
+<pre><code>
+0:000&gt; dt _PEB
+ntdll!_PEB
+   +0x000 InheritedAddressSpace : UChar
+   +0x001 ReadImageFileExecOptions : UChar
+   +0x002 BeingDebugged    : UChar
+   +0x003 BitField         : UChar
+   +0x003 ImageUsesLargePages : Pos 0, 1 Bit
+   +0x003 IsProtectedProcess : Pos 1, 1 Bit
+   +0x003 IsImageDynamicallyRelocated : Pos 2, 1 Bit
+   +0x003 SkipPatchingUser32Forwarders : Pos 3, 1 Bit
+   +0x003 IsPackagedProcess : Pos 4, 1 Bit
+   +0x003 IsAppContainer   : Pos 5, 1 Bit
+   +0x003 IsProtectedProcessLight : Pos 6, 1 Bit
+   +0x003 IsLongPathAwareProcess : Pos 7, 1 Bit
+   +0x004 Mutant           : Ptr32 Void
+   +0x008 ImageBaseAddress : Ptr32 Void
+   +0x00c Ldr              : Ptr32 _PEB_LDR_DATA
+   +0x010 ProcessParameters : Ptr32 _RTL_USER_PROCESS_PARAMETERS
+   +0x014 SubSystemData    : Ptr32 Void
+   +0x018 ProcessHeap      : Ptr32 Void
+   +0x01c FastPebLock      : Ptr32 _RTL_CRITICAL_SECTION
+   +0x020 AtlThunkSListPtr : Ptr32 _SLIST_HEADER
+   +0x024 IFEOKey          : Ptr32 Void
+   +0x028 CrossProcessFlags : Uint4B
+   ...（后续字段省略）...
+</code></pre>
+<p>关键字段：<code>+0x00c Ldr : Ptr32 _PEB_LDR_DATA</code></p>
+<h3>_PEB_LDR_DATA</h3>
+<pre><code>
+0:000&gt; dt _PEB_LDR_DATA
+ntdll!_PEB_LDR_DATA
+   +0x000 Length           : Uint4B
+   +0x004 Initialized      : UChar
+   +0x008 SsHandle         : Ptr32 Void
+   +0x00c InLoadOrderModuleList : _LIST_ENTRY
+   +0x014 InMemoryOrderModuleList : _LIST_ENTRY
+   +0x01c InInitializationOrderModuleList : _LIST_ENTRY
+   +0x024 EntryInProgress  : Ptr32 Void
+   +0x028 ShutdownInProgress : UChar
+   +0x02c ShutdownThreadId : Ptr32 Void
+</code></pre>
+<p>关键偏移：</p>
+<ul>
+<li><code>+0x00c InLoadOrderModuleList</code> — 按加载顺序排列的链表</li>
+<li><code>+0x014 InMemoryOrderModuleList</code> — 第二条链（8字节间隔）</li>
+<li><code>+0x01c InInitializationOrderModuleList</code> — 第三条链（8字节间隔）</li>
+</ul>
+<h3>_LIST_ENTRY</h3>
+<pre><code>
+0:000&gt; dt _LIST_ENTRY
+ntdll!_LIST_ENTRY
+   +0x000 Flink            : Ptr32 _LIST_ENTRY
+   +0x004 Blink            : Ptr32 _LIST_ENTRY
+</code></pre>
+<h3>_LDR_DATA_TABLE_ENTRY</h3>
+<pre><code>
+0:000&gt; dt _LDR_DATA_TABLE_ENTRY
+ntdll!_LDR_DATA_TABLE_ENTRY
+   +0x000 InLoadOrderLinks : _LIST_ENTRY
+   +0x008 InMemoryOrderLinks : _LIST_ENTRY
+   +0x010 InInitializationOrderLinks : _LIST_ENTRY
+   +0x018 DllBase          : Ptr32 Void
+   +0x01c EntryPoint       : Ptr32 Void
+   +0x020 SizeOfImage      : Uint4B
+   +0x024 FullDllName      : _UNICODE_STRING
+   +0x02c BaseDllName      : _UNICODE_STRING
+   +0x034 FlagGroup        : [4] UChar
+   +0x034 Flags            : Uint4B
+   ...（后续字段省略）...
+   +0x038 ObsoleteLoadCount : Uint2B
+   +0x03a TlsIndex         : Uint2B
+   +0x03c HashLinks        : _LIST_ENTRY
+   +0x044 TimeDateStamp    : Uint4B
+   +0x048 EntryPointActivationContext : Ptr32 _ACTIVATION_CONTEXT
+   +0x04c Lock             : Ptr32 Void
+   +0x050 DdagNode         : Ptr32 _LDR_DDAG_NODE
+   +0x054 NodeModuleLink   : _LIST_ENTRY
+   +0x05c LoadContext      : Ptr32 _LDRP_LOAD_CONTEXT
+   +0x060 ParentDllBase    : Ptr32 Void
+   +0x064 SwitchBackContext : Ptr32 Void
+   +0x068 BaseAddressIndexNode : _RTL_BALANCED_NODE
+   +0x074 MappingInfoIndexNode : _RTL_BALANCED_NODE
+   +0x080 OriginalBase     : Uint4B
+   +0x088 LoadTime         : _LARGE_INTEGER
+   +0x090 BaseNameHashValue : Uint4B
+   +0x094 LoadReason       : _LDR_DLL_LOAD_REASON
+   +0x098 ImplicitPathOptions : Uint4B
+   +0x09c ReferenceCount   : Uint4B
+   +0x0a0 DependentLoadFlags : Uint4B
+   +0x0a4 SigningLevel     : UChar
+   +0x0a8 CheckSum         : Uint4B
+   +0x0ac ActivePatchImageBase : Ptr32 Void
+   +0x0b0 HotPatchState    : _LDR_HOT_PATCH_STATE
+</code></pre>
+<p>关键字段：</p>
+<ul>
+<li><code>+0x000 InLoadOrderLinks</code> — 遍历和脱链用（Flink=+0, Blink=+4）</li>
+<li><code>+0x018 DllBase</code> — 模块基址</li>
+<li><code>+0x020 SizeOfImage</code> — 模块大小</li>
+<li><code>+0x024 FullDllName</code> — 完整路径（UNICODE_STRING）</li>
+<li><code>+0x02c BaseDllName</code> — 模块名（UNICODE_STRING），比对模块名用</li>
+<li><code>+0x02c Length</code> (USHORT)</li>
+<li><code>+0x02e MaximumLength</code> (USHORT)</li>
+<li><code>+0x030 Buffer</code> (Ptr32 WCHAR) — 实际字符串指针</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

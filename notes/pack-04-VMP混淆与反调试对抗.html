@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VMP 混淆与反调试对抗 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">VMP 混淆与反调试对抗</h1>
+<div class="meta"><span class="cat">壳与脱壳</span></div>
+<article>
+<h1>VMP 混淆与反调试对抗</h1>
+<p>课堂内容包括 VMP 多版本样本、简化虚拟机、NOR/NAND 万用门、<code>Mutate</code>、导入保护和反混淆；实验内容包括 ScyllaHide 安装、<code>crackme3_pack.exe</code> 反调试、x86 变长指令反汇编、<code>NtRaiseHardError</code> 栈分析、ScyllaTest/xAnalyzer 以及 x32dbg 的 F9 状态异常。凡是本次没有得到最终动态证据的判断，均标为「待确认」或「未验证」。</p>
+<h2>虚拟机组成与多版本对比</h2>
+<p>老师把历代 VMP 样本发给同学，用极简测试程序分别观察虚拟化、混淆、反调试、压缩和导入保护，并介绍如何借助 VMP 3.5.1 的源码理解内部机制。</p>
+<p>注意：记录中最初写成了 <code>VPM</code> 和「幻想函数」，分别应理解为 <code>VMP / VMProtect</code> 和混淆/变异相关函数，函数名为 <code>Mutate</code>。</p>
+<p>虚拟机基本组成：</p>
+<p>| 组件 | 含义 | |---|---| | <code>VIP</code> | Virtual Instruction Pointer，指向下一条虚拟指令或虚拟字节码 | | <code>VSP</code> | Virtual Stack Pointer，指向虚拟栈，保存虚拟指令的操作数和中间结果 | | <code>VMContext</code> | 保存虚拟寄存器、虚拟标志及其他虚拟机状态 | | <code>Dispatcher</code> | 取出并解码虚拟操作码，再把执行流交给对应 Handler | | <code>Handler</code> | 实现某一类虚拟指令语义，例如压栈、取内存、加法或逻辑运算 |</p>
+<p>简化虚拟机的基本流程：</p>
+<pre><code>
+VIP 指向虚拟指令
+    → 取出操作码 → 解码操作码
+    → Dispatcher 选择 Handler
+    → 从虚拟栈或上下文读取操作数
+    → 执行虚拟语义
+    → 写回 VSP/VMContext
+    → 更新 VIP，回到第一步
+</code></pre>
+<p>老师对教学用虚拟机做的处理：</p>
+<ul>
+<li>删除冗余调用和部分加密逻辑，让核心流程更容易观察；</li>
+<li>给寄存器或变量名增加位宽后缀，减少 8/16/32 位数据混用；</li>
+<li>修改虚拟指令操作码，例如把原来的加法演示改成减法；</li>
+<li>修正操作数读取顺序错误，避免减法结果颠倒。</li>
+</ul>
+<p>减法尤其能说明操作数顺序的重要性：<code>a - b != b - a</code>。若 Handler 从虚拟栈弹出两个操作数时把先后次序写反，即使虚拟机框架正常运行，业务结果也会偏差。</p>
+<p>教学用简化 VM 先把「取指—解码—分发—执行—写回」链路显露出来，再逐步加入真实保护中的随机化、Handler 表保护、布尔混淆和反调试。早期 1.x、2.x 与后来的 3.x 在虚拟机结构、Handler 表保护、代码随机化和混淆强度上存在演进；知道 3.5.1 的源码结构可以帮助理解函数职责、数据结构和调用关系，但不应把某一版的固定地址或字节特征直接套到所有版本。</p>
+<p>课堂实战采用「极简程序 + 单变量保护」的思路：</p>
+<pre><code>
+原始极简测试程序
+    → 只开启虚拟化
+    → 增加代码变异/混淆
+    → 增加导入保护
+    → 增加反调试
+    → 增加压缩
+</code></pre>
+<p>每次只增加一项保护，可以回答「这一段新出现的代码究竟由哪个选项产生」。随后对不同 VMP 版本做同类比较：</p>
+<p>1. 记录 VM 入口和虚拟机初始化结构； 2. 观察 VIP、VSP 和上下文的更新方式； 3. 识别 Dispatcher 与 Handler 的职责； 4. 对比 Handler 表是否编码、加密或随机化； 5. 比较开启/关闭混淆后的等价指令序列； 6. 最后再叠加导入保护、压缩和反调试，避免几个层次混在一起。</p>
+<p>跨版本识别应优先比较：</p>
+<pre><code>
+函数职责
+调用关系
+数据结构
+特征常量
+VIP/VSP 更新规律
+Handler 输入输出
+取指、解码、执行的数据流
+</code></pre>
+<p>容易误解的点：</p>
+<p>| 容易误解的说法 | 修正 | |---|---| | 「教学用简化虚拟机就是 VMP 的完整实现」 | 简化 VM 只保留核心概念；真实 VMP 还可能有滚动解密、随机化、Handler 表保护、反调试、导入保护等 | | 「知道 3.5.1 的函数名就能在所有成品中直接搜到」 | 发布版通常没有源码符号；二进制定位仍需结构、常量、调用关系或自编译对照 | | 「历代版本可以靠固定机器码特征识别」 | 编译器、随机化和变异会改变字节；语义和数据流比固定签名更可靠 | | 「混淆后的代码更复杂，所以虚拟机功能也变了」 | 混淆目标是语义等价；功能相同，变化的是实现形态和分析难度 | | 「NOR 混淆执行效率很高」 | 应理解为在可接受性能损耗下增加复杂度；等价展开通常会增加指令量，没有测试不能称为高效 |</p>
+<p>实验记录：老师发放了历代 VMP 壳样本，具体文件名和精确版本号未提供，记为待确认；课堂提到 VMP 从 2005 年前后至今的版本演进，重点讨论了 1.x、2.x、3.5/3.5.1；教学程序演示了把加法虚拟指令改成减法并修正参数读取顺序，具体源码和操作码数值未提供；课堂所说「二代壳」是讲解中的称呼，没有给出严格产品版本定义。</p>
+<h2>Mutate 变异</h2>
+<p><code>Mutate</code> 是 VMP 保护器生成阶段中的「代码变异/混淆生成」相关函数，把简单的原始运算或中间表示改写成语义相同、结构更复杂的表达式。</p>
+<p>概念流程：</p>
+<pre><code>
+原始指令或基本块
+    → VMProtect 生成阶段
+    → Mutate 选择等价变换
+    → 插入冗余、布尔表达式或随机化结构
+    → 生成混淆后的 VM/本机代码
+</code></pre>
+<p>可能出现的变异形式：</p>
+<ul>
+<li>指令等价替换；</li>
+<li>把简单算术拆成 NOT、AND、OR、XOR、移位和加法；</li>
+<li>插入无效或冗余计算；</li>
+<li>使用临时寄存器和中间变量；</li>
+<li>拆分、重排基本块；</li>
+<li>构造难以静态判断的控制流。</li>
+</ul>
+<p>源码的重要性不只是提供函数名，而是提供：</p>
+<pre><code>
+Mutate 的调用者
+参数和返回值
+内部数据结构
+使用的常量和分支
+所调用的子函数
+编译前后的可比特征
+</code></pre>
+<p>如果调试的是保护器本身，可以在执行保护操作时观察 <code>Mutate</code> 调用前后的数据；如果调试的是已保护完成的程序，<code>Mutate</code> 早已在生成阶段运行完，目标中留下的是它生成的结果，不一定还存在一个叫 <code>Mutate</code> 的函数。</p>
+<p>源码对照实验：</p>
+<pre><code>
+修改 3.5.1 源码中的 Mutate
+    → 重新编译保护器
+    → 用修改后的保护器重新保护自己的测试程序
+    → 得到关闭或削弱变异的样本
+    → 与原版保护结果对比
+</code></pre>
+<p>使用完全相同的输入和保护选项，只改变 <code>Mutate</code>：</p>
+<p>| 对照项 | 样本 A | 样本 B | |---|---|---| | 原始测试程序 | 相同 | 相同 | | 虚拟化范围 | 相同 | 相同 | | 其他保护选项 | 相同 | 相同 | | <code>Mutate</code> | 开启/原版 | 关闭或修改 | | 目的 | 观察混淆结果 | 建立较干净的参考结构 |</p>
+<p>分析现成混淆代码时做逆过程：</p>
+<pre><code>
+复杂指令序列
+    → 建立表达式/数据流
+    → 识别 NOT、NOR、NAND、XOR、进位结构
+    → 常量折叠和布尔化简
+    → 合并成 ADD、SUB、XOR 等简单语义
+</code></pre>
+<p>容易误解的点：</p>
+<p>| 容易误解的说法 | 修正 | |---|---| | 「找到 <code>Mutate</code> 就等于把现成样本反混淆了」 | <code>Mutate</code> 属于生成端；修改它后要重新编译、重新保护，主要用于建立对照样本 | | 「函数名公开，所以调试器符号窗口一定能搜到」 | 商业二进制可能剥离符号；只能借源码关系和自编译版本做对应 | | 「关闭 <code>Mutate</code> 就关闭了整个 VMP」 | 虚拟化、字节码编码、Handler 随机化、Handler 表保护、导入保护、压缩和反调试仍可能存在 | | 「Mutate 和 ScyllaHide 属于同一层」 | <code>Mutate</code> 是保护器生成端的混淆；ScyllaHide 是目标运行时的反反调试 |</p>
+<p>实验记录：本次没有提供 <code>Mutate</code> 的真实地址、参数、调用栈或源码片段，「可以在调试器直接找到」的具体操作尚未验证；老师的核心做法是比较「开启混淆」和「关闭混淆」后的虚拟机结构，重点看取指、解码、执行循环和 Handler 代码是否变清晰；课堂总结中「编译出无混淆的干净虚拟机」，更严谨地说应为「生成一个关闭或削弱该变异层的对照样本」，不保证其他保护全部消失。</p>
+<h2>德摩根定律、NOR/NAND 万用门与算术变异</h2>
+<p>德摩根定律：</p>
+<pre><code>
+第一定律：NOT(a AND b) = NOT(a) OR NOT(b)
+位运算：  ~(a &amp; b)     = (~a) | (~b)
+
+第二定律：NOT(a OR b)  = NOT(a) AND NOT(b)
+位运算：  ~(a | b)     = (~a) &amp; (~b)
+</code></pre>
+<p>NOR（或非）与 NAND（与非）：</p>
+<pre><code>
+NOR(a,b)  = NOT(a OR b)  = NOT(a) AND NOT(b)
+NAND(a,b) = NOT(a AND b) = NOT(a) OR NOT(b)
+</code></pre>
+<p>它们被称为「万用门」，因为仅用其中任意一种就能组合出 NOT、OR、AND、XOR 等完整逻辑功能。</p>
+<p>VMP 的布尔变异可以把一条简单指令（如 <code>sub eax, ebx</code>）先改写成补码等价式，再把 NOT、ADD、XOR、AND 继续拆成 NOR/NAND 组合。反混淆的关键不是逐条背诵，而是沿着输入、输出和数据依赖把几十条指令重新折叠成一个简单语义。</p>
+<h3>只使用 NOR 构造基本运算</h3>
+<p>老师板书中的以下公式正确：</p>
+<pre><code>
+NOT(a) = NOR(a,a)
+
+OR(a,b)
+= NOR(NOR(a,b), NOR(a,b))
+
+AND(a,b)
+= NOR(NOR(a,a), NOR(b,b))
+
+XOR(a,b)
+= NOR(
+    NOR(NOR(a,a), NOR(b,b)),
+    NOR(a,b)
+  )
+</code></pre>
+<p>NOR 版 XOR 拆分：</p>
+<pre><code>
+t1 = NOR(a,a)       = NOT(a)
+t2 = NOR(b,b)       = NOT(b)
+t3 = NOR(t1,t2)     = a AND b
+t4 = NOR(a,b)       = NOT(a OR b)
+result = NOR(t3,t4) = a XOR b
+</code></pre>
+<h3>只使用 NAND 构造基本运算</h3>
+<pre><code>
+NOT(a)
+= NAND(a,a)
+
+OR(a,b)
+= NAND(NAND(a,a), NAND(b,b))
+
+AND(a,b)
+= NAND(NAND(a,b), NAND(a,b))
+</code></pre>
+<h3>加法的「无进位结果 + 进位」</h3>
+<pre><code>
+a + b = (a XOR b) + ((a AND b) &lt;&lt; 1)
+</code></pre>
+<ul>
+<li><code>a XOR b</code>：不考虑进位的和；</li>
+<li><code>(a AND b) << 1</code>：下一轮要处理的进位。</li>
+</ul>
+<p>右侧仍有加号，要彻底去掉加号需迭代处理进位：</p>
+<pre><code>
+while b != 0:
+    carry = (a AND b) &lt;&lt; 1
+    a = a XOR b
+    b = carry
+
+result = a
+</code></pre>
+<h3>老师板书中的 NOR 减法</h3>
+<pre><code>
+SUB(a,b)
+= NOR(
+    ADD(NOR(a,a),b),
+    ADD(NOR(a,a),b)
+  )
+</code></pre>
+<p>令 <code>t = ADD(NOR(a,a),b) = (~a) + b</code>，又 <code>NOR(t,t) = NOT(t)</code>，所以在固定位宽补码运算中：</p>
+<pre><code>
+SUB(a,b) = NOT((~a)+b) = a-b  (mod 2^n)
+</code></pre>
+<p>8 位示例：</p>
+<pre><code>
+a = 05
+b = 03
+
+~a      = FA
+FA + 03 = FD
+~FD     = 02
+
+05 - 03 = 02
+</code></pre>
+<h3>长逻辑链化简顺序</h3>
+<p>1. 先把重复输入的门识别为取反：<code>NOR(x,x) = NOT(x)</code>，<code>NAND(x,x) = NOT(x)</code>； 2. 再识别常见二级结构：<code>NOR(NOR(a,a),NOR(b,b)) = a AND b</code>，<code>NAND(NAND(a,a),NAND(b,b)) = a OR b</code>； 3. 标记每个临时值，不要在脑中一次展开所有括号； 4. 区分「无进位结果」和「进位」； 5. 固定操作数宽度，例如 8/16/32 位； 6. 最后检查程序是否依赖 <code>CF/OF/ZF/SF</code> 等标志位。</p>
+<h3>问题公式</h3>
+<p>对话中抄下的 NAND-XOR：</p>
+<pre><code>
+XOR(a,b)
+= NAND(
+    NAND(NAND(a,a), NAND(b,b)),
+    NAND(a,b)
+  )
+</code></pre>
+<p>按当前括号计算，它实际是 <code>XNOR</code>：</p>
+<p>| a | b | 问题公式 | XOR | |---:|---:|---:|---:| | 0 | 0 | 1 | 0 | | 0 | 1 | 0 | 1 | | 1 | 0 | 0 | 1 | | 1 | 1 | 1 | 0 |</p>
+<h3>修正后公式</h3>
+<p>正确的 NAND-XOR：</p>
+<pre><code>
+t  = NAND(a,b)
+t1 = NAND(a,t)
+t2 = NAND(b,t)
+XOR(a,b) = NAND(t1,t2)
+</code></pre>
+<p>完整形式：</p>
+<pre><code>
+XOR(a,b)
+= NAND(
+    NAND(a,NAND(a,b)),
+    NAND(b,NAND(a,b))
+  )
+</code></pre>
+<p>容易误解的点：</p>
+<p>| 容易误解的地方 | 修正 | |---|---| | 「CPU 最终只执行 NOR 门」 | NOR 是逻辑等价表达；机器码仍由 NOT、OR、AND、XOR、移位、加法等指令组合实现 | | 「板书的 NAND-XOR 一定是 XOR」 | 按本次抄写的括号是 XNOR；可能是抄写或课堂书写少了一层，原板书需再核对 | | 「<code>a+b=(a XOR b)+((a AND b)<<1)</code> 已完全去掉加法」 | 右侧仍有加号，需要继续迭代进位或按固定位宽展开 | | 「减法只能写成 <code>a+(~b)+1</code>」 | 这是常见形式；板书的 <code>NOT((~a)+b)=a-b</code> 在固定位宽模运算下也成立 | | 「值相同就等于一条真实 <code>SUB</code> 完全等价」 | 结果位可以相同，但 CPU 的 CF、OF、ZF、SF 等标志不一定自然一致 | | 板书中的 <code>a+b=a+b</code> | 目前只是一条恒等式/占位提醒，没有完成任何化简；老师想表达的具体上下文待确认 |</p>
+<p>老师板书原始内容保留如下，便于与修正版本对照：</p>
+<pre><code>
+!(a AND b) = !a OR !b
+!(a OR b)  = !a AND !b
+
+NOR(a,b) = AND(NOT(a),NOT(b))
+NOT(a)   = NOR(a,a)
+OR(a,b)  = NOR(NOR(a,b),NOR(a,b))
+AND(a,b) = NOR(NOR(a,a),NOR(b,b))
+XOR(a,b) = NOR(NOR(NOR(a,a),NOR(b,b)),NOR(a,b))
+SUB(a,b) = NOR(ADD(NOR(a,a),b),ADD(NOR(a,a),b))
+
+a+b = (a XOR b)+((a AND b)&lt;&lt;1)
+a+b = a+b
+
+NAND(a,b) = OR(NOT(a),NOT(b))
+NOT(a)    = NAND(a,a)
+OR(a,b)   = NAND(NAND(a,a),NAND(b,b))
+AND(a,b)  = NAND(NAND(a,b),NAND(a,b))
+XOR(a,b)  = NAND(NAND(NAND(a,a),NAND(b,b)),NAND(a,b))
+</code></pre>
+<p>其中 NOR、NOT、OR、AND、NOR-XOR 和固定宽度下的 SUB 已验证；NAND-XOR 按当前抄写验证为 XNOR。</p>
+<h2>导入保护与 vmp_imp_fix</h2>
+<p>VMP 保护后静态分析器难以直接识别原始 API，开源工具 <code>vmp_imp_fix</code> 用于跟踪和修复导入关系。</p>
+<p>可能出现的保护形式：</p>
+<ul>
+<li>移除或破坏原始导入描述；</li>
+<li>在运行时解析 API；</li>
+<li>隐藏、编码 API 地址或索引；</li>
+<li>通过内部表、跳板或包装函数间接调用；</li>
+<li>重建或替换原 IAT 的调用关系。</li>
+</ul>
+<p>普通程序的静态调用关系较容易表现为 <code>call dword ptr [IAT槽]</code>。导入关系被隐藏后，分析器看到的可能只是内部跳板、运行时函数指针或 VMP 私有表，无法直接把调用标成 <code>MessageBoxA</code>、<code>NtQueryInformationProcess</code> 等名字。<code>vmp_imp_fix</code> 的思路是利用运行时已经解析出来的真实 API 地址，重新建立「地址—模块—函数名」的关系，再修复或重建可用的导入信息。</p>
+<p>课堂工作流：</p>
+<pre><code>
+运行授权测试样本
+    → 等待 VMP 完成 API 解析
+    → 跟踪实际调用或解析结果
+    → 识别真实 DLL/API
+    → 重建导入关系
+    → 验证修复后调用是否正确
+</code></pre>
+<p>本次没有提供 <code>vmp_imp_fix</code> 的实际命令、输出和修复文件，只记录原理，不补造操作结果。</p>
+<p>容易误解的点：</p>
+<p>| 容易误解的说法 | 修正 | |---|---| | 「整个 IAT 就是简单加密了」 | 可能是隐藏、编码、替换、间接调用或运行时解析；必须依据样本确认 | | 「修好导入表就已经去掉虚拟化」 | 导入修复只恢复 API 关系，不等于恢复虚拟指令、Handler 或原始控制流 | | 「运行时看到 API 名就能证明所有导入已修复」 | 还要验证调用槽、模块归属、转发导出和修复后程序行为 |</p>
+<p>实验记录：课堂明确提到工具名 <code>vmp_imp_fix</code>；只记录了「跟踪并修复导入、还原原始 API 调用」的课堂描述，没有真实样本修复日志，结论状态为「原理已记录，实验待做」。</p>
+<h2>ScyllaHide 安装配置</h2>
+<p>ScyllaHide 是 x64dbg/x32dbg 的用户态反反调试插件，通过修改 PEB 字段、Hook 查询 API、隐藏部分窗口/线程/时间和调试状态，尝试让目标程序看不到调试器。</p>
+<p>工具套件名称是 x64dbg，不代表所有目标都用 64 位调试器：</p>
+<p>| 目标文件 | 应使用的程序 | 插件扩展名 | Hook DLL | |---|---|---|---| | PE32 / x86 | <code>x32\x32dbg.exe</code> | <code>.dp32</code> | <code>HookLibraryx86.dll</code> | | PE32+ / x64 | <code>x64\x64dbg.exe</code> | <code>.dp64</code> | <code>HookLibraryx64.dll</code> |</p>
+<p>插件界面加载、Hook DLL 注入和所有反调试检测被成功隐藏，是三个不同层次：</p>
+<pre><code>
+插件菜单出现
+    ≠ Hook DLL 已注入
+
+Hook injection successful
+    ≠ 每一种 VMP 检测都已覆盖
+
+到达系统断点/入口断点
+    ≠ 程序一定能够继续正常运行
+</code></pre>
+<p>ScyllaHide 主要工作在用户层。如果目标直接执行系统调用、校验系统 API 入口、枚举 Hook DLL、检查父进程或使用插件未实现的路径，仍可能检测成功。</p>
+<p>官方入口：</p>
+<ul>
+<li>[ScyllaHide 官方 Releases](https://github.com/x64dbg/ScyllaHide/releases)</li>
+<li>[ScyllaHide v1.4 ZIP](https://github.com/x64dbg/ScyllaHide/releases/download/v1.4/ScyllaHide_2023-03-24_13-03.zip)</li>
+</ul>
+<p>32 位插件放置位置：</p>
+<pre><code>
+x64dbg目录\x32\plugins\ScyllaHideX64DBGPlugin.dp32
+x64dbg目录\x32\plugins\HookLibraryx86.dll
+x64dbg目录\x32\plugins\scylla_hide.ini
+</code></pre>
+<p>64 位插件放置位置：</p>
+<pre><code>
+x64dbg目录\x64\plugins\ScyllaHideX64DBGPlugin.dp64
+x64dbg目录\x64\plugins\HookLibraryx64.dll
+x64dbg目录\x64\plugins\scylla_hide.ini
+</code></pre>
+<p>配置修改后应停止并重新创建调试进程；已运行进程不能假定会被新配置完整修复。</p>
+<p><code>VMProtect x86/x64</code> Profile 包含的类别：</p>
+<p>| 类别 | 项目 | |---|---| | Hide from PEB | <code>BeingDebugged</code>、<code>HeapFlags</code>、<code>NtGlobalFlag</code>、<code>StartupInfo</code>、<code>OsBuildNumber</code> | | Debugger Hiding | <code>NtSetInformationThread</code>、<code>NtSetInformationProcess</code>、<code>NtQuerySystemInformation</code>、<code>NtQueryInformationProcess</code>、<code>NtQueryObject</code>、<code>NtYieldExecution</code>、<code>NtCreateThreadEx</code>、<code>OutputDebugStringA</code>、<code>BlockInput</code>、<code>NtUserFindWindowEx</code>、<code>NtUserBuildHwndList</code>、<code>NtUserQueryWindow</code>、<code>NtUserGetForegroundWindow</code>、<code>NtSetDebugFilterState</code>、<code>NtClose</code>、<code>Remove Debug Privileges</code> | | DRx Protection | <code>NtGetContextThread</code>、<code>NtSetContextThread</code>、<code>NtContinue</code>、<code>KiUserExceptionDispatcher</code> | | Timing Hooks | <code>GetTickCount</code>、<code>GetTickCount64</code>、<code>GetLocalTime</code>、<code>GetSystemTime</code>、<code>NtQuerySystemTime</code>、<code>NtQueryPerf.Counter</code> | | Misc | <code>Kill Anti-Attach</code> | | Special Hooks | <code>Prevent Thread creation</code>、<code>RunPE Unpacker</code> |</p>
+<p>DLL Injection 的选择：</p>
+<pre><code>
+Stealth Injection     未选
+Normal Injection      已选
+Unload after DllMain  未选
+</code></pre>
+<p>这个选择本身没有问题：普通注入兼容性通常最好；Stealth 更隐蔽但更容易出现兼容或注入失败；<code>Unload after DllMain</code> 可能影响后续 Hook，保持关闭。</p>
+<p>容易误解的点：</p>
+<p>| 容易误解的地方 | 修正 | |---|---| | 「电脑是 64 位，所以 32 位目标也用 x64dbg.exe」 | 目标位数决定调试器：<code>crackme3_pack.exe</code> 和 ScyllaTest 是 x86，应使用 x32dbg | | 「Hook injection successful 就说明插件没问题」 | 它只证明注入流程成功，不能证明返回值、直接系统调用、父进程、TLS、Hook 自检等全部隐藏 | | 「把所有选项勾上一定更强」 | 过多 Hook 可能改变程序行为或增加被检测面；本次截图是否偏离官方配置曾被误判，用户已明确恢复官方配置，不能把根因继续归咎于「乱勾选」 | | 「Normal Injection 是问题」 | 截图选择是正常配置，不是已证实的根因 | | 「ScyllaHide 理论支持 VMP，所以任何 VMP 都必须通过」 | v1.4 标注了对 VMProtect 3.6+ 的兼容支持，但不保证覆盖所有版本、选项和自定义检查 |</p>
+<h3>第一轮 crackme3_pack.exe 日志</h3>
+<pre><code>
+DLL已载入： 77740000 C:\Windows\SysWOW64\ucrtbase.dll
+线程 15344 已创建，入口：&lt;ntdll.sub_77E26120&gt; (77E26120)，参数：01B7A0C0
+DLL已载入： 756E0000 C:\Windows\SysWOW64\vcruntime140.dll
+DLL已载入： 77100000 C:\Windows\SysWOW64\user32.dll
+DLL已载入： 75AF0000 C:\Windows\SysWOW64\win32u.dll
+DLL已载入： 77490000 C:\Windows\SysWOW64\gdi32.dll
+DLL已载入： 762F0000 C:\Windows\SysWOW64\gdi32full.dll
+DLL已载入： 77C40000 C:\Windows\SysWOW64\msvcp_win.dll
+线程 17892 已创建，入口：&lt;ntdll.sub_77E26120&gt; (77E26120)，参数：01B7A0C0
+[ScyllaHide] Loaded VA for NtUserBlockInput = 0x75AF4C30
+[ScyllaHide] Loaded VA for NtUserQueryWindow = 0x75AF1230
+[ScyllaHide] Loaded VA for NtUserGetForegroundWindow = 0x75AF14C0
+[ScyllaHide] Loaded VA for NtUserBuildHwndList = 0x75AF12F0
+[ScyllaHide] Loaded VA for NtUserFindWindowEx = 0x75AF17C0
+[ScyllaHide] Loaded VA for NtUserGetClassName = 0x75AF1890
+[ScyllaHide] Loaded VA for NtUserInternalGetWindowText = 0x75AF1720
+[ScyllaHide] Loaded VA for NtUserGetThreadState = 0x75AF1150
+[ScyllaHide] Hook injection successful, image base 01B50000
+已到达系统断点！
+DLL已载入： 772E0000 C:\Windows\SysWOW64\imm32.dll
+INT3 断点 &quot;入口断点&quot; 于 &lt;crackme3_pack.OptionalHeader.AddressOfEntryPoint&gt; (010AFE27) ！
+线程 15344 退出
+线程 2752 退出
+线程 17892 退出
+进程已停止，退出码为 0xDEADC0DE (-559038242)
+正在将数据库保存于 C:\Users\Lenovo\Desktop\release\x32\db\crackme3_pack.exe.dd32 484毫秒
+调试结束！
+</code></pre>
+<p>这段日志能确认：</p>
+<pre><code>
+ScyllaHide Hook DLL：注入成功
+系统断点：到达
+入口断点：到达
+目标最终行为：主动/受控结束，退出码 0xDEADC0DE
+具体哪一项检测触发：尚未定位
+</code></pre>
+<p>注意：<code>image base 01B50000</code> 是本次注入模块映像基址，不是目标主模块固定基址。另一轮日志显示 <code>image base 013D0000</code>，说明该绝对地址随运行变化。</p>
+<h2>反调试检测面与 A/B/C 对照实验</h2>
+<p>VMP 可能从多个层面检测调试器：</p>
+<p>| 检测面 | 典型对象或 API | |---|---| | PEB | <code>PEB.BeingDebugged</code>、<code>PEB.NtGlobalFlag</code>、堆标志 | | 进程调试状态 | <code>NtQueryInformationProcess</code> 的 DebugPort、DebugObjectHandle、DebugFlags | | 调试对象 | <code>NtQueryObject</code> | | 线程隐藏/状态 | <code>NtSetInformationThread</code>、<code>NtCreateThreadEx</code> | | 系统调试状态 | <code>NtQuerySystemInformation</code> | | 简单 API | <code>IsDebuggerPresent</code>、<code>CheckRemoteDebuggerPresent</code> | | 窗口/进程枚举 | x32dbg/x64dbg 进程名、窗口标题、窗口类 | | 父进程 | 正常双击常见父进程是 <code>explorer.exe</code>，调试创建时可能是 <code>x32dbg.exe</code> | | Hook 自检 | 枚举 <code>HookLibraryx86.dll</code>、检查 ntdll/win32u 入口字节 | | 直接系统调用 | 绕过被 Hook 的 ntdll 导出入口 | | TLS/早期检查 | 在普通入口点以前保存检测结果 | | 时间检测 | <code>RDTSC</code>、<code>QueryPerformanceCounter</code>、<code>GetTickCount</code>、<code>NtQuerySystemTime</code> | | 异常和断点 | INT3、Trap Flag、异常分发、硬件调试寄存器等 |</p>
+<p>最基础的两个 API 是 <code>kernel32.IsDebuggerPresent</code> 和 <code>kernel32.CheckRemoteDebuggerPresent</code>。VMP 更可能查询：</p>
+<pre><code>
+ntdll.NtQueryInformationProcess
+ntdll.ZwQueryInformationProcess
+ntdll.NtQueryObject
+ntdll.NtSetInformationThread
+ntdll.NtQuerySystemInformation
+ntdll.NtClose
+</code></pre>
+<p>32 位 <code>NtQueryInformationProcess</code> 入口处：</p>
+<pre><code>
+[ESP+4] = ProcessHandle
+[ESP+8] = ProcessInformationClass
+</code></pre>
+<p>重点信息类：</p>
+<pre><code>
+7  = ProcessDebugPort
+30 = ProcessDebugObjectHandle
+31 = ProcessDebugFlags
+</code></pre>
+<p>目标也可能不调用 <code>IsDebuggerPresent</code>，而是直接读取 PEB：</p>
+<pre><code>
+mov eax,fs:[30h]            ; EAX = 32位 PEB
+cmp byte ptr [eax+2],0      ; PEB.BeingDebugged
+</code></pre>
+<p>此时只搜索 API 名不会命中。</p>
+<h3>A/B/C 三组最小对照实验</h3>
+<pre><code>
+A：完全关闭 x32dbg，直接双击目标
+B：只打开 x32dbg 空白窗口，不加载、不附加目标，再双击目标
+C：使用 x32dbg 加载并调试目标
+</code></pre>
+<p>「只打开 x32dbg，不调试」的准确含义：</p>
+<p>1. 启动 <code>x32dbg.exe</code>，停留在空白界面； 2. 不在调试器中打开 <code>crackme3_pack.exe</code>，也不附加； 3. 保持 x32dbg 窗口存在； 4. 在资源管理器中双击运行目标。</p>
+<p>结果判定：</p>
+<p>| 结果 | 更可能的方向 | |---|---| | B 也报错 | 调试器进程、窗口名或窗口类枚举 | | 只有 C 报错 | 目标自身的被调试状态、DebugObject、父进程、直接系统调用或 Hook 痕迹 |</p>
+<p>本次真实结果是<strong>只有 C 报错</strong>。因此可以排除「仅仅因为系统中存在 x32dbg 进程/窗口就触发」的简单路径，但不能排除父进程、DebugObject、PEB、直接系统调用或 Hook 自检。</p>
+<p>容易误解的点：</p>
+<p>| 容易误解的地方 | 修正 | |---|---| | 「只有 C 报错，所以一定是 <code>IsDebuggerPresent</code>」 | 只能缩小到真实调试状态相关路径，仍有多个候选 | | 「B 不报错就排除了所有进程信息检查」 | 只排除了简单扫描调试器进程/窗口；C 中父进程和 DebugObject 仍不同 | | 「入口断点出现，所以一定是入口字节校验」 | 这曾是早期猜测；随后暂时排除了断点/异常方向，没有证据定为根因 | | 「<code>0xDEADC0DE</code> 就是 ScyllaHide 的 Kill Anti-Attach」 | 这也是早期猜测，未由源码或断点证明；只能确认它是本次检测后的退出码 | | 「在 ntdll 导出上不命中就说明没有查询」 | 目标可能使用直接系统调用，绕过 ntdll 导出 Hook/断点 |</p>
+<p>阶段性排除和未决项：</p>
+<pre><code>
+简单窗口/进程扫描：A/B/C 结果支持排除
+异常检测：要求暂时排除，未形成完整证明
+入口/软件断点：要求暂时排除，早期判断已撤回
+PEB/DebugPort/DebugObject：仍需验证
+父进程：仍需验证
+直接系统调用：仍需验证
+HookLibrary/系统函数入口自检：仍需验证
+TLS 早期检查：仍需验证
+时间检查：优先级较低，但未排除
+</code></pre>
+<p>更有效的后续定位方向是回到目标模块，观察：</p>
+<pre><code>
+NtQueryInformationProcess
+NtQueryObject
+PEB 读取
+检测返回值后的条件分支
+进入 NtRaiseHardError 包装器之前的调用者
+</code></pre>
+<h2>x86 变长指令与滚轮</h2>
+<p>观察到同一片内存向上/下滚动后，x32dbg 显示出两组完全不同的汇编：</p>
+<pre><code>
+00C6FE27  68 63921E01          push 011E9263
+00C6FE2C  E8 505A4200          call 01095881
+00C6FE31  66:0FB646 02         movzx ax,byte ptr [esi+2]
+</code></pre>
+<p>另一种边界：</p>
+<pre><code>
+00C6FE25  38 49 68             cmp byte ptr [ecx+68],cl
+00C6FE28  63 92 1E01E850       arpl word ptr [edx+50E8011E],dx
+00C6FE2E  5A                   pop edx
+00C6FE2F  42                   inc edx
+00C6FE30  00 66 0F             add byte ptr [esi+0F],ah
+</code></pre>
+<p>x86 是变长指令集，一条指令最多可达 15 字节。向上滚动时，反汇编器必须猜「上一条指令从哪里开始」，而当前地址本身不能唯一反推出前一条边界。VMP 又可能插入垃圾字节、重叠指令或跳入一条指令的中间，使线性反汇编更容易产生另一种合法解码。</p>
+<p>两组显示来自同一串字节：</p>
+<pre><code>
+地址       原始字节
+00C6FE25   38 49 68 63 92 1E 01 E8 50 5A 42 00 66 0F B6 46 02
+</code></pre>
+<p>从 <code>00C6FE27</code> 开始时，<code>68 63 92 1E 01</code> 被解释为 <code>push imm32</code>，小端立即数为 <code>0x011E9263</code>。从 <code>00C6FE25</code> 开始时，前一条 <code>38 49 68</code> 已经把 <code>68</code> 当作 <code>[ecx+68]</code> 的位移字节「吃掉」，所以它不再是 <code>push</code> 操作码；后续 <code>E8</code> 也可能落入前一条指令的数据字段。</p>
+<p><code>call</code> 目标计算：</p>
+<pre><code>
+指令地址   = 00C6FE2C
+指令长度   = 5
+下一条 EIP = 00C6FE31
+rel32 字节 = 50 5A 42 00
+rel32 数值 = 00425A50
+目标地址   = 00C6FE31 + 00425A50 = 01095881
+</code></pre>
+<p>确认真实指令流的方法：</p>
+<p>1. 断住目标； 2. 在寄存器窗口对真实 <code>EIP</code> 选择「在反汇编中跟随」； 3. 以当前 EIP 为起点记录字节和指令； 4. 单步一次，记录新的 EIP； 5. 根据实际控制流确认边界，不依据滚轮产生的线性反汇编猜测； 6. 对相对 <code>call/jmp</code> 用「下一条地址 + 有符号位移」独立验算。</p>
+<p>容易误解的点：</p>
+<p>| 容易误解的地方 | 修正 | |---|---| | 「滚轮修改了内存代码」 | 内存字节未变，变化的是反汇编起始边界 | | 「看起来像 <code>push; call</code>，所以一定执行这组」 | 合理性只能辅助判断，最终由真实 EIP 和跳转路径决定 | | 「出现 <code>arpl</code> 就证明代码损坏」 | 也可能是从错误边界对数据/重叠字节进行的合法但无业务意义的解码 | | <code>010AFE27</code> 与 <code>00C6FE27</code> 是同一固定地址 | 它们来自不同日志/运行画面，绝对地址不同；可能受重定位或不同运行影响，主模块基址未给出，不能强行合并 | | 「AddressOfEntryPoint 在调试器中就是 PE 文件里存的原值」 | PE 字段存的是入口 RVA，调试器通常显示解析后的运行时 VA；加壳后该入口是壳入口，不一定是原程序 OEP |</p>
+<p>本次确认的机器码对应关系：</p>
+<pre><code>
+68 63 92 1E 01       → push 011E9263
+E8 50 5A 42 00       → call 01095881
+66 0F B6 46 02       → movzx ax,byte ptr [esi+2]
+</code></pre>
+<p>核心结论：<strong>内存字节没有变化，反汇编器选择的边界发生变化，CPU 实际执行哪一组由 EIP 和控制流决定。</strong></p>
+<h2>NtRaiseHardError：弹窗出口与栈分析</h2>
+<p>目标弹出：</p>
+<pre><code>
+A debugger has been found running in your system.
+Please, unload it from memory and restart your program.
+</code></pre>
+<p>弹窗时观察到栈中的：</p>
+<pre><code>
+011FE728  010052FE  返回到 crackme3_pack.010052FE 自 ???
+</code></pre>
+<p>包装代码：</p>
+<pre><code>
+010052F8  8B4425 00    mov eax,dword ptr ss:[ebp]       ; [ebp]=NtRaiseHardError
+010052FC  FFD0          call eax
+010052FE  8B6C25 FC    mov ebp,dword ptr ss:[ebp-4]
+01005302  894425 00    mov dword ptr ss:[ebp],eax
+</code></pre>
+<p>因此：</p>
+<pre><code>
+010052FC = 间接调用 NtRaiseHardError 的位置
+010052FE = call 自动压入的返回地址
+01005302 = 保存 NtRaiseHardError 返回状态的位置
+</code></pre>
+<p><code>call eax</code> 执行时，CPU 自动把下一条地址 <code>010052FE</code> 压入当前线程栈，再跳到 <code>EAX</code> 指向的 <code>NtRaiseHardError</code>。栈中出现 <code>010052FE</code> 是正常调用返回链，不代表 <code>010052FE</code> 就是反调试检测入口。</p>
+<p>调用链：</p>
+<pre><code>
+某个反调试检查
+    → 检测结果触发失败分支
+    → VMP 错误处理/包装代码
+    → 010052FC call NtRaiseHardError
+    → 显示 debugger found 通知
+    → 返回 010052FE 或随后退出
+</code></pre>
+<p><code>NtRaiseHardError</code> 是错误通知/弹窗出口，不是负责查询调试状态的 API。</p>
+<h3>分析这类栈先确认线程</h3>
+<p>1. 弹窗出现后不要确认关闭； 2. 打开 Threads，查看各线程 EIP 和栈范围； 3. 寻找包含 <code>010052FE</code> 或其他目标模块地址的线程； 4. 避免停留在 <code>NtWaitForWorkViaWorkerFactory</code> 的线程池等待线程； 5. 从 API 返回地址向外寻找真正的调用者，但必须检查候选地址前是否存在恰好结束于该地址的 <code>call</code>； 6. VMP 栈中可能混有函数指针、字符串指针、临时上下文和代码地址，不能把每个落在可执行区的数值都叫返回地址。</p>
+<p>容易误解的点：</p>
+<p>| 容易误解的地方 | 修正 | |---|---| | 「<code>010052FE</code> 是检测调试器的地方」 | 它是 <code>NtRaiseHardError</code> 的返回地址 | | 「栈窗口标成 <code>crackme3_pack.地址</code> 就是返回地址」 | 只有存在匹配的 <code>call</code> 边界和真实调用链才能确认；也可能只是 VMP 保存的代码指针 | | 「继续深入 ntdll 系统栈就能找到检测入口」 | ntdll 主要展示错误通知路径；真正判断通常在更外层目标模块 | | 「<code>0x50000018</code> 是反调试检测码」 | 它是传给 Hard Error 的状态组合，用于通知；不是检测 API 的返回值 | | 「任意线程的 ESP 都能追弹窗」 | 每个线程有独立栈；线程池等待线程与弹窗线程不是一条调用链 |</p>
+<h3>错误线程的栈</h3>
+<pre><code>
+0379F7A8  77E844B0  ntdll.RtlInterlockedCompareExchange64+180
+0379F7AC  00000000
+0379F7B0  000001E6
+0379F7B4  77E4AE9C  返回到 ntdll.ZwWaitForWorkViaWorkerFactory+C
+0379F7B8  77E26467  返回到 ntdll.TpCallbackIndependent+487
+0379F7BC  00000060
+</code></pre>
+<p><code>ZwWaitForWorkViaWorkerFactory</code>、<code>TpCallbackIndependent</code> 表明它是线程池等待链；栈地址范围 <code>0379xxxx</code> 也与此前的 <code>011Fxxxx</code> 不同，不应继续从这里追弹窗。</p>
+<h3>正确线程中的 Hard Error 参数</h3>
+<pre><code>
+014FEB74  010052AF  crackme3_pack.010052AF
+014FEB78  014FEC9C
+014FEB7C  014FEC9C
+014FEB80  014FEB94
+014FEB84  00000000
+014FEB88  77E844B0  ntdll.RtlInterlockedCompareExchange64+180
+014FEB8C  0038B20B
+014FEB90  00000175
+014FEB94  77E4A78C  返回到 ntdll.ZwRaiseHardError+C
+014FEB98  010052FE  返回到 crackme3_pack.010052FE
+014FEB9C  50000018
+014FEBA0  00000004
+014FEBA4  00000003
+014FEBA8  014FF6D0
+</code></pre>
+<p>从 <code>014FEB98</code> 开始可以映射为：</p>
+<p>| 栈地址 | 数值 | 解释 | |---|---:|---| | <code>014FEB98</code> | <code>010052FE</code> | <code>NtRaiseHardError</code> 返回地址 | | <code>014FEB9C</code> | <code>50000018</code> | <code>ErrorStatus</code> | | <code>014FEBA0</code> | <code>00000004</code> | <code>NumberOfParameters = 4</code> | | <code>014FEBA4</code> | <code>00000003</code> | 参数 0、1 按 Unicode 字符串解释的掩码 | | <code>014FEBA8</code> | <code>014FF6D0</code> | 参数数组地址 | | 后续两个参数 | 未完整贴出 | <code>ValidResponseOptions</code> 和 <code>Response</code>，待确认 |</p>
+<p>状态值拆解：</p>
+<pre><code>
+50000018
+= 40000018 | 10000000
+= STATUS_SERVICE_NOTIFICATION | HARDERROR_OVERRIDE_ERRORMODE
+</code></pre>
+<h3>更深处的混合上下文</h3>
+<pre><code>
+014FEBB8  010052AF  crackme3_pack.010052AF
+014FEBBC  01085D34  crackme3_pack.01085D34
+014FEBC0  00000202
+014FEBC4  014FF6F8
+014FEBC8  004A0000
+014FEBCC  00000287
+014FEBD0  00000217
+014FEBD4  00000206
+014FEBD8  014FF6D0
+014FEBDC  014FF4F6  L&quot;rackme3_pack.exe&quot;
+014FEBE0  77E4A780  ntdll.NtRaiseHardError
+014FEBE4  00000213
+014FEBE8  00000203
+014FEBEC  00000069
+014FEBF0  010B1165  crackme3_pack.010B1165
+014FEBF4  014FF4F4  L&quot;crackme3_pack.exe&quot;
+014FEBF8  00000257
+</code></pre>
+<p>确认项：</p>
+<pre><code>
+014FEBE0 = NtRaiseHardError 函数指针
+014FEBD8 = 之前看到的参数数组 014FF6D0
+014FF4F4 = UTF-16 字符串 &quot;crackme3_pack.exe&quot; 的正确起点
+014FF4F6 = 比正确起点多 2 字节，因此显示成 &quot;rackme3_pack.exe&quot;
+</code></pre>
+<p>候选地址 <code>010052AF</code>、<code>01085D34</code>、<code>010B1165</code> 只是「落在目标可执行区的数值」。本次没有取得它们前面的精确 <code>call</code> 证据，不能确认谁是真正外层返回地址；检测函数最终没有从这条栈完全定位出来。</p>
+<h2>ScyllaTest、xAnalyzer 与 F9 状态异常</h2>
+<p>为了区分「ScyllaHide 本身没有隐藏基础检查」与「VMP 使用额外检测」，尝试使用官方发布包内的 <code>ScyllaTest_x86.exe</code>，它应当在被调试状态下检查多种反调试项目。</p>
+<p>但加载后首先出现的是 xAnalyzer 的静态分析日志，而不是 ScyllaTest 检测结果：</p>
+<pre><code>
+INT3 断点 &quot;入口断点&quot; 于 &lt;scyllatest_x86.OptionalHeader.AddressOfEntryPoint&gt; (005542F2) ！
+Starting analysis...
+...
+[xAnalyzer]: Analysis completed in 2.083000 secs
+</code></pre>
+<p>xAnalyzer 与 ScyllaHide 是不同插件：</p>
+<p>| 项目 | xAnalyzer | ScyllaHide / ScyllaTest | |---|---|---| | 作用 | 静态识别基本块、函数、循环、xref，并给数据库加注释 | 隐藏/测试反调试状态 | | 日志中的 <code>Analysis completed</code> | 只表示分析完成 | 不代表反调试通过 | | 是否运行了目标程序 | 不一定 | ScyllaTest 必须真正执行并显示测试结果 |</p>
+<p>本次还出现「单步可以、F9 不能正常继续」「状态栏一度显示运行中」「又提示运行被调试程序或者重新调试」的不一致状态。这更像调试器事件状态、插件冲突或版本兼容问题，而不是简单的快捷键不会使用。</p>
+<p>排障路线：</p>
+<p>1. 不再从 F9/Fn 键等基础操作猜测； 2. 查看日志底部究竟是系统断点、入口断点、进程退出还是异常； 3. 区分 xAnalyzer 分析日志与 ScyllaHide 注入日志； 4. 建立一个全新的官方 x64dbg 目录； 5. 先不安装任何插件，验证 x32dbg 基本运行； 6. 只加入三个 32 位 ScyllaHide 文件； 7. 不复制 xAnalyzer 和其他旧插件； 8. 再测试 <code>ScyllaTest_x86.exe</code>； 9. 若新环境正常，旧环境存在插件/配置冲突；若仍异常，再研究新版 x64dbg 与较旧 ScyllaHide 构建的兼容性。</p>
+<p>当日核对的 x64dbg 官方下载：</p>
+<ul>
+<li>[x64dbg GitHub Releases](https://github.com/x64dbg/x64dbg/releases/latest)</li>
+<li>[snapshot_2026-05-27_12-11.zip](https://sourceforge.net/projects/x64dbg/files/snapshots/snapshot_2026-05-27_12-11.zip/download)</li>
+</ul>
+<p>当时记录的版本：</p>
+<pre><code>
+x64dbg snapshot：2026.05.27
+文件名：snapshot_2026-05-27_12-11.zip
+ScyllaHide：v1.4（压缩包日期 2023-03-24）
+</code></pre>
+<p>重装时不直接覆盖旧目录：</p>
+<pre><code>
+旧 release → 改名保留为 release_old
+新版       → 解压到全新目录
+旧数据库   → 保留 x32\db 和 x64\db
+</code></pre>
+<p>容易误解的点：</p>
+<p>| 容易误解的地方 | 修正 | |---|---| | 「<code>Analysis completed</code> 表示 ScyllaTest 已通过」 | 它是 xAnalyzer 的静态分析结束，不是 ScyllaHide 测试 | | 「提示『这种分析不能用在32位程序』来自 ScyllaHide」 | 日志上下文显示它属于其他分析插件提示，不是反调试测试结果 | | 「状态栏显示运行中，所以一定已经出现测试界面」 | 只能说明某一时刻调试状态是运行；进程可能随后退出、被挂起或事件状态异常 | | 「F9 不能继续就是 Fn 键问题」 | 这是一次明确误判，后来已撤回；应优先检查调试事件链和插件冲突 | | 「高级选项太多就是已确认根因」 | 用户明确说已恢复官方配置，这一推断被撤回 | | 「xAnalyzer 一定导致冲突」 | 它是唯一明确参与分析的其他插件，属于合理嫌疑，但没有完成干净环境对照，仍是待确认 |</p>
+<h3>ScyllaTest/xAnalyzer 原始日志</h3>
+<pre><code>
+INT3 断点 &quot;入口断点&quot; 于 &lt;scyllatest_x86.OptionalHeader.AddressOfEntryPoint&gt; (005542F2) ！
+Starting analysis...
+Basic block starts in 141ms!
+95188 basic blocks, 3037 function starts detected...
+Basic blocks in 250ms!
+77560/95188 delayed blocks...
+22556/77560 delayed blocks resolved (55004/95188 still left, probably unreferenced functions)
+55004/95188 unreferenced blocks
+6793 functions found!
+Functions in 47ms!
+Function ranges in 0ms!
+Analysis finished!
+这种分析不能用在32位程序……
+Starting xref analysis...
+[xAnalyzer]: Doing extended analysis...
+
+8496 xrefs found in 16ms!
+Starting analysis...
+670 called functions populated
+Analysis finished in 31ms!
+所有循环已删除！
+[xAnalyzer]: Extended analysis completed in 1.427000 secs
+
+[xAnalyzer]: Analysis completed in 2.083000 secs
+
+[xAnalyzer]: Execution Summary
+
+ - Defined Functions Detected: 227
+ - Undefined Functions Detected: 0
+ - VB DllFunctionCalls Stubs Detected: 0
+ - Total Functions Detected: 227
+ - Total Loops Detected: 401
+ - Total Comments Set: 809
+ - Total Labels Set: 0
+</code></pre>
+<p>另一轮关键日志：</p>
+<pre><code>
+[ScyllaHide] Loaded VA for NtUserQueryWindow = 0x75AF1230
+[ScyllaHide] Loaded VA for NtUserGetForegroundWindow = 0x75AF14C0
+[ScyllaHide] Loaded VA for NtUserBuildHwndList = 0x75AF12F0
+[ScyllaHide] Loaded VA for NtUserFindWindowEx = 0x75AF17C0
+[ScyllaHide] Loaded VA for NtUserGetClassName = 0x75AF1890
+[ScyllaHide] Loaded VA for NtUserInternalGetWindowText = 0x75AF1720
+[ScyllaHide] Loaded VA for NtUserGetThreadState = 0x75AF1150
+[ScyllaHide] Hook injection successful, image base 013D0000
+已到达系统断点！
+DLL已载入： 772E0000 C:\Windows\SysWOW64\imm32.dll
+</code></pre>
+<p>这段只证明进程仍停在系统断点并且注入成功，不能从中断言已经退出。注意：分析中曾先误判为进程退出，随后根据日志纠正。</p>
+<p>本次未获得 ScyllaTest 最终 <code>Detected/Not detected</code> 界面，测试结论：</p>
+<pre><code>
+ScyllaTest 检测结果：未取得
+F9/调试状态根因：未最终确认
+干净 x32dbg + 仅 ScyllaHide 对照：提出但未完成
+</code></pre>
+<h2>TitanHide 与 HyperHide</h2>
+<p>三种不同层次的反反调试工具：</p>
+<p>| 工具 | 大致层次 | 特点 | |---|---|---| | ScyllaHide | 用户态 API/PEB Hook | 安装简单，兼容性较好，但可能被直接系统调用或 Hook 自检绕过 | | TitanHide | 内核驱动 | 能隐藏更多内核调试状态，但驱动老化、签名、兼容性和蓝屏风险更高 | | HyperHide | 插件 + 驱动/Hypervisor | 依赖 VT-x/EPT 等虚拟化能力，环境要求和风险更高 |</p>
+<p>当用户态 Hook 无法控制真实内核调试对象或目标直接进入内核时，驱动/Hypervisor 理论上能在更低层修改或虚拟化观察结果。但「层次更低」也意味着更高系统权限和更大故障面。</p>
+<p>官方入口：</p>
+<ul>
+<li>[TitanHide 官方仓库](https://github.com/mrexodia/TitanHide)</li>
+<li>[HyperHide 官方仓库](https://github.com/Air14/HyperHide)</li>
+</ul>
+<p>浏览器拦截的文件名为 <code>TitanHide-f1fbb18ec89ce8d072296faeda8ff7aa9a4468cb.zip</code>，当时核对认为该提交号对应 TitanHide 官方 <code>v0019</code> 发布，但浏览器仍将其视为危险下载。即使来源匹配，也不等于适合在主力物理机安装。</p>
+<p>没有虚拟机时的安全路线：</p>
+<pre><code>
+不关闭 Defender/SmartScreen
+不在日常物理机强装内核隐藏驱动
+继续使用用户态 ScyllaHide 做最小对照
+使用干净 x32dbg 环境排除插件冲突
+借助 3.5.1 源码、字符串、常量和调用关系做静态定位
+用自写极简程序逐项开启保护
+</code></pre>
+<p>容易误解的点：</p>
+<p>| 容易误解的地方 | 修正 | |---|---| | 「浏览器报毒一定是假阳性」 | 这类工具确实包含高权限隐藏行为；来源真实也不能消除运行风险 | | 「官方仓库就可以直接在物理机装驱动」 | 官方来源只解决来源可信度，不解决驱动兼容、签名、蓝屏和系统完整性风险 | | 「换 TitanHide/HyperHide 就一定过 VMP」 | VMP 也可检测驱动名称、服务、Hypervisor 或异常行为，没有万能工具 | | 「同时开启三个工具更强」 | 多层 Hook/驱动容易互相干扰，也让实验无法判断究竟谁生效 |</p>
+<p>实验记录：TitanHide ZIP 被浏览器提示「已屏蔽危险的下载内容」；没有虚拟机，本次没有继续安装 TitanHide/HyperHide，也没有关闭系统安全防护；驱动级方案只完成了工具层次和风险评估，没有产生安装或运行结果。</p>
+<h2>全局结论与下一次复现实验顺序</h2>
+<p>本次形成三个彼此独立的层次：</p>
+<pre><code>
+第一层：虚拟机机制
+VIP → 取指 → 解码 → Dispatcher → Handler → VSP/Context
+
+第二层：代码变异
+简单算术 → NOR/NAND/布尔表达式 → 复杂等价代码
+
+第三层：保护工程
+反调试、导入保护、压缩、Handler 表保护、随机化
+</code></pre>
+<p>不分层就容易把以下问题混为一谈：</p>
+<pre><code>
+ScyllaHide 过不了反调试
+≠ Mutate 反混淆失败
+≠ 虚拟机 Handler 无法分析
+≠ IAT 修复失败
+</code></pre>
+<p>从 <code>NtRaiseHardError</code> 栈向外追踪收益降低，也证明了在混淆栈中盲猜返回地址不如受控对照实验有效。</p>
+<p>下一次最小复现实验顺序：</p>
+<p>1. 保留现有旧 x64dbg 目录和 <code>x32\db</code> 数据库； 2. 解压全新的官方 x64dbg； 3. 不安装任何第三方插件，先验证 x32dbg 基本运行； 4. 只加入 ScyllaHide 三个 x86 文件； 5. 使用官方 Profile 和 Normal Injection； 6. 运行 ScyllaTest，记录完整检测界面和日志末尾； 7. 对自写极简程序做 A/B/C 测试； 8. 在授权 VMP 样本中观察 <code>NtQueryInformationProcess</code>、<code>NtQueryObject</code> 和 PEB 读取； 9. 若 API 断点不命中，考虑直接系统调用或早期 TLS 路径； 10. 把错误通知路径与检测路径分开，不再把 <code>NtRaiseHardError</code> 当检测入口； 11. 反混淆研究另开一条线，用修改 <code>Mutate</code> 前后的自保护样本做对照。</p>
+<p>早期说法的最终状态：</p>
+<p>| 说法 | 最终状态 | |---|---| | 「插件没用/没注入」 | 已被日志推翻：注入成功 | | 「入口 INT3 一定触发检测」 | 未证实，后续暂时排除 | | 「<code>0xDEADC0DE</code> 一定由 Kill Anti-Attach 产生」 | 未证实 | | 「弹窗栈里的 <code>010052FE</code> 是检测函数」 | 已推翻：它是 <code>NtRaiseHardError</code> 返回地址 | | 「线程池栈可继续追检测」 | 已推翻：切错线程 | | 「Normal Injection 选择错误」 | 已推翻：该选择正常 | | 「F9 是键盘/Fn 问题」 | 已撤回，是一次不符合证据的误判 | | 「xAnalyzer 就是根因」 | 仅是嫌疑，尚未完成干净环境对照 | | 「ScyllaHide 理论支持就必过」 | 应改为「覆盖常见用户态检查，但不保证所有检测路径」 |</p>
+<p>最终确认：</p>
+<pre><code>
+1. ScyllaHide Hook 注入成功。
+2. 只有真正被 x32dbg 调试的 C 组报错。
+3. 010052FC 调用 NtRaiseHardError，010052FE 是返回地址。
+4. 0x50000018 是 Hard Error 通知参数，不是检测 API。
+5. 滚轮没有改机器码，只改变线性反汇编边界。
+6. Normal Injection 的选择正确。
+7. xAnalyzer 日志不等于 ScyllaTest 结果。
+8. NAND-XOR 板书按当前括号实际是 XNOR。
+9. NOR-SUB 在固定位宽补码下结果成立。
+10. Mutate 属于生成端，不是任意成品的自动反混淆器。
+</code></pre>
+<p>仍待确认：</p>
+<pre><code>
+1. crackme3_pack.exe 最终命中的具体反调试分支。
+2. 0xDEADC0DE 的精确产生位置。
+3. 是否存在直接系统调用、父进程、TLS 或 Hook 自检。
+4. ScyllaTest 的实际 Detected/Not detected 结果。
+5. xAnalyzer 是否与当前 x32dbg 调试状态冲突。
+6. 全新 x32dbg + 仅 ScyllaHide 的复现实验结果。
+7. Mutate 的真实源码位置、地址、参数和调用关系。
+8. vmp_imp_fix 在课堂样本上的实际修复输出。
+</code></pre>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>作业实战 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">作业实战</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>作业实战</h1>
+<h2>作业一：inc2l 工具补丁</h2>
+<h3>1.1 工具简介</h3>
+<p><code>inc2l</code> 是 MASM32 SDK 自带的工具，用于将 <code>.inc</code> 包含文件转换为 <code>.lib</code> 静态库。工作流程：</p>
+<p>1. 读取 <code>.inc</code> 文件，生成对应的 <code>.asm</code> 和 <code>.def</code> 文件 2. 调用 <code>ml.exe</code> 编译 <code>.asm</code> → <code>.obj</code> 3. 调用 <code>link.exe</code> 链接 <code>.obj</code> + <code>.def</code> → <code>.lib</code>（及 <code>.dll</code>） 4. 清理临时文件</p>
+<h3>1.2 问题描述</h3>
+<p>inc2l 内部硬编码了 ml 和 link 的路径为 <code>\masm32\bin\ml</code> 和 <code>\masm32\bin\Link</code>，该路径从当前盘符根目录开始查找。当 MASM32 未安装在默认路径时，工具无法找到 ml.exe 和 link.exe。</p>
+<h3>1.3 逆向分析</h3>
+<p>目标环境：</p>
+<ul>
+<li>文件：<code>inc2l_dump_SCY.exe</code>（Delphi 编写）</li>
+<li>调试器：x32dbg</li>
+<li>MASM32 安装路径：<code>E:\RadASM\masm32\</code></li>
+</ul>
+<p>由于目标程序为 Delphi 编写，Delphi 的字符串常量通过间接方式引用，x32dbg 的"字符串引用"搜索无法找到。改用 <strong>Ctrl+B 二进制搜索</strong>，搜索 <code>\masm32</code> 对应的十六进制字节序列 <code>5C 6D 61 73 6D 33 32</code>，在 <code>.rdata</code> 段中找到 4 处匹配：</p>
+<p>| 编号 | 地址 | 原始内容 | 前缀长度 | 占位符 | |------|------|---------|---------|--------| | 字符串1 | <code>004055E2</code> | <code>\masm32\bin\ml /c /coff )</code> | 12字节 | <code>)</code> (0x29) | | 字符串2 | <code>004055FC</code> | <code>\masm32\bin\Link /SUBSYSTEM:WINDOWS /OUT:/</code> | 12字节 | <code>/</code> (0x2F) | | 字符串3 | <code>~00405627</code> | <code>\bin\Link /SUBSYSTEM:WINDOWS /WARN:1 /DLL /DEF:6</code> | 5字节 | <code>6</code> (0x36) | | 字符串4 | <code>00405658</code> | <code>\masm32\bin\Link /SUBSYSTEM:WINDOWS /WARN:1 /DLL /DEF:</code> + 0x04 | 12字节 | 0x04 |</p>
+<p>四条字符串末尾的特殊字符（<code>)</code>、<code>/</code>、<code>6</code>、<code>0x04</code>）是<strong>占位符</strong>。程序运行时通过<strong>固定偏移</strong>定位占位符，将其替换为实际的文件名（如 <code>kernel32.asm</code>、<code>kernel32.def</code>）。这意味着：</p>
+<ul>
+<li><strong>不能改变字符串长度</strong>——否则占位符偏移变化，替换失败</li>
+<li><strong>不能改变占位符之前的内容布局</strong>——必须保持等长替换</li>
+</ul>
+<p>在 <code>00404834</code>（<code>call edx</code>）处发现 CreateProcessA 的调用包装函数：</p>
+<pre><code>
+00404805 | mov eax, FFFFFFFF        ; spinlock init
+0040480A | xchg [405010], eax       ; atomic swap
+00404810 | test eax, eax            ; check lock
+00404812 | jne 404805               ; spin if locked
+00404814 | pop [405020]             ; save return addr
+0040481A | push edx                 ; save func ptr
+0040481B | push 8001                ; SetErrorMode flags
+00404820 | call [SetErrorMode]
+0040482B | push 0
+0040482D | call [SetLastError]
+00404833 | pop edx                  ; restore func ptr
+00404834 | call edx                 ; ← calls CreateProcessA
+00404836 | push [405020]            ; restore return addr
+</code></pre>
+<p>在 CreateProcessA 入口下断点，观察到实际命令行：</p>
+<pre><code>
+第1次调用: \masm32\bin\ml /c /coff kernel32.asm
+第2次调用: \masm32\bin\Link /SUBSYSTEM:WINDOWS /WARN:1 /DLL /DEF:kernel32.def kernel32.obj
+第3次调用: dir kernel32（清理临时文件）
+</code></pre>
+<p>本次测试仅命中<strong>字符串1</strong>（ml 编译）和<strong>字符串4</strong>（Link DLL 链接），字符串2和3未被调用。</p>
+<p>字符串3 的特殊性：前缀为 <code>\bin\</code>（5字节）而非 <code>\masm32\bin\</code>（12字节），该字符串在运行时由程序动态拼接 MASM32 安装路径（从环境变量或注册表读取）到前方。因此<strong>不能修改字符串3</strong>。</p>
+<h3>1.4 失败的尝试</h3>
+<p>| 方案 | 做法 | 结果 | 原因 | |------|------|------|------| | 空格填充 | 将12字节前缀替换为 <code>0x20</code> | CreateProcessA 返回失败（EAX=0, ERROR_INVALID_PARAMETER=87, LastStatus=STATUS_NO_SUCH_FILE） | lpApplicationName=NULL 时，Windows 不跳过 lpCommandLine 的前导空格，将空字符串解析为可执行文件名 | | NULL截断 | 将前缀首字节改为 <code>0x00</code> | 命令行为空 | strlen 遇到首字节为0直接返回0，命令行长度为0 | | 左移填充 | 将内容左移到字符串开头，末尾补0 | 占位符偏移变化，ml 收到 <code>ml /c /coff )</code> 而非 <code>ml /c /coff kernel32.asm</code> | 占位符位置改变，替换机制失效 |</p>
+<p>空格填充的详细调试过程——CreateProcessA 断点处的堆栈分析：</p>
+<pre><code>
+0019FBF8  00404836  ← [esp] 返回地址
+0019FBFC  00000000  ← [esp+4]  lpApplicationName = NULL
+0019FC00  0019FC80  ← [esp+8]  lpCommandLine = &quot;            ml /c /coff kernel32.asm&quot;
+0019FC04  00000000  ← [esp+0C] lpProcessAttributes = NULL
+0019FC08  00000000  ← [esp+10] lpThreadAttributes = NULL
+0019FC0C  00000000  ← [esp+14] bInheritHandles = FALSE
+0019FC10  00000000  ← [esp+18] dwCreationFlags = 0
+0019FC14  00000000  ← [esp+1C] lpEnvironment = NULL
+0019FC18  00000000  ← [esp+20] lpCurrentDirectory = NULL
+0019FC1C  0019FC38  ← [esp+24] lpStartupInfo (cb=0x44)
+0019FC20  0019FC28  ← [esp+28] lpProcessInformation
+</code></pre>
+<p>所有参数均合法，但 <code>lpCommandLine</code> 前导空格导致 Windows 解析出空的可执行文件名，返回 <code>ERROR_INVALID_PARAMETER</code>。</p>
+<h3>1.5 最终方案：<code>./</code> 路径替换</h3>
+<p>将 <code>\masm32\bin\</code>（12字节）替换为 <code>././././././</code>（12字节，即 <code>0x2E 0x2F</code> 重复6次）。原理：</p>
+<ul>
+<li><code>.</code> 在 Windows 路径中表示当前目录</li>
+<li><code>./</code> 重复多次仍等价于当前目录</li>
+<li><code>././././././ml</code> 解析为 <code>.\ml</code>，即当前目录下的 <code>ml.exe</code></li>
+<li>长度完全一致（12字节），占位符偏移不变</li>
+<li>不含空格，CreateProcessA 能正确解析第一个 token</li>
+</ul>
+<h3>1.6 修改明细</h3>
+<p>仅需修改2处：</p>
+<p>| 地址 | 原始字节 | 修改后字节 | 修改后内容 | |------|---------|-----------|-----------| | <code>004055E2</code> | <code>5C 6D 61 73 6D 33 32 5C 62 69 6E 5C</code> | <code>2E 2F 2E 2F 2E 2F 2E 2F 2E 2F 2E 2F</code> | <code>././././././ml /c /coff )</code> | | <code>00405658</code> | <code>5C 6D 61 73 6D 33 32 5C 62 69 6E 5C</code> | <code>2E 2F 2E 2F 2E 2F 2E 2F 2E 2F 2E 2F</code> | <code>././././././Link /SUBSYSTEM:WINDOWS /WARN:1 /DLL /DEF:</code> + 0x04 |</p>
+<p>字符串2（<code>004055FC</code>）和字符串3（<code>~00405627</code>）不修改。</p>
+<h3>1.7 测试验证</h3>
+<ul>
+<li>工作目录：<code>E:\RadASM\masm32\tools\inc2l\</code></li>
+<li>该目录下放置：<code>ml.exe</code>、<code>link.exe</code>、<code>mspdb50.dll</code></li>
+<li>CreateProcessA 断点验证命令行：</li>
+<li>第1次命中：<code>././././././ml /c /coff kernel32.asm</code>（正确）</li>
+<li>第2次命中：<code>././././././Link /SUBSYSTEM:WINDOWS /WARN:1 /DLL /DEF:kernel32.def kernel32.obj</code>（正确）</li>
+<li>成功生成 <code>kernel32.lib</code> 和 <code>kernel32.dll</code></li>
+</ul>
+<h3>1.8 环境依赖</h3>
+<ul>
+<li><code>link.exe</code> 运行时需要 <code>mspdb50.dll</code>（VS 的程序数据库支持库），需一并放置在同一目录</li>
+<li>使用 x32dbg 的 Ctrl+P（修补文件）功能保存补丁后的 exe</li>
+</ul>
+<h2>作业二：PEB 隐藏模块</h2>
+<h3>2.1 作业要求</h3>
+<p>使用 32 位汇编实现一个隐藏指定模块的函数，并写出测试示例。老师提供了 C 语言参考代码，要求用汇编重写。</p>
+<h3>2.2 原理</h3>
+<p>Windows 的 <code>CreateToolhelp32Snapshot</code> + <code>Module32First/Module32Next</code> 内部遍历的是 PEB（Process Environment Block）中的 <code>InLoadOrderModuleList</code> 双向链表。将该链表中目标模块的节点摘除（unlink），即可让模块从枚举结果中消失。</p>
+<h3>2.3 核心数据结构链路</h3>
+<pre><code>
+TEB (fs:[30h])
+  └→ PEB
+       └→ PEB_LDR_DATA (+0Ch)
+            └→ InLoadOrderModuleList (+0Ch, LIST_ENTRY)
+                 └→ Flink → 第一个 LDR_DATA_TABLE_ENTRY
+                      └→ InLoadOrderLinks (+0h, LIST_ENTRY)
+                           ├→ Flink → 下一个 Entry
+                           └→ Blink → 上一个 Entry
+</code></pre>
+<h3>2.4 双向链表脱链操作</h3>
+<p>找到目标模块后，执行经典的脱链：</p>
+<pre><code>
+Entry-&gt;Flink-&gt;Blink = Entry-&gt;Blink    ;  下一个节点.Blink = 当前节点.Blink
+Entry-&gt;Blink-&gt;Flink = Entry-&gt;Flink    ;  上一个节点.Flink = 当前节点.Flink
+</code></pre>
+<p>对应的汇编（4条 mov 指令）：</p>
+<pre><code>
+mov eax, curEntry
+mov ecx, [eax]      ; ecx = Flink (下一个)
+mov edx, [eax+4]    ; edx = Blink (上一个)
+mov [ecx+4], edx    ; 下一个.Blink = 上一个
+mov [edx], ecx      ; 上一个.Flink = 下一个
+</code></pre>
+<h3>2.5 踩过的坑</h3>
+<p>坑1：<code>assume fs:ERROR</code>。MASM32 的 <code>windows.inc</code> 里有 <code>assume fs:ERROR</code>，禁止直接访问 <code>fs</code> 段寄存器。使用 <code>fs:[30h]</code> 前必须加 <code>assume fs:nothing</code>：</p>
+<pre><code>
+.code
+assume fs:nothing        ; 在 .code 开头加一行搞定
+</code></pre>
+<p>坑2：<code>mov</code> vs <code>lea</code> 取 BaseDllName 地址。<code>BaseDllName</code> 是 <code>UNICODE_STRING</code> 结构体<strong>内嵌</strong>在 <code>LDR_DATA_TABLE_ENTRY</code> 中（偏移 +0x2C），不是指针：</p>
+<pre><code>
+; 错误：mov 取了 Length 字段的值当指针
+mov ecx, [ecx+2Ch]      ; 读到的是 Length+MaximumLength 拼成的 DWORD，不是地址
+
+; 正确：lea 取结构体的地址
+lea ecx, [ecx+2Ch]      ; ecx = &amp;BaseDllName (UNICODE_STRING 结构体地址)
+mov edx, [ecx+4]        ; edx = BaseDllName.Buffer (+4 = Buffer 字段)
+</code></pre>
+<p>坑3：BaseDllName.Buffer 为 NULL。链表中有些模块的 <code>BaseDllName.Buffer</code> 为空，<code>lstrcmpiW</code> 解引用 NULL 直接崩溃，需要加 NULL 检查：</p>
+<pre><code>
+.if edx != 0
+    invoke lstrcmpiW, offset wszTarget, edx
+    .if eax == 0
+        ...
+    .endif
+.endif
+</code></pre>
+<h3>2.6 最终代码</h3>
+<p>完整汇编代码见 <code>HideModule.asm</code>，核心结构：</p>
+<ul>
+<li><code>GetProcessModule</code> — 用 <code>CreateToolhelp32Snapshot</code> 枚举模块，<code>sprintf</code> 写入缓冲区</li>
+<li><code>HideModule</code> — <code>fs:[30h]</code> 走 PEB 链表，找到目标后 4 条 <code>mov</code> 脱链</li>
+<li><code>main</code> — 枚举前 → 隐藏 → 枚举后，用 <code>wsprintfA</code> 写空行间隔，一次 <code>MessageBoxA</code> 弹窗显示</li>
+</ul>
+<h3>2.7 MASM 伪指令与 C 代码对照</h3>
+<p>| 老师 C 代码 | MASM 伪指令 | |------------|------------| | <code>do { ... } while (Entry != FirstEntry)</code> | <code>.repeat ... .until eax == firstEntry</code> | | <code>if (lstrcmpi(...) == 0)</code> | <code>.if eax == 0</code> | | <code>break;</code> | <code>.break</code> | | <code>Entry->InLoadOrderLinks.Flink->Blink = ...</code> | 4 条 <code>mov</code>（无法用伪指令简化） |</p>
+<h2>关键知识点整理</h2>
+<h3>Delphi 程序的逆向特征</h3>
+<ul>
+<li>字符串使用 AnsiString 运行时管理，有引用计数和长度字段</li>
+<li>字符串常量存在 <code>.rdata</code> 段，通过间接方式引用</li>
+<li>x32dbg 的"字符串引用"搜索找不到，必须用 <strong>Ctrl+B 二进制搜索</strong></li>
+<li>字符串末尾可能有占位符字符，通过固定偏移替换</li>
+</ul>
+<h3>CreateProcessA 参数分析</h3>
+<pre><code>
+BOOL CreateProcessA(
+  LPCSTR lpApplicationName,      // [esp+4]  NULL = 从命令行解析
+  LPSTR lpCommandLine,          // [esp+8]  命令行
+  LPSECURITY_ATTRIBUTES,        // [esp+0C] 通常 NULL
+  LPSECURITY_ATTRIBUTES,        // [esp+10] 通常 NULL
+  BOOL bInheritHandles,         // [esp+14] 通常 FALSE
+  DWORD dwCreationFlags,        // [esp+18] 通常 0
+  LPVOID lpEnvironment,         // [esp+1C] NULL = 继承父进程
+  LPCSTR lpCurrentDirectory,    // [esp+20] NULL = 继承父进程
+  LPSTARTUPINFOA lpStartupInfo, // [esp+24] cb=0x44
+  LPPROCESS_INFORMATION         // [esp+28] 输出
+);
+</code></pre>
+<p>当 <code>lpApplicationName = NULL</code> 时，Windows 从 <code>lpCommandLine</code> 解析可执行文件名，但<strong>不跳过前导空格</strong>。</p>
+<h3>Windows 路径解析</h3>
+<ul>
+<li><code>\masm32\bin\ml</code> — 从当前盘符根目录开始</li>
+<li><code>.\ml</code> 或 <code>././././././ml</code> — 从当前目录开始</li>
+<li><code>./</code> 重复多次仍等价于当前目录</li>
+</ul>
+<h3>MASM 调用 C 库函数</h3>
+<ul>
+<li><code>msvcrt.lib</code>（动态链接 msvcrt.dll）不需要 CRT 初始化，<code>end main</code> 即可</li>
+<li><code>libc.lib</code>（静态链接）需要 <code>mainCRTStartup</code> 调 <code>_initterm</code> 初始化</li>
+<li><code>sprintf</code> 写缓冲区不依赖 <code>stdout</code>，不需要 CRT 初始化</li>
+<li><code>printf</code> 写 <code>stdout</code>，依赖 CRT 初始化</li>
+</ul>
+<h3>MASM 伪指令</h3>
+<p>| MASM 伪指令 | 对应 C 代码 | |------------|------------| | <code>.while condition ... .endw</code> | <code>while (condition) { ... }</code> | | <code>.repeat ... .until condition</code> | <code>do { ... } while (!condition)</code> | | <code>.if eax == 0 ... .endif</code> | <code>if (eax == 0) { ... }</code> | | <code>.break</code> | <code>break;</code> | | <code>invoke func, arg1, arg2</code> | <code>func(arg1, arg2)</code> | | <code>assume fs:nothing</code> | 允许访问 fs 段寄存器 |</p>
+<h3><code>mov</code> vs <code>lea</code></h3>
+<pre><code>
+mov ecx, [ecx+2Ch]   ; 读取 [ecx+2Ch] 处的值（4字节）
+lea ecx, [ecx+2Ch]   ; 计算 ecx+2Ch 的地址，不读内存
+</code></pre>
+<p>当目标字段是内嵌结构体（如 <code>UNICODE_STRING BaseDllName</code>）时，用 <code>lea</code> 取结构体地址。当目标字段是指针时，用 <code>mov</code> 取指针值。</p>
+<h3>GetCommandLine A 版本兼容问题</h3>
+<p>低版本 Windows SDK / MASM32 的 <code>kernel32.inc</code> 中可能没有 <code>GetCommandLineA</code> 的声明，只有 <code>GetCommandLine</code>（无 A/W 后缀）。修复方法：</p>
+<p>1. 更新 MASM32 库文件到较新版本 2. 或手动在代码中声明：<code>GetCommandLineA PROTO STDCALL</code></p>
+<h2>压缩壳原理与脱壳实战</h2>
+<h3>压缩壳工作机制</h3>
+<p>加壳阶段（静态修改 PE 文件）：</p>
+<p>1. 将原始 PE 的代码段（.text）、数据段等压缩存储 2. 修改 PE 头的 <code>AddressOfEntryPoint</code> 指向壳代码（解压 stub） 3. 壳代码通常放在新增的节（section）中 4. 原始 OEP 被保存在壳代码的数据区</p>
+<p>解压阶段（运行时）：</p>
+<p>1. 程序从壳代码入口开始执行（不是原始 OEP） 2. 壳代码在内存中解压原始代码和数据，写回到原始的虚拟地址 3. 修复导入表（IAT）——壳运行时可能用自己的 IAT 替换了原始的 4. 跳转到原始入口点（OEP），程序从此正常执行</p>
+<h3>OEP（Original Entry Point）</h3>
+<p>原始程序的真正入口点。加壳后入口点被改为壳代码地址，OEP 被隐藏在壳代码的解压逻辑中。</p>
+<h3>快速定位 OEP</h3>
+<p>原理：壳代码解压完成后跳回 OEP 时，通常会先进行栈平衡恢复（如 <code>mov esp, ebp</code> / <code>pop ebp</code> / <code>ret</code> 或直接 <code>jmp OEP</code>）。通过硬件访问断点监控栈区域，可以在这个时刻停下来。</p>
+<p>操作步骤（x32dbg）：</p>
+<p>1. 运行加壳程序，让壳代码开始执行解压 2. 在壳代码运行过程中观察栈状态 3. 设置硬件访问断点（<code>ba</code> 等价操作：Debug → Hardware Breakpoint），监控栈平衡恢复时的内存访问 4. 断点触发时，单步执行，找到跳回 OEP 的 <code>jmp</code> 或 <code>call</code> 指令 5. 跟随跳转，记录目标地址即为 OEP</p>
+<h3>Dump 内存</h3>
+<p>定位到 OEP 后，使用 x32dbg 的 Scylla 插件 Dump：</p>
+<p>1. 打开 Scylla（Plugins → Scylla） 2. 设置 OEP 地址 3. 点击 Dump，将进程内存导出为新的 PE 文件</p>
+<h3>修复 IAT</h3>
+<p>脱壳后程序无法运行的原因：IAT 可能被壳修改或损坏。修复步骤（Scylla）：</p>
+<p>1. IAT AutoSearch — 自动查找 IAT 在内存中的位置 2. Get Imports — 获取导入函数列表 3. Fix Dump — 选择刚才 Dump 出的 PE 文件，修复其 IAT</p>
+<h3>脱壳后修复硬编码路径</h3>
+<p>脱壳后的程序可能还有硬编码路径问题（如 inc2l 的 <code>\masm32\bin\</code>），需要用补丁作业中的方法（二进制搜索 + 等长替换）修复。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

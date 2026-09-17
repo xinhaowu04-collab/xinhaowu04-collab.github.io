@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>寄存器与 EFLAGS · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">寄存器与 EFLAGS</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>寄存器与 EFLAGS</h1>
+<p>x86 寄存器是 CPU 内部极高速存储单元，位于 ALU 旁边，访问速度比内存快几个数量级（约 1 个时钟周期 vs 几十~几百个）。32 位 x86 提供三类寄存器：</p>
+<ul>
+<li><strong>8 个通用寄存器</strong>（EAX/EBX/ECX/EDX/ESI/EDI/ESP/EBP）：算术运算、数据暂存、指针寻址</li>
+<li><strong>2 个特殊寄存器</strong>（EIP、EFLAGS）：控制程序执行流、记录运算状态</li>
+<li><strong>6 个段寄存器</strong>（CS/DS/SS/ES/FS/GS）：分段内存管理（保护模式下多已淡化）</li>
+</ul>
+<p>数据必须经寄存器才能进 ALU 运算（Load → 运算 → Store），这是加载-存储架构的核心。寄存器解决三个问题：速度鸿沟（内存延迟约 60~100ns，寄存器约 0.1ns）、指令编码效率（寄存器编号只需 3 bit，远少于 32 bit 内存地址）、减少总线压力。</p>
+<h2>通用寄存器</h2>
+<p>386 把 8086 的 16 位通用寄存器全部扩展成 32 位，命名规则是前面加 <strong>E</strong>（Extended）。</p>
+<h3>子寄存器结构</h3>
+<pre><code>
+EAX (32 bit)
+ ├── AX (低 16 bit)
+ │    ├── AL (低 8 bit)
+ │    └── AH (高 8 bit)
+
+EBX / ECX / EDX 结构同上：BX→BL/BH, CX→CL/CH, DX→DL/DH
+
+ESI→SI、EDI→DI、ESP→SP、EBP→BP（仅低 16 位，无 H/L 拆分）
+</code></pre>
+<p>兼容关系是<strong>子寄存器嵌套</strong>：EAX 的低 16 位就是 AX，AX 的低 8 位是 AL、高 8 位是 AH，三者共享同一片物理存储。8086（1978）是 16 位 CPU，升级到 32 位时 Intel 要保持二进制兼容——老程序识别 <code>AL</code>/<code>AH</code>，新程序识别 <code>EAX</code>，为 8086 写的代码在 386 上不用改就能跑。EAX 的高 16 位没有单独助记符访问，只能整体操作 EAX。</p>
+<p><strong>部分更新语义</strong>：写 <code>AX</code> 只映射到 <code>EAX</code> 的低 16 位，高 16 位保持不变（<code>EAX = (EAX & 0xFFFF0000) | AX</code>）。代价是 CPU 寄存器文件内部需要部分更新逻辑，换来 30 年软件兼容。</p>
+<pre><code>
+MOV  EAX, 0AABBCCDDh  ; EAX = AABBCCDD
+MOV  AX,  1234h       ; EAX = AABB1234（高 16 位 AABB 保留）
+MOV  AL,  56h         ; EAX = AABB1256（高 24 位保留）
+MOV  AH,  78h         ; EAX = AABB7856（AH 覆盖掉 12）
+</code></pre>
+<p>注意：386 指令编码里"操作数是 32 位还是 16 位"由 66h 前缀控制，没有前缀默认按段宽度。x64dbg 里看到 EAX 说明是 32 位代码段；看到 AX 且前面有 66h 前缀，说明在 32 位段里临时用了 16 位操作数。</p>
+<h3>各寄存器职责速查</h3>
+<p>| 寄存器 | 全称 | 主要用途 | 备注 | |--------|------|---------|------| | <code>EAX</code> | Accumulator | <strong>函数返回值</strong>；乘除法默认操作数 | 绝大多数指令将其作为累加器 | | <code>EBX</code> | Base | 通用；调用约定要求 Callee-saved | 16 位时代曾用于内存基址 | | <code>ECX</code> | Counter | <code>loop</code>/<code>rep</code> 计数；C++ <code>this</code> 指针（thiscall） | 移位指令也用它作位数计数器 | | <code>EDX</code> | Data | 乘法高 32 位（<code>EDX:EAX</code>）；I/O 端口地址 | <code>DIV</code>/<code>MUL</code> 与 EAX 配对使用 | | <code>ESI</code> | Source Index | 字符串/内存复制的<strong>源</strong>指针 | <code>MOVS</code>/<code>LODS</code> 等串指令自增/自减 | | <code>EDI</code> | Destination Index | 字符串/内存复制的<strong>目标</strong>指针 | 通常与 ESI 成对使用 | | <code>ESP</code> | Stack Pointer | <strong>栈顶指针</strong>，<code>PUSH</code>/<code>POP</code>/<code>CALL</code>/<code>RET</code> 自动维护 | 绝对不要当通用寄存器手动修改 | | <code>EBP</code> | Base Pointer | <strong>栈帧基址</strong>，函数内固定指向当前栈帧底部 | 寻址参数 <code>[EBP+8]</code> 和局部变量 <code>[EBP-4]</code> |</p>
+<h3>读写通用寄存器</h3>
+<pre><code>
+; === 赋值 ===
+MOV  EAX, 12345678h   ; 立即数送入 EAX
+MOV  EBX, EAX         ; 复制到 EBX
+MOV  AL,  0FFh        ; 修改低 8 位，高 24 位不变
+
+; === EAX:EDX 做 32 位乘法（结果 64 bit）===
+MOV  EAX, 12345h
+MOV  EDX, 67890h
+MUL  EDX              ; EDX:EAX = EAX * EDX
+
+; === ECX 做循环计数 ===
+MOV  ECX, 10
+loop_start:
+    ; 循环体
+    LOOP loop_start   ; DEC ECX; if ECX != 0, JMP loop_start
+</code></pre>
+<h2>特殊寄存器</h2>
+<p>| 寄存器 | 说明 | |--------|------| | <code>EIP</code> | <strong>指令指针</strong>，指向下一条将要执行的指令。不能通过 <code>MOV</code> 直接读写，只能通过 <code>JMP</code>/<code>CALL</code>/<code>RET</code>/<code>INT</code> 等控制流指令隐式修改 | | <code>EFLAGS</code> | <strong>标志寄存器</strong>，32 位宽，每一位代表一条运算结果的属性标志，影响整个程序的控制流走向 |</p>
+<h2>段寄存器</h2>
+<p>386 把段寄存器从 4 个增加到 6 个（新增 FS/GS），段寄存器本身保持 16 位。</p>
+<p>| 段寄存器 | 用途 | 引入时机 | |---------|------|---------| | <code>CS</code> | 代码段，指向当前执行代码所在段，不能直接 <code>MOV</code> | 8086 | | <code>DS</code> | 数据段（默认），绝大多数内存访问默认使用 DS | 8086 | | <code>ES</code> | 附加数据段，串指令（如 <code>MOVS</code>）的目标段 | 8086 | | <code>SS</code> | 栈段，<code>PUSH</code>/<code>POP</code>/<code>CALL</code>/<code>RET</code> 默认操作 SS 指向的段 | 8086 | | <code>FS</code> | 自由段，OS 当 TLS/TIB 锚点：<strong>Windows 32 位下指向当前线程的 TEB</strong> | 386 新增 | | <code>GS</code> | 自由段，OS 当 per-CPU/TLS 锚点 | 386 新增 |</p>
+<p>FS/GS 存在的意义：留出两个"自由"段寄存器，给操作系统内核当<strong>线程局部存储（TLS）的锚点</strong>用，而不影响程序正常使用的 DS/ES。Win32 平坦内存模型下所有段基址均为 0、界限 4GB，段寄存器更多是历史遗留和少数特殊用途。</p>
+<p>注意：反汇编里看到 <code>FS:[0]</code>、<code>FS:[30h]</code>，第一反应是在访问操作系统线程/进程结构——Windows 32 位 <code>FS:[0]</code> → TIB（线程信息块，偏移 0 即 SEH 链头），<code>FS:[30h]</code> → PEB（进程环境块）；Linux 64 位 <code>GS:[0]</code> → per-CPU 数据/TLS 基址。这是反调试、线程信息读取的经典入口。</p>
+<h2>EFLAGS</h2>
+<p>16 位 FLAGS 扩展成 32 位 EFLAGS，低 16 位完全兼容，高 16 位新增 8 个系统级标志；64 位进一步扩展为 RFLAGS，低 32 位与 EFLAGS 兼容。</p>
+<p>EFLAGS 是 ALU 和控制流之间的桥梁：ALU 执行 <code>ADD</code>/<code>SUB</code>/<code>CMP</code> 后自动把结果特征（是否为零、是否进位、是否溢出）写入标志位，后续条件跳转 <code>JZ</code>/<code>JG</code> 等<strong>无代价地读取</strong>这些位。<code>CMP</code>/<code>TEST</code>/<code>SUB</code> <strong>写</strong> EFLAGS，<code>JZ</code>/<code>JNE</code>/<code>JG</code> <strong>读</strong> EFLAGS，两者之间不需要额外指令——这是硬件实现的一次"免费通信"。</p>
+<h3>运算与状态标志（6 个，16/32 位一致）</h3>
+<p>| 标志 | 位名 | 含义 | |------|------|------| | CF | 进位标志 | 无符号数运算产生进位/溢出 | | PF | 奇偶标志 | 运算结果低 8 位中二进制 1 的个数奇偶 | | AF | 辅助进位标志 | BCD 码运算时低 4 位向高 4 位进位 | | ZF | 零标志 | 运算结果等于 0 时置 1 | | SF | 符号标志 | 记录运算结果正负（最高位值） | | OF | 溢出标志 | 有符号数运算发生溢出 |</p>
+<p><strong>CF 管无符号溢出，OF 管有符号溢出</strong>。两者独立判断，同一条运算可能只置其中一个。</p>
+<h3>控制标志（2 个，16/32 位相同）</h3>
+<p>| 标志 | 含义 | |------|------| | DF | 方向标志，控制串指令地址自增/自减方向 | | IF | 中断允许标志，控制 CPU 是否响应可屏蔽硬件中断 |</p>
+<h3>系统级标志（8 个，32 位 EFLAGS 新增）</h3>
+<p>用于特权级、多任务、内存保护，是 32 位相比 16 位的核心差异：</p>
+<p>| 标志 | 含义 | |------|------| | NT | 嵌套任务，任务链式调用、多任务切换使用 | | VM | 虚拟 8086 模式，32 位环境下运行 16 位 DOS 程序 | | AC | 对齐检查，配合 CR0 校验内存访问地址对齐 | | IOPL | I/O 特权级（占 2bit），标识当前任务 I/O 操作权限等级 | | RF | 恢复标志，配合调试异常，控制断点恢复时是否临时屏蔽 | | VIF | 虚拟中断标志，为虚拟 8086 模式服务的"虚拟化版"IF | | VIP | 虚拟中断挂起，配合 VIF 使用 | | ID | ID 标志，能否被软件修改这一位是检测 CPU 是否支持 CPUID 的经典手法 |</p>
+<p>注意：逆向中绝大多数情况只关心状态标志——<code>CMP</code>/<code>TEST</code> 后跟条件跳转 <code>J*</code> 的模式全靠 CF/ZF/SF/OF 驱动。系统级标志（VM/IOPL/NT 等）出现在应用层代码里极其罕见，看到基本说明在分析内核或虚拟化相关代码。</p>
+<p>ID 标志妙用：试着翻转 ID 位，翻转成功就说明 CPU 支持 CPUID——这是很多系统信息工具的第一步探测。</p>
+<h3>EFLAGS 使用实践</h3>
+<p>EFLAGS 不能直接读写（只有 <code>PUSHF</code>/<code>POPF</code> 间接访问），由运算指令隐式修改：</p>
+<pre><code>
+; === 设置标志位 ===
+CMP  EAX, EBX   ; EAX - EBX，结果不保存，只改 EFLAGS
+                ; ZF=1 表示相等，CF=1 表示无符号借位，SF/OF 看有符号结果
+
+TEST EAX, EAX   ; EAX &amp; EAX
+                ; ZF=1 表示 EAX == 0，SF=1 表示 EAX 最高位为 1
+
+; === 根据标志位跳转 ===
+CMP  EAX, 100
+JE   equal      ; ZF=1（EAX == 100）
+JNE  not_equal  ; ZF=0（EAX != 100）
+JG   greater    ; ZF=0 AND SF=OF（有符号：EAX &gt; 100）
+JL   less       ; SF != OF（有符号：EAX &lt; 100）
+JA   above      ; CF=0 AND ZF=0（无符号：EAX &gt; 100）
+JB   below      ; CF=1（无符号：EAX &lt; 100）
+</code></pre>
+<h2>Caller-saved 与 Callee-saved</h2>
+<p>寄存器是函数之间共享的稀缺资源，全保存会让调用开销无法接受，ABI 把寄存器分两类：</p>
+<ul>
+<li><strong>Caller-saved</strong>（EAX、ECX、EDX）：调用方在 <code>CALL</code> 前自行 <code>PUSH</code> 保存；被调函数可直接修改无需还原</li>
+<li><strong>Callee-saved</strong>（EBX、ESI、EDI、EBP）：被调函数要用就必须入口 <code>PUSH</code>、退出前 <code>POP</code> 还原；调用方可假定它们不变</li>
+</ul>
+<p>约定背后的逻辑：EAX 放返回值，每个函数都会覆盖它；ECX/EDX 常用于临时运算，要求被调函数保存反而增加指令数；EBX/ESI/EDI/EBP 常存"长期"值（循环变量、基址指针），由被调函数保存后调用方返回可直接用。</p>
+<pre><code>
+; === Caller-saved 示例 ===
+my_func PROC
+    PUSH EAX          ; EAX/ECX/EDX 里是之后还要用的值，自己保存
+    PUSH ECX
+    CALL some_other_func
+    POP  ECX
+    POP  EAX
+    RET
+my_func ENDP
+
+; === Callee-saved 示例 ===
+your_func PROC
+    PUSH EBP
+    MOV  EBP, ESP
+    PUSH EBX          ; 要使用 EBX/ESI/EDI，先保存
+    PUSH ESI
+    PUSH EDI
+    ; ... 函数体 ...
+    POP  EDI          ; 恢复顺序与压栈相反
+    POP  ESI
+    POP  EBX
+    POP  EBP
+    RET
+your_func ENDP
+</code></pre>
+<h2>ESP 与 EBP 栈帧协作</h2>
+<p>栈帧模式（EBP 作帧指针）让函数通过 <code>[EBP+8]</code> 定位参数、<code>[EBP-4]</code> 定位局部变量，即使 ESP 在函数体内因 <code>PUSH</code>/<code>POP</code> 频繁变化，EBP 依然稳定不变。固定流程：入口 <code>PUSH EBP</code> → <code>MOV EBP, ESP</code> → <code>SUB ESP, LocalSize</code>；出口 <code>MOV ESP, EBP</code> → <code>POP EBP</code> → <code>RET</code>。</p>
+<h3>栈帧完整模板</h3>
+<pre><code>
+FuncName PROC
+    ; === 入口 ===
+    PUSH  EBP
+    MOV   EBP, ESP
+    PUSH  EBX          ; 保存 callee-saved
+    PUSH  ESI
+    PUSH  EDI
+    SUB   ESP, 40h     ; 分配局部变量空间（64 字节）
+
+    ; === 函数体 ===
+    ; [EBP+8]  = 第一个参数
+    ; [EBP+12] = 第二个参数
+    ; [EBP-4]  = 第一个局部变量
+    ; [EBP-8]  = 第二个局部变量
+
+    ; === 出口 ===
+    POP   EDI
+    POP   ESI
+    POP   EBX
+    MOV   ESP, EBP     ; 还原栈顶
+    POP   EBP
+    RET   8            ; RET n 自动释放参数空间（stdcall）
+FuncName ENDP
+</code></pre>
+<h3>靠寄存器用途反推代码结构</h3>
+<pre><code>
+; EAX = 返回值：函数结尾的 mov eax, xxx 说明返回值
+mov eax, [ebp-4]
+ret
+
+; ECX = this 指针（C++ thiscall）或循环计数器
+mov ecx, [ebp+8]       ; ecx 拿到对象指针 → 可能是 thiscall
+loop_start:
+    ...
+    loop loop_start    ; ecx 当循环计数器
+
+; EDX:EAX = 乘除法结果对
+mul ecx                ; 结果在 EDX:EAX，说明是 32 位乘法
+</code></pre>
+<p>注意：函数末尾 <code>mov eax, xxx; ret</code> → xxx 就是 return 的表达式；<code>mov ecx, xxx</code> 后跟 <code>call method</code> → thiscall，ecx 是 this 指针；<code>FS:[0]</code>/<code>FS:[30h]</code> → 访问 TEB/PEB，常见于异常处理或反调试；函数入口 <code>push ebp; mov ebp, esp; push ebx/esi/edi</code> → 这些是被调用者保存寄存器，说明函数要用它们存长期值。</p>
+<h3>调试器中观察寄存器</h3>
+<ul>
+<li>WinDbg / x64dbg：右侧面板实时显示所有寄存器值，EFLAGS 以独立小灯形式展示</li>
+<li>OllyDbg：左下角寄存器面板，标志位用彩色字母表示（C=进位，Z=零，S=符号，O=溢出）</li>
+<li>调试时重点关注：EIP 是否停在预期指令；ESP 是否平衡（函数入口 vs 出口应一致）；EFLAGS 条件跳转后的标志是否符合预期</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

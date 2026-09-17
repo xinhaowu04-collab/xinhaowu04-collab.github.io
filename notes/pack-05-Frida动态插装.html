@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frida 动态插装 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">Frida 动态插装</h1>
+<div class="meta"><span class="cat">壳与脱壳</span></div>
+<article>
+<h1>Frida 动态插装</h1>
+<p>Frida 是动态插装工具：把 Agent 注入目标进程，在进程内部执行 JavaScript Hook 逻辑，再通过客户端与 Agent 通讯。价值在于不必先完全读懂几千万行代码，而是围绕感兴趣的功能，动态观察函数调用、参数、返回值和调用关系。</p>
+<p>注意：Frida 实验只用于自己编写的测试程序、课堂样本及其他明确授权的实验目标。</p>
+<p>| 组件 | 作用 | |---|---| | <code>frida</code> | 交互式 REPL，可按名称或 PID 附加，也可通过 <code>-l</code> 加载独立 JS | | <code>frida-ps</code> | 枚举进程，得到进程名和 PID；也可配合 USB 设备选项 | | <code>frida-trace</code> | 按函数名、模块名或模块偏移批量建立跟踪，并生成可编辑的 handler | | <code>frida</code> Python 包 | Python 绑定，提供设备枚举、附加、脚本创建和消息收发能力 | | <code>frida-tools</code> | <code>frida</code>、<code>frida-ps</code>、<code>frida-trace</code> 等命令行工具，版本号与核心 Frida 独立 | | JavaScript Agent | 真正运行在目标进程中的 Hook 逻辑 |</p>
+<p>传统逆向定位思路：</p>
+<ul>
+<li>对写文件等关键 API 下断点</li>
+<li>搜索内存中的关键数据，再对相关内存下访问断点</li>
+<li>根据功能触发时的调用栈或异常逐层定位</li>
+<li>先处理反调试，再继续单步或跟踪</li>
+</ul>
+<p>传统逆向的困难在于程序规模大、目标功能分散、数据可能加密、真实 API 未知，调试器还可能触发反调试。动态插装把问题收缩为：</p>
+<pre><code>
+我关心哪个行为？
+    ↓
+哪些函数在行为发生时被调用？
+    ↓
+它们接收了什么参数、返回了什么？
+    ↓
+哪个调用与目标功能最相关？
+</code></pre>
+<p>"给所有函数添加日志"只是分析方向，不是默认操作。<code>frida-trace</code> 会根据 <code>-i</code>、<code>-I</code>、<code>-a</code> 等条件建立 working set，只跟踪匹配到的函数；无差别跟踪会带来巨大日志量和运行开销。</p>
+<p>动态插装的基本关系：</p>
+<pre><code>
+Frida 客户端 ──附加/派生──&gt; 目标进程
+Frida 客户端 ──加载脚本──&gt; Frida Agent（注入目标进程）
+Agent ──onEnter──&gt; 读取/修改参数 ──&gt; 原函数或替代函数 ──onLeave──&gt; 读取/修改返回值
+Agent ──日志/消息──&gt; 客户端
+</code></pre>
+<p>学习顺序：</p>
+<pre><code>
+环境安装与版本排错
+    ↓
+frida-ps 枚举进程 → 按 PID 附加
+    ↓
+frida-trace 自动 Hook 导出 API → 修改自动生成的 handler
+    ↓
+打印并修改参数、返回值
+    ↓
+独立 hook.js 手动查地址并 Interceptor.attach
+    ↓
+模块基址 + RVA Hook 自己的内部函数
+    ↓
+NativeFunction 主动调用 → Interceptor.replace 替换实现
+    ↓
+内存补丁、反调试观察、调用栈与 Stalker（后续课程）
+</code></pre>
+<p>"两种 Hook 方式"要按上下文区分：</p>
+<p>| 表述层级 | 两种方式 | 说明 | |---|---|---| | 工具工作流 | <code>frida-trace</code> 自动 handler vs 独立 <code>hook.js</code> | 课堂顺序主要指这一组 | | Interceptor 机制 | <code>Interceptor.attach</code> vs <code>Interceptor.replace</code> | 观察/替换机制的区别 | | 进程时机 | 附加已运行进程 vs Frida 派生新进程 | 决定能否捕获启动初期调用，不是另一套 Interceptor |</p>
+<p>常见误解：</p>
+<p>| 说法 | 正解 | |---|---| | Frida 会自动为所有函数加日志 | 只有选入跟踪集合或手动安装 Hook 的函数才会被跟踪 | | Frida 支持"全平台、全指令集" | 概括性表达；以当前版本官方支持矩阵、目标系统和架构为准 | | 动态插装能代替所有静态分析 | 适合快速定位运行时行为，但函数原型、RVA、调用约定和数据结构仍常需静态分析确认 | | Hook 一个反调试 API 就能解决全部反调试 | API 型检查只是一类；直接系统调用、PEB 读取、时间差、异常和多线程检查不会自动消失 | | Hook 越多越好 | Hook 越多日志噪声和性能影响越明显；从明确行为和小范围函数集合开始 |</p>
+<h2>安装排错：Python 与 Frida 17.17.0</h2>
+<p>Frida 在 Windows 上包含两个包，版本号各自独立：</p>
+<pre><code>
+frida         → Python 绑定和本地 Frida 核心（本次 17.17.0）
+frida-tools   → frida、frida-ps、frida-trace 等命令（原环境 12.4.4）
+</code></pre>
+<p><code>pip</code> 允许单独升级一个包。只执行 <code>py -m pip install frida==17.17.0</code> 时，pip 会满足这条请求，但旧 <code>frida-tools 12.4.4</code> 声明 <code>frida<17.0.0,>=16.2.2</code>，因此可以同时出现 <code>Successfully installed frida-17.17.0</code> 和依赖冲突警告——核心包装上了，只是环境依赖不一致，并非安装完全失败。</p>
+<p>第二个问题来自 Python 版本：Frida 17.17.0 的源码执行 <code>from typing import NotRequired</code>，而 <code>typing.NotRequired</code> 是 Python 3.11 才加入标准库的，Python 3.10 导入即失败。</p>
+<p>轮子文件名 <code>frida-17.17.0-cp37-abi3-win_amd64.whl</code> 中，<code>cp37-abi3</code> 表示本地二进制扩展采用稳定 ABI、兼容多个 CPython 版本；<strong>它不能保证包内 Python 源码只用了 3.7 的标准库成员</strong>，"轮子能安装"与"源码一定能导入"是两回事。</p>
+<h3>安装与修复</h3>
+<pre><code>
+py -m pip install --upgrade pip
+py -m pip install frida==17.17.0
+py -m pip install --upgrade frida-tools
+py -m pip check
+</code></pre>
+<p>只下载不安装：<code>py -m pip download frida==17.17.0 -d .\frida_packages</code>。</p>
+<p>注意：对话最初提到的 <code>17.17.1</code> 在 PyPI 上没有可用安装包证据，标为待确认；<code>17.17.0</code> 是实际安装并验证的版本。只执行 <code>py -m pip install frida-tools</code> 会让 pip 自选依赖组合，要固定核心版本必须显式写 <code>frida==17.17.0</code>。</p>
+<p>Windows 上 Python 3.10 不必删除，与 3.12 并存，用 <code>py</code> 启动器选版本：</p>
+<pre><code>
+winget install -e --id Python.Python.3.12
+py -0p
+py -3.12 --version
+py -3.12 -m pip install --upgrade pip
+py -3.12 -m pip install --upgrade frida==17.17.0 frida-tools
+py -3.12 -c &quot;import frida; print(frida.__version__)&quot;
+</code></pre>
+<h3>命令路径仍指向 Python 3.10</h3>
+<p>用 <code>where frida</code> 查看实际执行文件。若仍指向 <code>Python310\Scripts\frida.exe</code>，说明裸命令 <code>frida</code> 由旧 Scripts 目录提供。先直接测试新环境：</p>
+<pre><code>
+&quot;%LocalAppData%\Programs\Python\Python312\Scripts\frida.exe&quot; --version
+</code></pre>
+<p>确认不再需要旧环境中的 Frida 后，只卸载包、不卸载 Python 3.10：</p>
+<pre><code>
+py -3.10 -m pip uninstall frida frida-tools
+</code></pre>
+<p>重新打开 CMD 再验证 <code>where frida</code> 和 <code>frida --version</code>。</p>
+<h3>Python 3.10 临时源码修补（未采用）</h3>
+<p>必须保留 Python 3.10 时，可从 Frida 的 <code>typing</code> 导入列表移除 <code>NotRequired</code>，改为 <code>from typing_extensions import NotRequired</code>。但修改位于 <code>site-packages</code>，升级或重装会覆盖，不如直接用 Python 3.11+。本次未采用。</p>
+<p>常见误解：</p>
+<p>| 现象 | 误解 | 正解 | |---|---|---| | <code>Successfully installed</code> 前有 dependency conflicts | Frida 没装上 | 核心已装上，旧 <code>frida-tools</code> 依赖声明不兼容 | | 已装 <code>typing_extensions</code> 仍报错 | 扩展包没装好 | Frida 17.17.0 直接从标准库 <code>typing</code> 导入，扩展包不会把成员注入 <code>typing</code> | | <code>py -3.12 import frida</code> 成功但 <code>frida --version</code> 报 Python310 错误 | Python 3.12 的 Frida 坏了 | Python 模块正常；PATH 仍选择旧 <code>Python310\Scripts\frida.exe</code> | | <code>frida-tools</code> 不是 17.17.0 | 版本不匹配 | <code>frida-tools</code> 独立版本号，只需依赖范围兼容 | | <code>cp37-abi3</code> | 所有代码只要求 Python 3.7 | 只描述二进制扩展 ABI，不保证源码未用新标准库功能 |</p>
+<h3>实验记录</h3>
+<p>首次安装输出摘要：</p>
+<pre><code>
+C:\Users\Lenovo&gt;py -m pip install frida==17.17.0
+Downloading frida-17.17.0-cp37-abi3-win_amd64.whl (41.8 MB)
+Found existing installation: frida 16.4.4
+Successfully uninstalled frida-16.4.4
+
+ERROR: pip&#x27;s dependency resolver does not currently take into account all the packages that are installed.
+frida-tools 12.4.4 requires frida&lt;17.0.0,&gt;=16.2.2,
+but you have frida 17.17.0 which is incompatible.
+
+Successfully installed frida-17.17.0
+</code></pre>
+<p>Python 3.10 导入失败证据：</p>
+<pre><code>
+ImportError: cannot import name &#x27;NotRequired&#x27; from &#x27;typing&#x27;
+(C:\Users\Lenovo\AppData\Local\Programs\Python\Python310\lib\typing.py)
+</code></pre>
+<p>环境中已存在 <code>typing_extensions 4.15.0</code>，但不解决问题。</p>
+<p>最终验证：</p>
+<pre><code>
+C:\Users\Lenovo&gt;py -3.12 -c &quot;import frida; print(frida.__version__)&quot;
+17.17.0
+
+C:\Users\Lenovo&gt;where frida
+C:\Users\Lenovo\AppData\Local\Programs\Python\Python312\Scripts\frida.exe
+
+C:\Users\Lenovo&gt;frida --version
+17.17.0
+</code></pre>
+<p>结论：Python 3.12、Frida 17.17.0 和裸命令路径均已实际验证成功。</p>
+<h2>进程枚举与附加</h2>
+<p>Frida 可按进程名或 PID 附加已运行的程序，也可由 Frida 创建新进程。基本流程：<code>frida-ps</code> 列出全部进程 → 找到目标 → 记录 PID → 按 PID 附加。</p>
+<p>进程名可能重复，PID 能准确指向某一次运行实例，适合实验复现；但 PID 只在进程生命周期内有效，程序重启后要重新枚举。</p>
+<p>| 方式 | 示例 | 特点 | |---|---|---| | 按 PID 附加 | <code>frida -p 4196</code> | 精确定位当前实例 | | 按名称附加 | <code>frida -n Notepad.exe</code> | 简便，同名进程可能有歧义 | | 由 Frida 启动 | <code>frida -f "HookDemo.exe" -l hook.js</code> | 在业务逻辑执行前安装脚本，适合捕获早期调用 |</p>
+<p>实际操作：</p>
+<pre><code>
+frida-ps
+frida-ps | findstr /i notepad
+frida -p 4196
+</code></pre>
+<p><code>findstr</code> 只是列表过长时的可选过滤，不是 Frida 必需步骤。连接 USB 设备上的 Frida 服务用 <code>frida-ps -U</code>（本次只连接了 Local System）。</p>
+<p>附加成功后在 REPL 中验证：</p>
+<pre><code>
+Process.id
+Process.arch
+Process.pointerSize
+Process.enumerateModules()[0]
+</code></pre>
+<p>也可拆开查看主模块：</p>
+<pre><code>
+const mainModule = Process.enumerateModules()[0];
+mainModule.name
+mainModule.base
+mainModule.size
+</code></pre>
+<p>常见误解：</p>
+<p>| 误解 | 正解 | |---|---| | 记住一次 PID 就能永久使用 | 进程重启后要重新枚举 | | Python 是 64 位就不能附加 32 位目标 | 主机 Python 位数与目标附加能力不能简单画等号，以实际附加结果和目标架构为准 | | <code>Process.pointerSize</code> 是文件位数 | 反映目标进程指针宽度：32 位通常为 4，64 位通常为 8 | | 启动模式意味着程序永远挂起 | Frida 早期注入后，现代 CLI 默认在脚本加载后恢复，只有显式暂停选项才保持暂停 |</p>
+<p>实验记录：</p>
+<pre><code>
+C:\Users\Lenovo&gt;frida -p 4196
+Frida 17.17.0 - A world-class dynamic instrumentation toolkit
+Connected to Local System (id=local)
+
+[Local::PID::4196 ]-&gt;
+</code></pre>
+<p>PID 4196 附加成功；目标进程名称和架构未在对话中贴出，标记待确认。</p>
+<h2>frida-trace 自动生成 handler</h2>
+<p>第一种 Hook 方式：用 <code>frida-trace</code> 按通配符查找函数，工具自动生成 handler 文件，然后直接编辑 handler。</p>
+<pre><code>
+frida-trace -p 4196 -i &quot;MessageBox*&quot;
+frida-trace -p 4196 -i &quot;user32.dll!MessageBox*&quot;
+</code></pre>
+<p><code>-i</code> 的基本格式是 <code>[MODULE!]FUNCTION</code>，模块名和函数名都可用通配符。</p>
+<p>用户最初执行 <code>frida -p 4196 -i "MessageBox*"</code> 报 <code>unrecognized arguments: -i</code>——<code>-i</code> 属于 <code>frida-trace</code>，不属于 <code>frida</code> REPL：</p>
+<p>| 命令 | 主要用途 | 支持 <code>-i</code> | |---|---|---| | <code>frida</code> | REPL、执行表达式、加载独立脚本 | 否 | | <code>frida-trace</code> | 匹配函数、批量跟踪、生成 handler | 是 |</p>
+<p><code>frida-trace</code> 的自动化工作：</p>
+<pre><code>
+解析 -i 规则 → 枚举已加载模块和导出函数 → 建立 working set
+→ 为匹配函数安装跟踪 → 生成 __handlers__ 下的 JS 文件 → 监视文件变化并自动重载
+</code></pre>
+<p>为避免 handler 生成在用户目录根部，先进入实验目录：</p>
+<pre><code>
+mkdir C:\Users\Lenovo\Documents\FridaLab
+cd /d C:\Users\Lenovo\Documents\FridaLab
+frida-trace -p 4196 -i &quot;user32.dll!MessageBox*&quot;
+</code></pre>
+<p>本次实际从 <code>C:\Users\Lenovo</code> 启动，handler 生成在 <code>C:\Users\Lenovo\__handlers__\user32.dll\</code>，共 8 个：</p>
+<pre><code>
+MessageBoxA.js          MessageBoxW.js
+MessageBoxExA.js        MessageBoxExW.js
+MessageBoxTimeoutA.js   MessageBoxTimeoutW.js
+MessageBoxIndirectA.js  MessageBoxIndirectW.js
+</code></pre>
+<p>保存 handler 只触发重载，不会主动调用目标 API；只有目标程序下一次调用对应函数时 <code>onEnter</code>/<code>onLeave</code> 才执行。目标持续弹窗时，看起来像"保存后马上打印"。</p>
+<p>常见误解：</p>
+<ul>
+<li>老师说的"直接改默认生成的文件"指 <code>__handlers__\user32.dll\MessageBoxA.js</code>。排查过程中曾猜测是 REPL 内部 Agent <code>Python312\Lib\site-packages\frida_tools\repl_agent.js</code>（可用 <code>py -3.12 -c "import frida_tools, pathlib; print(pathlib.Path(frida_tools.__file__).parent / 'repl_agent.js')"</code> 定位），最终结论以 <code>__handlers__</code> 为准，不要改 <code>site-packages</code> 内部文件。</li>
+<li>自动生成 8 个 handler 不代表目标调用了 8 个函数——"生成"只说明通配符匹配到 8 个导出。</li>
+</ul>
+<p>实验记录：</p>
+<pre><code>
+MessageBoxExA: Auto-generated handler at &quot;C:\Users\Lenovo\__handlers__\user32.dll\MessageBoxExA.js&quot;
+...（共 8 个）
+Started tracing 8 functions.
+Web UI available at http://localhost:63835/
+</code></pre>
+<p>端口 <code>63835</code> 是当次运行的随机端口，不是固定值。控制台还推荐了官方 GUI Luma，本次未使用。</p>
+<p>实际调用日志：</p>
+<pre><code>
+           /* TID 0x2114 */
+ 29450 ms  MessageBoxA()
+ 29450 ms     | MessageBoxTimeoutA()
+ 29450 ms     |    | MessageBoxTimeoutW()
+ 30698 ms  MessageBoxA()
+ 30698 ms     | MessageBoxTimeoutA()
+ 30698 ms     |    | MessageBoxTimeoutW()
+</code></pre>
+<ul>
+<li><code>TID 0x2114</code> 是调用所在线程 ID；毫秒值是 trace 时间位置；竖线表示嵌套调用深度</li>
+<li>实际调用链：<code>MessageBoxA → MessageBoxTimeoutA → MessageBoxTimeoutW</code></li>
+<li><code>MessageBoxW()</code> 没有独立出现，不能根据"生成了 MessageBoxW.js"断言目标直接调用了它</li>
+</ul>
+<h2>MessageBoxA handler：参数与返回值打印</h2>
+<p>自动生成的原始 handler：</p>
+<pre><code>
+defineHandler({
+  onEnter(log, args, state) {
+    log(&#x27;MessageBoxA()&#x27;);
+  },
+
+  onLeave(log, retval, state) {
+  }
+});
+</code></pre>
+<p>回调签名与参数含义：</p>
+<p>| 名称 | 含义 | |---|---| | <code>log</code> | <code>frida-trace</code> 提供的格式化日志函数，显示线程和调用层级 | | <code>args</code> | 目标函数参数数组，元素以 <code>NativePointer</code> 形式暴露 | | <code>state</code> | handler 状态对象，可保存需要持续引用的数据 | | <code>retval</code> | 原始返回值对象，可读取或调用 <code>replace()</code> 修改 |</p>
+<p><code>MessageBoxA</code> 函数原型：</p>
+<pre><code>
+int MessageBoxA(
+    HWND   hWnd,
+    LPCSTR lpText,
+    LPCSTR lpCaption,
+    UINT   uType
+);
+</code></pre>
+<p>参数映射：</p>
+<p>| Frida 参数 | Win32 参数 | 解释方式 | |---|---|---| | <code>args[0]</code> | <code>hWnd</code> | 窗口句柄，保留为指针值显示 | | <code>args[1]</code> | <code>lpText</code> | ANSI 字符串指针，<code>readAnsiString()</code> | | <code>args[2]</code> | <code>lpCaption</code> | ANSI 字符串指针，<code>readAnsiString()</code> | | <code>args[3]</code> | <code>uType</code> | <code>UINT</code> 标志，<code>toUInt32()</code> | | <code>retval</code> | <code>int</code> | 按钮编号，<code>toInt32()</code> |</p>
+<p><code>args[1]</code> 不是 JS 字符串，而是目标进程中的地址，指向以 0 结尾的 ANSI 字节串，要通过指针读取内容：<code>args[1].readAnsiString()</code>。</p>
+<p>A/W 版区别：</p>
+<p>| API | 参数类型 | Frida 读取方式 | |---|---|---| | <code>MessageBoxA</code> | <code>LPCSTR</code>，Windows ANSI | <code>readAnsiString()</code> | | <code>MessageBoxW</code> | <code>LPCWSTR</code>，UTF-16 | <code>readUtf16String()</code> |</p>
+<p>注意：老师截图对 <code>MessageBoxA</code> 用了 <code>readUtf8String()</code>。英文 ASCII 在 UTF-8 和常见 ANSI 编码中字节相同，所以英文演示能成功；但遇到中文 ANSI/GBK 字节可能乱码或失败。按 API 语义应使用 <code>readAnsiString()</code>。</p>
+<p>模板字符串必须用反引号，<code>${表达式}</code> 先计算再插入：</p>
+<pre><code>
+log(<code>[MessageBoxA] 返回值 = ${result}</code>);   // 正确
+log(&#x27;[MessageBoxA] 返回值 = ${result}&#x27;);   // 错误：原样输出 ${result}
+</code></pre>
+<h3>三个典型问题代码</h3>
+<p>模板字符串用了单引号：</p>
+<pre><code>
+log(&#x27;hWnd = ${hWnd}&#x27;);              // 错误
+log(<code>hWnd = ${hWnd}</code>);              // 修正
+</code></pre>
+<p>变量名叫 <code>textPtr</code> 但存的已是字符串：</p>
+<pre><code>
+const textPtr = args[1].readAnsiString();   // 能工作，命名误导
+const textAddress = args[1];                // 更清楚的写法
+const text = textAddress.readAnsiString();
+</code></pre>
+<p>不检查空指针：</p>
+<pre><code>
+const text = args[1].isNull()
+  ? &#x27;&lt;NULL&gt;&#x27;
+  : args[1].readAnsiString();
+
+const caption = args[2].isNull()
+  ? &#x27;&lt;NULL&gt;&#x27;
+  : args[2].readAnsiString();
+</code></pre>
+<h3>修正后的打印版本</h3>
+<pre><code>
+defineHandler({
+  onEnter(log, args, state) {
+    log(<code>MessageBoxA()</code>);
+
+    const hWnd = args[0];
+
+    const text = args[1].isNull()
+      ? &#x27;&lt;NULL&gt;&#x27;
+      : args[1].readAnsiString();
+
+    const caption = args[2].isNull()
+      ? &#x27;&lt;NULL&gt;&#x27;
+      : args[2].readAnsiString();
+
+    const type = args[3].toUInt32();
+
+    log(<code>hWnd = ${hWnd}</code>);
+    log(<code>text = ${text}</code>);
+    log(<code>caption = ${caption}</code>);
+    log(<code>type = ${type}，十六进制 = 0x${type.toString(16)}</code>);
+  },
+
+  onLeave(log, retval, state) {
+    const result = retval.toInt32();
+    log(<code>返回值 = ${result}</code>);
+  }
+});
+</code></pre>
+<p><code>onEnter</code> 在弹窗显示前执行；<code>onLeave</code> 必须等用户点击按钮、<code>MessageBoxA</code> 准备返回时才执行，没立即输出不是 Hook 失败。</p>
+<p>常见返回值：</p>
+<p>| 数值 | 常量 | 含义 | |---:|---|---| | 1 | <code>IDOK</code> | 确定 | | 2 | <code>IDCANCEL</code> | 取消 | | 3 | <code>IDABORT</code> | 中止 | | 4 | <code>IDRETRY</code> | 重试 | | 5 | <code>IDIGNORE</code> | 忽略 | | 6 | <code>IDYES</code> | 是 | | 7 | <code>IDNO</code> | 否 |</p>
+<p>常见误解：</p>
+<p>| 误解 | 正解 | |---|---| | <code>textPtr</code> 这个名字证明它还是指针 | 名字不决定类型；<code>readAnsiString()</code> 后得到的是 JS 字符串 | | <code>args[3]</code> 直接打印就是普通整数 | 以 <code>NativePointer</code> 形式提供，按 <code>UINT</code> 解释应用 <code>toUInt32()</code> | | <code>retval</code> 直接打印就是 C 的 <code>int</code> | 应按返回类型调用 <code>toInt32()</code> 等转换方法 | | <code>readUtf8String()</code> 可用于所有 A 版 API | A 表示 Windows ANSI，不等于 UTF-8；ASCII 只是碰巧兼容 | | handler 可以混用其他 API 的读取方式 | handler 必须按自己对应 API 的函数原型解释参数 |</p>
+<p>实验记录：用户最终版本用 <code>const textPtr = args[1].readAnsiString()</code> 和 <code>type.toInt32()</code>，对小值 <code>uType</code> 通常能显示，但更严谨是 <code>toUInt32()</code>；<code>textPtr</code> 命名不准确但不导致运行错误。该版参数打印的完整控制台输出未贴出，具体标题、正文、<code>uType</code> 和按钮返回值均为待回验。</p>
+<h2>修改参数与返回值</h2>
+<p>参数修改在 <code>onEnter</code>，返回值修改在 <code>onLeave</code>：</p>
+<pre><code>
+进入 MessageBoxA → onEnter：查看/替换 args[] → MessageBoxA 用修改后的参数执行
+→ 用户点击按钮 → onLeave：查看/替换 retval → 调用者收到最终返回值
+</code></pre>
+<p>字符串参数的本质是地址，JS 普通字符串不能直接作为 <code>LPCSTR</code> 传入，要先在目标进程申请内存并编码：<code>Memory.allocAnsiString('hello Frida')</code> 返回 <code>NativePointer</code>，再把参数改成新地址。返回值读取用 <code>retval.toInt32()</code>，修改用 <code>retval.replace(100)</code>。</p>
+<h3>申请新字符串并替换参数指针</h3>
+<pre><code>
+state.newtext = Memory.allocAnsiString(<code>hello Frida</code>);
+state.newcaption = Memory.allocAnsiString(<code>Frida Hook</code>);
+
+args[1] = state.newtext;
+args[2] = state.newcaption;
+
+log(<code>newtext = ${state.newtext.readAnsiString()}</code>);
+log(<code>newcaption = ${state.newcaption.readAnsiString()}</code>);
+</code></pre>
+<p>指针保存在 <code>state</code> 中，让 handler 持续持有这些对象。</p>
+<p>问题代码：对象属性与局部变量混淆。</p>
+<pre><code>
+state.newtext = Memory.allocAnsiString(<code>hello Frida</code>);
+args[1] = newtext;        // ReferenceError: &#x27;newtext&#x27; is not defined
+args[1] = state.newtext;  // 修正
+</code></pre>
+<p><code>state.newtext</code> 是 <code>state</code> 的属性，不会自动声明局部变量 <code>newtext</code>。</p>
+<p>注意地址与内容的区别：<code>${state.newtext}</code> 打印地址（如 <code>0x1f53a990250</code>），<code>${state.newtext.readAnsiString()}</code> 才打印内容。</p>
+<h3>修改 uType</h3>
+<p>参数数组元素以指针大小的值暴露，写整数标志：</p>
+<pre><code>
+args[3] = ptr(0x04);
+</code></pre>
+<p>| 数值 | 含义 | |---:|---| | <code>0x00</code> | <code>MB_OK</code> | | <code>0x01</code> | <code>MB_OKCANCEL</code> | | <code>0x04</code> | <code>MB_YESNO</code> | | <code>0x40</code> | <code>MB_ICONINFORMATION</code> |</p>
+<h3>修改返回值</h3>
+<p>问题代码：<code>retval.add(100)</code> 只是指针运算，算出"原地址加 100"的新 <code>NativePointer</code> 且结果被丢弃，不会修改真实返回值。</p>
+<pre><code>
+retval.replace(100);                              // 强制返回 100
+
+const oldResult = retval.toInt32();               // 在原结果上加 100
+retval.replace(oldResult + 100);
+
+retval.replace(1);   // IDOK，更符合 MessageBoxA 语义
+retval.replace(6);   // IDYES
+retval.replace(7);   // IDNO
+</code></pre>
+<p>验证前后变化要各打印一次：</p>
+<pre><code>
+const oldResult = retval.toInt32();
+log(<code>修改前返回值 = ${oldResult}</code>);
+
+retval.replace(100);
+
+log(<code>修改后返回值 = ${retval.toInt32()}</code>);
+</code></pre>
+<h3>综合版本</h3>
+<pre><code>
+defineHandler({
+  onEnter(log, args, state) {
+    log(<code>MessageBoxA()</code>);
+    const hWnd = args[0];
+    const textPtr = args[1].readAnsiString();
+    const captionPtr = args[2].readAnsiString();
+    const type = args[3];
+
+    log(<code>hWnd = ${hWnd}</code>);
+    log(<code>text = ${textPtr}</code>);
+    log(<code>caption = ${captionPtr}</code>);
+    log(<code>type = ${type.toInt32()}</code>);
+
+    state.newtext = Memory.allocAnsiString(<code>hello Frida</code>);
+    state.newcaption = Memory.allocAnsiString(<code>Frida Hook</code>);
+    args[1] = state.newtext;
+    args[2] = state.newcaption;
+
+    log(<code>newtext = ${state.newtext.readAnsiString()}</code>);
+    log(<code>newcaption = ${state.newcaption.readAnsiString()}</code>);
+  },
+
+  onLeave(log, retval, state) {
+    log(<code>返回值 = ${retval.toInt32()}</code>);
+    retval.replace(100);
+    log(<code>修改后返回值 = ${retval.toInt32()}</code>);
+  }
+});
+</code></pre>
+<p>建议的稳健性改进：</p>
+<pre><code>
+const text = args[1].isNull() ? &#x27;&lt;NULL&gt;&#x27; : args[1].readAnsiString();
+const caption = args[2].isNull() ? &#x27;&lt;NULL&gt;&#x27; : args[2].readAnsiString();
+const type = args[3].toUInt32();
+</code></pre>
+<p>常见误解：</p>
+<ul>
+<li>老师截图中的 <code>args[1].writeUtf8String("Hooked by Frida!")</code> 直接覆盖原缓冲区，必须同时满足：原内存可写、缓冲区足够大、编码兼容。新字符串更长或原内存只读时可能越界或异常；申请新内存替换指针更稳妥。</li>
+<li><code>retval.replace(100)</code> 不会让弹窗重新显示：<code>onLeave</code> 发生在弹窗关闭后，替换只影响调用者收到的值。</li>
+<li>目标程序可能完全忽略返回值：即使替换成功，调用者不读结果，程序外观就不变。验证 Frida 层是否修改应在 <code>replace()</code> 前后打印；验证业务效果要求目标程序根据返回值分支。</li>
+<li><code>100</code> 不是标准按钮返回值，调用者用 <code>switch</code> 可能落入默认分支；功能实验更适合用 1、2、6、7。</li>
+</ul>
+<p>实验记录：</p>
+<pre><code>
+单引号模板错误           → 改为反引号
+textPtr命名误导           → 说明其实际已是字符串
+NativePointer直接显示      → 使用 toInt32/toUInt32
+state.newtext/newtext混用  → 统一使用 state.newtext
+打印地址而非内容           → 使用 readAnsiString()
+retval.add(100)            → retval.replace(100)
+只打印旧返回值             → replace 前后各打印一次
+</code></pre>
+<p>状态区分：frida-trace 触发 MessageBoxA 已验证；handler 保存自动加载已从机制确认；新标题/正文实际显示、retval 是否被调用者接收为 100、目标程序是否使用返回值——均待动态回验。</p>
+<h2>独立 JS 与 Interceptor.attach</h2>
+<p>第二种 Hook 方式：脚本自己查找模块、查找导出地址、调用 <code>Interceptor.attach</code>。与 <code>frida-trace</code> 底层目标相同，外层职责不同：</p>
+<p>| <code>frida-trace</code> handler | 独立 <code>hook.js</code> | |---|---| | 工具已找到函数地址 | 脚本自己找模块和函数地址 | | 工具已安装跟踪 | 脚本自己调用 <code>Interceptor.attach</code> | | <code>onEnter(log,args,state)</code> | <code>onEnter(args)</code> | | <code>onLeave(log,retval,state)</code> | <code>onLeave(retval)</code> | | 使用 <code>log()</code> | 常用 <code>console.log()</code> 或 <code>send()</code> |</p>
+<p>自动 handler 适合快速批量观察；独立脚本适合精确控制：自己决定地址解析方式、同时 Hook 多个不相关函数、维护共享数据、Hook 未导出函数、用 <code>NativeFunction</code> 主动调用、用 <code>Interceptor.replace</code> 替换实现。</p>
+<p>老师截图的核心代码：</p>
+<pre><code>
+function HookMessageBoxA() {
+  console.log(&quot;Frida HookMessageBoxA&quot;);
+
+  const mou = Process.getModuleByName(&quot;user32.dll&quot;);
+  const msgBoxAddr = mou.getExportByName(&quot;MessageBoxA&quot;);
+
+  if (msgBoxAddr) {
+    console.log(&quot;[+] 找到 MessageBoxA: &quot; + msgBoxAddr);
+
+    Interceptor.attach(msgBoxAddr, {
+      onEnter: function (args) {
+        console.log(&quot;==== 拦截到弹窗 ====&quot;);
+        console.log(&quot;标题: &quot; + args[2].readUtf8String());
+        console.log(&quot;内容: &quot; + args[1].readUtf8String());
+
+        // 修改弹窗内容
+        // args[1].writeUtf8String(&quot;Hooked by Frida!&quot;);
+      }
+    });
+  }
+}
+</code></pre>
+<p>函数声明本身不会自动执行，完整脚本还需显式调用 <code>HookMessageBoxA();</code> 或 <code>setImmediate(HookMessageBoxA);</code>。</p>
+<p>独立脚本基本结构：</p>
+<pre><code>
+function hookApi() {
+  const module = Process.getModuleByName(&#x27;user32.dll&#x27;);
+  const address = module.getExportByName(&#x27;MessageBoxA&#x27;);
+
+  console.log(<code>user32.dll基址 = ${module.base}</code>);
+  console.log(<code>MessageBoxA地址 = ${address}</code>);
+
+  Interceptor.attach(address, {
+    onEnter(args) {
+      const text = args[1].isNull()
+        ? &#x27;&lt;NULL&gt;&#x27;
+        : args[1].readAnsiString();
+
+      console.log(<code>正文 = ${text}</code>);
+    },
+
+    onLeave(retval) {
+      console.log(<code>返回值 = ${retval.toInt32()}</code>);
+    }
+  });
+}
+
+setImmediate(hookApi);
+</code></pre>
+<p><code>Interceptor.attach()</code> 返回 listener，可单独撤销：</p>
+<pre><code>
+const listener = Interceptor.attach(address, {
+  onEnter(args) {
+  }
+});
+
+listener.detach();
+</code></pre>
+<p>加载方式：</p>
+<pre><code>
+frida -p PID -l hook.js
+frida -f &quot;C:\完整路径\HookDemo.exe&quot; -l hook.js
+</code></pre>
+<p>使用 <code>-l</code> 时脚本保存后 Frida CLI 支持自动重载，适合实时修改。</p>
+<p>常见误解：</p>
+<p>| 误解 | 正解 | |---|---| | 这是完全不同的底层 Hook 技术 | 两者最终都用 Frida Interceptor，区别是自动化层级 | | 可把 <code>Interceptor.attach</code> 代码直接粘进生成的 handler | handler 已由 <code>frida-trace</code> 安装 Hook，重复手动 attach 会混淆职责 | | <code>onEnter: function(args)</code> 与 <code>onEnter(args)</code> 功能不同 | 前者是传统属性函数写法，后者是对象方法简写 | | 独立脚本只需声明函数 | 还必须调用函数或安排它执行 | | 老师对 <code>MessageBoxA</code> 用 <code>readUtf8String()</code> 可推广到所有中文场景 | ASCII 演示可行；按 Win32 语义应优先 ANSI |</p>
+<p>实验记录：本次实际完成的是 <code>frida-trace</code> handler，独立脚本尚未真正保存、加载并运行。下一步实验应从自己编写的目标程序开始，而不是直接在未知程序上尝试。</p>
+<h2>Hook 未导出函数：模块基址、VA 与 RVA</h2>
+<p>系统 API 可通过导出名找到；自己程序的内部函数往往没有导出名，要从静态分析工具得到 RVA（函数相对模块基址的偏移）：</p>
+<pre><code>
+RVA       = 静态VA - 默认ImageBase
+运行时VA  = 当前模块基址 + RVA
+</code></pre>
+<p>注意：不能把磁盘文件偏移 FOA 直接加到模块内存基址。</p>
+<p>查找模块的两种接口：</p>
+<p>| 接口 | 模块不存在时 | |---|---| | <code>findModuleByName()</code> | 返回 <code>null</code>，适合自己写条件分支 | | <code>getModuleByName()</code> | 抛出异常，适合"模块必须存在"的场景 |</p>
+<pre><code>
+const module = Process.findModuleByName(&#x27;HookDemo.exe&#x27;);
+
+if (module === null) {
+  throw new Error(&#x27;HookDemo.exe 尚未加载&#x27;);
+}
+</code></pre>
+<p>ASLR 使程序每次运行的模块基址可能变化，直接把 IDA 里的静态地址当运行时绝对地址会 Hook 到错误位置；RVA 相对模块内部布局稳定，因此用 <code>module.base.add(rva)</code>。</p>
+<h3>实验准备</h3>
+<p>建议自己准备 32 位 Debug 测试程序：</p>
+<pre><code>
+int __declspec(noinline) __stdcall MyAdd(int a, int b)
+{
+    return a + b;
+}
+</code></pre>
+<p>实验条件：</p>
+<ul>
+<li>使用 x86 Debug，关闭优化</li>
+<li><code>__declspec(noinline)</code> 防止内联</li>
+<li>确保程序实际调用 <code>MyAdd</code></li>
+<li>最好循环调用或等待输入，避免附加前函数已执行完</li>
+</ul>
+<p>需要收集：程序模块名、函数完整声明、IDA/x32dbg 显示的函数静态 VA、PE 默认 ImageBase。</p>
+<p>说明性示例（教学值，非实测地址）：</p>
+<pre><code>
+函数静态VA = 0x00401230
+ImageBase   = 0x00400000
+
+RVA = 0x00401230 - 0x00400000 = 0x00001230
+</code></pre>
+<p>独立脚本骨架：</p>
+<pre><code>
+function hookMyFunction() {
+  const module = Process.getModuleByName(&#x27;HookDemo.exe&#x27;);
+  const functionAddress = module.base.add(0x1230);
+
+  console.log(<code>模块基址 = ${module.base}</code>);
+  console.log(<code>函数运行时地址 = ${functionAddress}</code>);
+
+  Interceptor.attach(functionAddress, {
+    onEnter(args) {
+      const a = args[0].toInt32();
+      const b = args[1].toInt32();
+
+      console.log(<code>a = ${a}</code>);
+      console.log(<code>b = ${b}</code>);
+
+      // 后续实验：args[0] = ptr(100);
+    },
+
+    onLeave(retval) {
+      console.log(<code>返回值 = ${retval.toInt32()}</code>);
+
+      // 后续实验：retval.replace(999);
+    }
+  });
+}
+
+setImmediate(hookMyFunction);
+</code></pre>
+<p>常见误解：</p>
+<p>| 误解 | 正解 | |---|---| | IDA 地址可以直接拿来 Hook | 若包含默认 ImageBase，先算 RVA，再加运行时模块基址 | | 模块基址 + 文件偏移 | 内存 Hook 用 RVA/模块内偏移，不能套磁盘 FOA | | 找到函数入口就能正确读参数 | 还必须确认函数原型、参数类型和调用约定 | | C++ 函数第一个可见参数总是 <code>args[0]</code> | 成员函数可能有隐藏 <code>this</code>，x86 <code>thiscall/fastcall</code> 还涉及寄存器传参 | | Release 下函数名和地址一定存在 | 优化可能内联、合并或删除函数 | | <code>__stdcall</code>、<code>cdecl</code> 对 attach 没意义 | 读参数和主动调用必须理解实际 ABI；主动调用时错误原型尤其容易崩溃 |</p>
+<p>实验记录：本主题尚未真实编译运行，目标 EXE 名称、函数声明、ImageBase、静态 VA、RVA、运行时基址和最终函数地址均为待确认项。</p>
+<h2>NativeFunction 主动调用与 Interceptor.replace</h2>
+<p><code>NativeFunction</code> 把本地函数地址包装成 JS 可调用对象；<code>Interceptor.replace</code> 把目标函数后续调用重定向到新的 <code>NativeCallback</code> 实现。</p>
+<pre><code>
+attach：  调用者 → onEnter → 原函数 → onLeave → 调用者
+replace： 调用者 → replacement →（可选：主动调用原函数）→ 调用者
+</code></pre>
+<p><code>attach</code> 适合旁路观察和局部修改，原函数自动执行；<code>replace</code> 适合完全或部分接管实现，<strong>原函数不会自动执行</strong>。</p>
+<p><code>replace</code> 与程序是否已运行没有必然关系：</p>
+<ul>
+<li>附加已运行进程后安装：只影响安装后的后续调用</li>
+<li>由 Frida 创建进程并尽早加载脚本：可捕获启动初期调用</li>
+<li>安装前已发生的调用无法倒退捕获</li>
+<li>已进入执行中的一次调用通常不会被中途改写</li>
+</ul>
+<p><code>NativeFunction</code> 主动调用内部函数时，地址正确只是第一步，还要准确声明：返回值类型、参数数量和类型、x86 调用约定、是否有隐藏 <code>this</code>、是否依赖特定对象/线程/TLS/初始化状态、是否会造成重入。</p>
+<p><code>replace</code> 比 <code>attach</code> 多一项硬要求：替代实现必须通过 <code>NativeCallback</code> 准确声明返回类型、参数类型和 ABI。<code>attach</code> 构造时不要求完整原型，但解释 <code>args[]</code> 时仍必须知道真实原型。</p>
+<h3>基本用法</h3>
+<p>包装原函数：</p>
+<pre><code>
+const original = new NativeFunction(
+  functionAddress,
+  &#x27;int&#x27;,
+  [&#x27;int&#x27;, &#x27;int&#x27;],
+  Process.arch === &#x27;ia32&#x27; ? &#x27;stdcall&#x27; : &#x27;default&#x27;
+);
+</code></pre>
+<p>替代函数骨架：</p>
+<pre><code>
+const replacement = new NativeCallback(
+  function (a, b) {
+    console.log(<code>a = ${a}, b = ${b}</code>);
+
+    // 完全替换：直接返回自己的结果
+    return 1234;
+
+    // 部分替换时可主动调用 original(a, b)
+  },
+  &#x27;int&#x27;,
+  [&#x27;int&#x27;, &#x27;int&#x27;],
+  Process.arch === &#x27;ia32&#x27; ? &#x27;stdcall&#x27; : &#x27;default&#x27;
+);
+
+Interceptor.replace(functionAddress, replacement);
+</code></pre>
+<p>恢复原函数：<code>Interceptor.revert(functionAddress);</code></p>
+<h3>MessageBoxW 完整替换模板</h3>
+<p>原型：</p>
+<pre><code>
+int MessageBoxW(
+    HWND    hWnd,
+    LPCWSTR lpText,
+    LPCWSTR lpCaption,
+    UINT    uType
+);
+</code></pre>
+<pre><code>
+const user32 = Process.getModuleByName(&#x27;user32.dll&#x27;);
+const messageBoxW = user32.getExportByName(&#x27;MessageBoxW&#x27;);
+
+const argTypes = [
+  &#x27;pointer&#x27;,
+  &#x27;pointer&#x27;,
+  &#x27;pointer&#x27;,
+  &#x27;uint&#x27;
+];
+
+const abi = Process.arch === &#x27;ia32&#x27;
+  ? &#x27;stdcall&#x27;
+  : &#x27;default&#x27;;
+
+const originalMessageBoxW = new NativeFunction(
+  messageBoxW,
+  &#x27;int&#x27;,
+  argTypes,
+  abi
+);
+
+const newText = Memory.allocUtf16String(&#x27;Hooked by Frida&#x27;);
+const newCaption = Memory.allocUtf16String(&#x27;Interceptor.replace&#x27;);
+
+const replacement = new NativeCallback(
+  function (hWnd, text, caption, type) {
+    // 部分替换：手动调用原函数
+    return originalMessageBoxW(
+      hWnd,
+      newText,
+      newCaption,
+      type
+    );
+  },
+  &#x27;int&#x27;,
+  argTypes,
+  abi
+);
+
+Interceptor.replace(messageBoxW, replacement);
+</code></pre>
+<p>若 replacement 不调用 <code>originalMessageBoxW()</code> 而直接 <code>return 1</code>，就是完全接管，原弹窗逻辑不会执行。调用原地址的 <code>NativeFunction</code> 用于在 replacement 内显式进入原实现——"替换"不等于"原函数永远不能再调用"。</p>
+<p>加载方式：</p>
+<pre><code>
+frida -p PID -l replace.js
+frida -f &quot;HookDemo.exe&quot; -l replace.js
+</code></pre>
+<p>常见误解：</p>
+<p>| 误解 | 正解 | |---|---| | <code>replace</code> 必须在程序没运行时使用 | 目标函数已加载、地址可得即可安装；越晚越会漏掉早期调用 | | <code>replace</code> 后原函数仍自动执行 | 不会，除非 replacement 显式通过 <code>NativeFunction</code> 调用原实现 | | <code>replace</code> 会修改磁盘 EXE | 只改当前进程的执行路径，不改磁盘文件 | | 替换脚本退出后永久有效 | 可用 <code>Interceptor.revert()</code> 恢复；脚本卸载或进程结束也不等于磁盘被永久修改 | | <code>NativeFunction</code> 只要地址对就安全 | 原型、ABI、对象状态和线程环境任何一项错误都可能崩溃 | | 主动调用内部算法就能直接"穷举" | 只适用于明确授权的受控实验，且函数必须能在当前状态下独立、重复、安全调用 |</p>
+<p>实验记录：本主题只完成原理讨论。<code>Interceptor.attach</code> 已通过 frida-trace 间接验证触发；独立 attach、<code>NativeFunction</code>、<code>Interceptor.replace</code>、<code>Interceptor.revert</code>、启动模式捕获早期调用均尚未运行。</p>
+<h2>高级主题：内存补丁、反调试观察、调用栈与 Stalker</h2>
+<p>课堂提到的后续主题：</p>
+<ul>
+<li>直接修改目标进程内存中的指令，例如授权实验中改成 NOP</li>
+<li>Hook 检测调试器的关键 API，观察或控制 API 型反调试结果</li>
+<li>打印调用栈，判断某个函数是谁调用的</li>
+<li>使用线程级跟踪分析混淆代码或复杂执行流</li>
+</ul>
+<p>| 能力 | 主要回答的问题 | |---|---| | 参数/返回值 Hook | 这个函数接收和返回了什么？ | | 内存补丁 | 如果改变这几条指令，控制流会怎样？ | | API 型反调试观察 | 程序通过哪个公开 API 获取调试状态？ | | <code>Thread.backtrace()</code> | 当前 Hook 点是由哪些调用层到达的？ | | <code>Stalker</code> | 某线程执行了哪些调用、基本块或指令？ |</p>
+<p>后续实验路线：</p>
+<pre><code>
+先确定授权样本与目标行为 → 先观察，不修改 → 缩小到单个函数/单个线程
+→ 记录原始参数、返回值、调用栈 → 一次只改一个条件 → 比较修改前后结果
+</code></pre>
+<p>常见误解：</p>
+<p>| 误解 | 正解 | |---|---| | 调用栈打印就是完整指令跟踪 | <code>Thread.backtrace()</code> 是某一时刻的栈快照；<code>Stalker</code> 才用于连续线程跟踪 | | NOP 补丁只要写 <code>0x90</code> 就行 | 必须理解目标架构、指令边界、覆盖长度和内存权限；本次未做实际实验 | | Hook 一个检测调试器 API 即可代表全部反调试 | 只能覆盖对应路径，其他检查方式需独立证据 | | 跟踪越细结果越准确 | 指令级跟踪开销和日志量很大，先从函数调用和少量基本块入手 |</p>
+<p>实验记录：内存 NOP 补丁、反调试 API Hook、<code>Thread.backtrace</code>、<code>Stalker</code> 线程跟踪均未实验。</p>
+<h2>验证边界与参考资料</h2>
+<p>为避免把"代码写出来""工具自动生成""实际运行成功"混为一谈，验证状态分层：</p>
+<p>| 层级 | 含义 | |---|---| | 设计/说明 | 讨论了正确的字段、地址和数据流 | | 代码完成 | 脚本语法和 API 使用经过纠错 | | 工具触发验证 | 控制台证明 Hook 确实触发 | | 行为验证 | 目标程序实际表现证明参数或返回值修改生效 |</p>
+<p>Frida 脚本没有语法错误，不代表地址、函数原型、编码和业务分支都正确；控制台显示 <code>retval</code> 被替换，也不保证目标程序使用了该返回值。</p>
+<pre><code>
+frida --version成功        ≠ 已能附加所有目标
+frida -p成功              ≠ 已经Hook到目标函数
+Started tracing 8 functions ≠ 8个函数都实际执行过
+handler代码保存成功         ≠ 目标API已经再次调用
+retval.replace执行         ≠ 调用者一定使用了新值
+</code></pre>
+<p>本次最终已确认：</p>
+<pre><code>
+Python 3.12 可导入 frida 17.17.0
+裸 frida 命令来自 Python312\Scripts
+frida --version 输出 17.17.0
+PID 4196 成功附加
+frida-trace 匹配并生成 8 个 MessageBox* handler
+实际出现 MessageBoxA → MessageBoxTimeoutA → MessageBoxTimeoutW 调用层级
+</code></pre>
+<p>本次仍待确认：</p>
+<pre><code>
+Frida 17.17.1 是否已发布并可从 PyPI 安装
+目标进程 4196 的名称和架构
+最终参数打印的具体值
+新标题和正文的实际显示效果
+返回值 100 是否被调用者读取
+自己的内部函数 VA、ImageBase、RVA 和运行时地址
+独立 hook.js、NativeFunction、Interceptor.replace 的运行结果
+</code></pre>
+<p>下一次实验建议依次补齐证据：保存当前 <code>MessageBoxA.js</code> → 触发一次弹窗 → 保存修改前参数日志 → 截取新正文和新标题的弹窗 → 记录 <code>retval.replace()</code> 前后数值 → 用自己的测试程序显式打印 <code>MessageBoxA</code> 返回值 → 再进入独立 <code>hook.js</code> 与内部函数 RVA 实验。</p>
+<p>官方参考：</p>
+<ul>
+<li>[Frida JavaScript API](https://frida.re/docs/javascript-api/)</li>
+<li>[Frida CLI](https://frida.re/docs/frida-cli/)</li>
+<li>[frida-trace](https://frida.re/docs/frida-trace/)</li>
+<li>[Frida Functions 教程](https://frida.re/docs/functions/)</li>
+<li>[Python Windows 使用说明](https://docs.python.org/3/using/windows.html)</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

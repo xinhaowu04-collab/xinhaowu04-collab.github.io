@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>节修改与代码注入 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">节修改与代码注入</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>节修改与代码注入</h1>
+<p>两种把注入代码纳入 PE 内存映像的思路：扩大最后一个节（不增节表项，把尾部数据并入已有节），或新增一个正式节（加一条节头，加载器按新节字段映射）。</p>
+<h2>扩大最后一个节</h2>
+<p>不增加节表项，把文件尾部追加的数据纳入原最后一个节的文件范围和内存范围。课堂流程：</p>
+<pre><code>
+1. 文件尾部追加注入数据
+2. 处理最后节 VirtualSize（老师示例中清零）
+3. 增大最后节 SizeOfRawData
+4. 重新计算全局 SizeOfImage
+5. 检查最后节 Characteristics 和控制流
+</code></pre>
+<p>第一步只改变文件长度；不改节头，新增数据仍只是 Overlay，加载器不必把它当节数据。</p>
+<h3>课堂算例</h3>
+<p>原最后节：</p>
+<pre><code>
+VirtualAddress   = 3000h
+VirtualSize      = 0180h
+PointerToRawData = 0600h
+SizeOfRawData    = 0200h     ; 原节文件范围 0600h~07FFh，0800h 之后是原 Overlay
+</code></pre>
+<p>在 <code>0800h</code> 追加 <code>250h</code> 字节：</p>
+<pre><code>
+旧末端 0800h + 追加 0250h = 新末端 0A50h
+AlignUp(0A50h, 200h) = 0C00h
+新 SizeOfRawData = 0C00h - 0600h = 0600h
+</code></pre>
+<p>注入代码位置：</p>
+<pre><code>
+节内偏移 = 0800h - 0600h = 0200h
+RVA      = 3000h + 0200h = 3200h
+VA       = 00400000h + 3200h = 00403200h   （ImageBase=00400000h）
+</code></pre>
+<p>新内存范围与全局大小（按老师的 <code>VirtualSize=0</code> 兼容处理理解，有效内存大小约等于 <code>SizeOfRawData</code>）：</p>
+<pre><code>
+内存末端 = 3000h + 0600h = 3600h
+SizeOfImage = AlignUp(3600h, 1000h) = 4000h
+</code></pre>
+<p>注意：</p>
+<ul>
+<li><code>SizeOfImage</code> 是可选头的全局字段，不是"最后一个节的 SizeOfImage"；节头改 <code>VirtualSize</code>/<code>SizeOfRawData</code>，可选头改 <code>SizeOfImage</code></li>
+<li><code>SizeOfRawData</code> 按文件对齐后的<strong>整个节范围</strong>计算，不是只加注入长度</li>
+<li>标准做法是给 <code>VirtualSize</code> 设置足以覆盖新增内容的大小；老师的"清零"利用部分加载器/手动映射器对 <code>VirtualSize=0</code> 按 <code>SizeOfRawData</code> 处理的兼容行为，是课堂技巧、待样本验证，不是无条件规范</li>
+<li><code>SizeOfRawData=0</code>、<code>VirtualSize=1000h</code> 时文件无原始数据、内存零填，类似未初始化全局数据；反过来文件有数据而 <code>VirtualSize</code> 很小或为零时，不同加载器边界处理可能不同</li>
+<li>追加代码被映射不等于自动执行，还要让控制流跳到它</li>
+<li>最后节只有 R 或 RW、没有 X 时注入代码会因页面不可执行失败；复用数据节做代码区要改权限，带来兼容性和安全性问题</li>
+</ul>
+<h2>增加一个新节</h2>
+<p>新增正式节（如 <code>.inj</code>）：加一条 <code>IMAGE_SECTION_HEADER</code>，加载器按新节字段把新增数据复制到新内存区域。老师概括的步骤：</p>
+<pre><code>
+1. 修改 FileHeader.NumberOfSections
+2. 检查节表是否有空间，必要时修改 SizeOfHeaders 和后续文件偏移
+3. 插入一条新的节表项
+4. 安排新节的文件位置、内存 RVA、大小和权限
+5. 重新计算 SizeOfImage
+6. 如需执行，再修改控制流
+</code></pre>
+<p>每条节头固定 40 字节（<code>28h</code>）。<code>NumberOfSections</code> 位于 <code>IMAGE_FILE_HEADER</code> 不是可选头；不更新它，加载器仍按旧数量遍历，看不到新节。</p>
+<p>节表能否直接追加，取决于现有头部与第一个节原始数据之间有没有至少 <code>28h</code> 空余：</p>
+<p>| 节表结束 | 第一节开始 | 空余 | 结论 | |---:|---:|---:|---| | <code>0340h</code> | <code>0400h</code> | <code>C0h</code> | 够放一条新节头 | | <code>03F0h</code> | <code>0400h</code> | <code>10h</code> | 不够，需插入对齐空间、后移后续原始节数据并同步更新受影响的 <code>PointerToRawData</code>，必要时更新 <code>SizeOfHeaders</code> |</p>
+<h3>课堂算例</h3>
+<p>原最后节加载后末端 <code>4800h</code>，<code>SectionAlignment=1000h</code>：</p>
+<pre><code>
+新节 VirtualAddress = AlignUp(4800h, 1000h) = 5000h
+VirtualSize   = 2000h    ; 占两个内存页
+SizeOfRawData = 1000h    ; 只有一页文件初始化数据
+</code></pre>
+<p>含义：</p>
+<pre><code>
+RVA 5000h~5FFFh：文件中有一页初始化数据，加载时复制
+RVA 6000h~6FFFh：文件中没有对应数据，加载时为零
+内存末端 = 5000h + 2000h = 7000h
+SizeOfImage = 7000h
+</code></pre>
+<p>新节表项概念值：</p>
+<pre><code>
+Name              = .inj
+VirtualAddress    = 5000h
+VirtualSize       = 2000h
+PointerToRawData  = 文件尾部按 FileAlignment 对齐后的位置
+SizeOfRawData     = 1000h
+Characteristics   = 按用途设置
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>新增节通常不用改 ImageBase；只有整体搬迁并处理重定位时才考虑</li>
+<li>改 <code>SizeOfHeaders</code> 不等于给节表腾空间：物理空间不够时还要插入/移动文件字节并修改后续 raw 偏移</li>
+<li>一个节表项的 <code>Characteristics</code> 是节级描述，不能单靠它把两页分别设成 RX 和 RW；代码页想 RX、工作缓冲区想 RW 时，分成两个节或运行时单独调整保护更清晰</li>
+<li>新节被加载不等于会执行，仍需入口点/跳转等控制流到达</li>
+<li><code>SizeOfRawData=1000h</code> 不代表两页文件内容：本例只有一页文件原始数据，第二页由 <code>VirtualSize</code> 描述并零填。"一页初始化、一页未初始化"省掉第二页的文件存储，代价是同节两页共享节级权限</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

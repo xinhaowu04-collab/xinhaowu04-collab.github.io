@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手工 Loader 实战 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">手工 Loader 实战</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>手工 Loader 实战</h1>
+<p>课堂主题：写一个先运行的外层程序（壳/加载器），读取另一个 PE 文件（XP 版扫雷 winmine.exe），把目标文件重新组织到一块可执行内存中，再把执行流转到目标入口点。练习代码明确实现了文件映射、PE 头校验、节拷贝、头拷贝和导入表修补；重定位、TLS 等完整系统装载行为没有实现，不能把它理解为已覆盖 Windows 装载器的全部功能。</p>
+<h2>外层加载器的总体流程</h2>
+<p>Windows 正常启动 PE 时会完成：读取 DOS/NT/节表、按 RVA 建立内存布局、复制节、设置页面权限、处理重定位、加载 DLL、填写 IAT、处理其他启动信息、调用入口点。课堂手动模拟其中一部分：</p>
+<pre><code>
+外层程序启动
+  → VirtualProtect 预留区域
+  → CreateFile 打开 winmine.exe
+  → CreateFileMapping + MapViewOfFile
+  → 校验 MZ / PE 签名
+  → 遍历节表并复制节
+  → 复制 PE 头
+  → 遍历导入描述符
+  → LoadLibraryA + GetProcAddress 填 IAT
+  → ImageBase + AddressOfEntryPoint
+  → 跳转到目标 OEP
+</code></pre>
+<p>总体顺序：</p>
+<p>1. 外层程序预留足够空间，且外层程序和目标程序的首选基址一致。 2. 用文件映射把目标文件作为源数据映射到另一块地址。 3. 从 MZ、e_lfanew 和 PE\0\0 开始解析。 4. 根据每个节的 VirtualAddress 和 PointerToRawData，把文件中的节数据复制到内存相应位置。 5. 把目标 PE 头复制到目标基址开头。 6. 根据导入目录加载 DLL，并把函数地址填进 IAT。 7. 计算目标入口地址并跳转。</p>
+<p>「把目标文件映射到自己文件后面」不准确，准确的地址关系：</p>
+<pre><code>
+目标文件映射视图 lpBaseAddress = 源文件数据
+外层模块基址 lpImageBase       = 目标映像要被复制到的内存区域
+目标节源地址                   = lpBaseAddress + PointerToRawData
+目标节目的地址                 = lpImageBase + VirtualAddress
+</code></pre>
+<p>| 容易混淆的说法 | 更准确的说法 | |---|---| | 目标文件被映射到自己文件后面 | MapViewOfFile 产生独立的文件映射视图；随后代码把视图内容复制到外层模块已预留的内存区域 | | Overlay 尾部数据放进去就会执行 | Overlay 只是文件尾部数据；必须有解析和跳转逻辑，且目标页要具备合适权限 | | 加载 PE 就等于 memcpy | 还涉及导入、重定位、权限、入口环境等；本练习只实现了其中一部分 |</p>
+<p>课堂还提到把代码藏在其他文件（如图片）尾部的思路，对应文件尾追加数据/Overlay：仅仅把字节放到文件尾部不会自动执行，还需要有代码知道这些字节在哪里、如何解析，并显式改变控制流。</p>
+<h2>PE32 内存布局、基址和对齐</h2>
+<p>本次反复出现的字段：</p>
+<p>| 字段 | 含义 | |---|---| | ImageBase | 映像首选装载基址 | | AddressOfEntryPoint | 入口点的 RVA | | VirtualAddress | 节在映像内的 RVA 起点 | | PointerToRawData | 节在文件中的偏移（FOA） | | SizeOfRawData | 节在文件中的原始数据大小 | | VirtualSize | 节在内存中的实际大小描述 | | FileAlignment | 文件布局对齐单位 | | SectionAlignment | 内存/RVA 布局对齐单位 | | SizeOfHeaders | 要复制的 PE 头总大小 | | SizeOfImage | 目标映像在内存中需要覆盖的总范围 | | NumberOfSections | 节数量 |</p>
+<p>三个地址概念必须分开：</p>
+<pre><code>
+FOA = 文件偏移
+RVA = 相对于 ImageBase 的相对虚拟地址
+VA  = 实际基址 + RVA
+</code></pre>
+<p>RVA 已定位到所属节时：</p>
+<pre><code>
+FOA = PointerToRawData + (RVA - VirtualAddress)
+VA  = actualImageBase + RVA
+</code></pre>
+<p>文件是线性字节流，内存映像按节表中的 RVA 组织，一个节在文件里不一定从它在内存中的 RVA 位置开始，不能把文件偏移和 RVA 混用。</p>
+<p>本次加载器把外层模块实际基址设成目标 PE 的首选基址，因为代码没有实现重定位：若目标要求 ImageBase=01000000 而外层模块实际位于 00400000，直接按目标 RVA 写入并跳转会产生地址不一致。/BASE:01000000 设置外层程序的首选基址，最终调试时两者一致。</p>
+<p>MEM_SIZE = 0x20000 是外层程序预留的目标映像空间。它不是文件映射视图的大小，也不是各节大小简单相加：</p>
+<pre><code>
+目标缓冲区至少要覆盖目标 SizeOfImage，
+并且外层加载器自身的代码应放在这个目标覆盖范围之外。
+</code></pre>
+<h3>对齐函数 GetAlignment</h3>
+<pre><code>
+GetAlignment proc uses edx dwSize:dword, dwAlign:dword
+    mov eax, dwSize
+    xor edx, edx
+    div dwAlign
+    .if edx != 0
+        inc eax
+    .endif
+    mul dwAlign
+    ret
+GetAlignment endp
+</code></pre>
+<p>算法是向上取整到 dwAlign 的倍数：q = Size / Align；若余数不为 0 则 q++；结果 = q * Align。C++ 翻译：</p>
+<pre><code>
+DWORD GetAlignment(DWORD size, DWORD align)
+{
+    DWORD quotient = size / align;
+    DWORD remainder = size % align;
+
+    if (remainder != 0) {
+        ++quotient;
+    }
+
+    return quotient * align;
+}
+</code></pre>
+<p>函数判断的不是数据属于哪个节，而是按 FileAlignment 向上对齐后的字节数；节拷贝时把这个结果作为 memcpy 的长度。</p>
+<p>注意：</p>
+<ul>
+<li>FileAlignment 管磁盘文件中节原始数据如何排列，SectionAlignment 管内存中节的 RVA 如何排列。</li>
+<li>预留大小不是简单相加：还要看 VirtualAddress、VirtualSize、节间空洞、头部和 SizeOfImage；本次代码直接用目标 SizeOfImage 与 MEM_SIZE 比较。</li>
+<li>SizeOfRawData 和内存节大小不是同一个概念：文件中复制原始数据，内存中还可能按 VirtualSize 处理尾部零填充。课堂代码用 GetAlignment(SizeOfRawData, FileAlignment)，与完整系统装载器的所有边界规则并不等价。</li>
+<li>/BASE 不是强行保证任何时候都在该地址；本实验通过工程设置使实际基址与目标首选基址相同，代码遇到不一致时直接失败，也没有实现重定位修复。</li>
+</ul>
+<p>调试记录：最初输出 ImageBase=00ED0000（受 ASLR 影响）；GetAlignment 与 LoadPE 的 RVA 曾都显示为 00021080——两个函数都返回 0 时链接器可能做相同代码折叠（ICF），RVA 相同不代表逻辑上是同一个函数，可让函数内容不同或检查 /OPT:ICF。调整工程基址后，最终目标映像头打印：</p>
+<pre><code>
+实际模块基址      = 01000000
+DOS签名           = 5A4D
+NT签名            = 00004550
+目标ImageBase     = 01000000
+SizeOfImage       = 00020000
+SizeOfHeaders     = 00000400
+节数量            = 3
+入口点RVA         = 0001F1E0
+入口点VA          = 0101F1E0
+</code></pre>
+<p>即 actualImageBase == OptionalHeader.ImageBase、0x20000 <= MEM_SIZE、入口 VA = 0x01000000 + 0x0001F1E0 = 0x0101F1E0。</p>
+<h2>预留空间、代码段、Padding 和 VS 工程</h2>
+<p>老师汇编开头：</p>
+<pre><code>
+.code
+    db MEM_SIZE dup(?)
+</code></pre>
+<p>在外层程序的代码段中预留 0x20000 字节空间。目标 PE 的节和头被复制到这块区域，加载器代码排在它后面，避免复制目标映像时覆盖正在执行的加载器。</p>
+<p>用汇编产生明确的 NOP 填充：</p>
+<pre><code>
+.386
+.model flat, C
+
+PADDING_SEG SEGMENT ALIGN(16) PUBLIC USE32 EXECUTE READ \
+                    ALIAS(&quot;.text$A&quot;) &#x27;CODE&#x27;
+
+    db 20000h dup(90h)
+
+PADDING_SEG ENDS
+END
+</code></pre>
+<p>0x90 是 x86 的 NOP 机器码：</p>
+<p>| 写法 | 结果 | |---|---| | db 20000h dup(?) | 预留未初始化字节，具体内容不作为可靠数据使用 | | db 20000h dup(90h) | 生成 0x20000 个明确的 90 字节 |</p>
+<p>也可以用宏生成 0x1000 个 NOP：</p>
+<pre><code>
+#define E1       __asm _emit 0x90
+#define E2       E1 E1
+#define E4       E2 E2
+#define E8       E4 E4
+#define E16      E8 E8
+#define E32      E16 E16
+#define E64      E32 E32
+#define E128     E64 E64
+#define E256     E128 E128
+#define E512     E256 E256
+#define E1024    E512 E512
+#define E2048    E1024 E1024
+#define E4096    E2048 E2048
+</code></pre>
+<p>对应：</p>
+<pre><code>
+#pragma code_seg(push, padding_code, &quot;.text$A&quot;)
+
+__declspec(naked)
+__declspec(noinline)
+void Padding()
+{
+    E4096
+    __asm ret
+}
+
+#pragma code_seg(pop, padding_code)
+</code></pre>
+<p>.text$A、.text$B 是 MSVC/COFF 常用的节片段排序命名：$ 后面的后缀影响链接时片段排列顺序，通常 .text$A 排在 .text$B 前面，最终映像中可能合并显示成一个 .text 节。<code>#pragma code_seg(push, loader_code, ".text$B")</code> 主要控制排序，不是多创建一个最终 PE 节的原因。去掉 .text$B 后仍看到 .text 约 0x21000，是因为 padding.asm 仍贡献大量代码段字节；删除排序指令不会删除 Padding 数据。</p>
+<p>调试器看到的页面布局：</p>
+<pre><code>
+地址=00981000 大小=00001000 页面信息=&quot;.text&quot;  当前保护=ER---
+地址=00982000 大小=00001000 页面信息=&quot;.rdata&quot; 当前保护=-R---
+地址=00983000 大小=00001000 页面信息=&quot;.data&quot;  当前保护=-RW--
+地址=00984000 大小=00020000 页面信息=&quot;.text&quot;  当前保护=ER---
+地址=009A4000 大小=00001000 页面信息=&quot;.rsrc&quot;  当前保护=-R---
+地址=009A5000 大小=00001000 页面信息=&quot;.reloc&quot; 当前保护=-R---
+</code></pre>
+<p>第二个较大的 .text 区域正是 Padding 对代码段布局的影响；调试器按页面显示，区间大小常是 0x1000 粒度，不表示 text$A 和 text$B 必然各自成为最终文件节头。</p>
+<p>两种可行实验路线：纯汇编 Padding + C++ Loader（用 MASM 精确预留目标空间，并在同一汇编文件中放 StartStub）；或 C++/内联汇编测试（先用简单 TestLoader()、printf、Padding 验证链接和地址，再接入真正的 LoadPE）。选择混合编程，是因为纯 C 很难保证一个巨大、可写、可执行的数组准确落在 .text 的开头并且不被链接器优化或重排。</p>
+<p>相关概念区分：</p>
+<p>| 概念 | 含义 | |---|---| | Overlay | 文件正常结构末尾之外追加的字节；不因位于 EOF 就自动映射或执行 | | Padding | 为对齐或布局预留的填充字节；本次用 0x90 NOP 形成代码段缓冲区 | | Code Cave | 可利用的空闲空间；本次是主动在外层 .code 中预留空间，而不是扫描现有空洞 |</p>
+<p>010 Editor 看到的节头十六进制：</p>
+<pre><code>
+2E 74 65 78 74 00 00 00 11 1D 00 00 00 10 00 00
+00 1E 00 00 00 04 00 00 00 00 00 00 00 00 00 00
+00 00 00 00 20 00 00 60
+</code></pre>
+<p>按 IMAGE_SECTION_HEADER（小端序）解释：</p>
+<p>| 字节范围 | 字段 | 值 | |---|---|---| | 0～7 | Name | .text | | 8～11 | VirtualSize | 0x1D11 | | 12～15 | VirtualAddress | 0x1000 | | 16～19 | SizeOfRawData | 0x1E00 | | 20～23 | PointerToRawData | 0x400 | | 24～31 | 重定位/行号指针 | 0 | | 32～35 | 重定位/行号数量 | 0 | | 36～39 | Characteristics | 0x60000020 |</p>
+<p>文件中看到连续 0x1000 个 90，与 E4096 生成 4096 个 NOP 的实验相符；但这段数据属于本次编译出的 Padding，不能推断所有 .text 节都必然以 0x1000 个 NOP 开头。</p>
+<h2>文件映射、PE 头解析和节拷贝</h2>
+<p>文件映射三个 API 的角色：</p>
+<pre><code>
+hFile = CreateFile(...);
+hMap = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+lpBaseAddress = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+</code></pre>
+<p>| 对象 | 作用 | |---|---| | hFile | 文件句柄 | | hMap | 文件映射对象句柄 | | lpBaseAddress | 映射视图的起始地址，可按文件偏移读取 | | lpImageBase | 外层模块实际基址，也被当作目标映像的复制目的地 |</p>
+<p>PE 解析顺序与校验：</p>
+<pre><code>
+PIMAGE_DOS_HEADER lpDosHeader =
+    (PIMAGE_DOS_HEADER)lpBaseAddress;
+
+PIMAGE_NT_HEADERS32 lpNtHeader =
+    (PIMAGE_NT_HEADERS32)(
+        (BYTE*)lpBaseAddress + lpDosHeader-&gt;e_lfanew);
+
+if (lpDosHeader-&gt;e_magic != 0x5A4D) { /* 不是 MZ 文件 */ }
+if (lpNtHeader-&gt;Signature != 0x00004550) { /* 不是 PE\0\0 */ }
+</code></pre>
+<p>e_lfanew 不是 NT 头本身，而是从文件/映射起点到 NT 头的偏移：NT 头地址 = 映射起点 + e_lfanew。</p>
+<p>节表紧接在完整的可选头之后，长度由 SizeOfOptionalHeader 给出，不是取 OptionalHeader 后再加一个 IMAGE_DATA_DIRECTORY 大小：</p>
+<pre><code>
+PIMAGE_SECTION_HEADER lpSectionHeader =
+    (PIMAGE_SECTION_HEADER)(
+        (BYTE*)&amp;lpNtHeader-&gt;OptionalHeader +
+        lpNtHeader-&gt;FileHeader.SizeOfOptionalHeader);
+</code></pre>
+<p>节拷贝循环的汇编：</p>
+<pre><code>
+.while dwSecNum != 0
+    mov ecx, [edi].VirtualAddress
+    add ecx, [esi].OptionalHeader.ImageBase
+    mov edx, [edi].PointerToRawData
+    add edx, lpBaseAddress
+    invoke GetAlignment, [edi].SizeOfRawData, \
+                         [esi].OptionalHeader.FileAlignment
+    invoke crt_memcpy, ecx, edx, eax
+
+    add edi, sizeof IMAGE_SECTION_HEADER
+    dec dwSecNum
+.endw
+</code></pre>
+<p>C++ 等价：</p>
+<pre><code>
+while (dwSecNum) {
+    DWORD size = GetAlignment(
+        lpSectionHeader-&gt;SizeOfRawData,
+        lpNtHeader-&gt;OptionalHeader.FileAlignment);
+
+    memcpy(
+        (BYTE*)lpImageBase + lpSectionHeader-&gt;VirtualAddress,
+        (BYTE*)lpBaseAddress + lpSectionHeader-&gt;PointerToRawData,
+        size);
+
+    ++lpSectionHeader;
+    --dwSecNum;
+}
+</code></pre>
+<p>每次循环做四件事：取 VirtualAddress 得目标内存位置；取 PointerToRawData 得源文件位置；按 FileAlignment 计算复制长度；移动到下一个 IMAGE_SECTION_HEADER。然后复制头：</p>
+<pre><code>
+memcpy(lpImageBase,
+       lpBaseAddress,
+       lpNtHeader-&gt;OptionalHeader.SizeOfHeaders);
+</code></pre>
+<h3>LoadPE 骨架</h3>
+<pre><code>
+extern &quot;C&quot; DWORD __cdecl LoadPE()
+{
+    DWORD oldProtect;
+    HANDLE hFile = INVALID_HANDLE_VALUE;
+    HANDLE hMap = nullptr;
+    void* lpBaseAddress = nullptr;
+
+    HMODULE lpImageBase = GetModuleHandle(NULL);
+
+    if (!VirtualProtect(lpImageBase, MEM_SIZE,
+                        PAGE_EXECUTE_READWRITE, &amp;oldProtect)) {
+        printf(&quot;VirtualProtect失败: %lu\n&quot;, GetLastError());
+        return 0;
+    }
+
+    hFile = CreateFile(L&quot;winmine.exe&quot;, GENERIC_READ,
+                       FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        printf(&quot;CreateFile失败: %lu\n&quot;, GetLastError());
+        return 0;
+    }
+
+    hMap = CreateFileMapping(hFile, NULL, PAGE_READONLY,
+                             0, 0, NULL);
+    if (hMap == nullptr) {
+        printf(&quot;CreateFileMapping失败: %lu\n&quot;, GetLastError());
+        return 0;
+    }
+
+    lpBaseAddress = MapViewOfFile(hMap, FILE_MAP_READ,
+                                  0, 0, 0);
+    if (lpBaseAddress == nullptr) {
+        printf(&quot;MapViewOfFile失败: %lu\n&quot;, GetLastError());
+        return 0;
+    }
+
+    // 后面进行 MZ/PE 校验、节复制、头复制和导入表修补
+}
+</code></pre>
+<h3>问题代码与修正点</h3>
+<p>1. VirtualProtect 返回值判断反了：返回非零代表成功，应 <code>if (!bRet) { /* 失败处理 */ }</code>。 2. CreateFile 句柄判断反了：应 <code>if (hFile == INVALID_HANDLE_VALUE)</code>，而不是 <code>!=</code>。 3. 指针运算显式转成 BYTE*：void* 不是标准 C++ 中可按字节加法的类型，写 <code>(BYTE*)lpBaseAddress + lpDosHeader->e_lfanew</code>，不依赖编译器对 void* + offset 的扩展。 4. 映射失败或句柄失败时，完整版本应关闭已成功创建的句柄；早期版本若干直接 return 会留下清理不完整的问题。</p>
+<p>实验记录：CreateFile失败: 2 是找不到文件；相对路径 winmine.exe 相对于程序运行时的当前工作目录解析，把扫雷文件放到正确位置后文件映射阶段通过。随后加入两个限制：</p>
+<pre><code>
+if (actualImageBase != lpNtHeader-&gt;OptionalHeader.ImageBase) {
+    printf(&quot;基址不一致\n&quot;);
+    return 0;
+}
+
+if (lpNtHeader-&gt;OptionalHeader.SizeOfImage &gt; MEM_SIZE) {
+    printf(&quot;目标映像太大\n&quot;);
+    return 0;
+}
+</code></pre>
+<p>分别验证外层基址是否等于目标首选基址、预留区域是否足够。</p>
+<h2>导入表、INT/IAT 和函数地址修补</h2>
+<p>导入表路线：</p>
+<pre><code>
+OptionalHeader.DataDirectory[1]
+    -&gt; IMAGE_IMPORT_DESCRIPTOR
+    -&gt; Name
+    -&gt; OriginalFirstThunk / FirstThunk
+    -&gt; INT / IAT
+    -&gt; IMAGE_IMPORT_BY_NAME
+</code></pre>
+<pre><code>
+DWORD importRva =
+    lpNtHeader-&gt;OptionalHeader.DataDirectory[1].VirtualAddress;
+
+PIMAGE_IMPORT_DESCRIPTOR lpImportTable =
+    (PIMAGE_IMPORT_DESCRIPTOR)(
+        (BYTE*)lpImageBase + importRva);
+</code></pre>
+<p>DataDirectory[1] 是导入目录槽位，正式代码可写成 IMAGE_DIRECTORY_ENTRY_IMPORT。一个 IMAGE_IMPORT_DESCRIPTOR 表示一个 DLL 的导入信息：</p>
+<p>| 字段 | 用途 | |---|---| | Name | DLL 名称的 RVA | | OriginalFirstThunk | INT/导入名称表 RVA，通常指向名称或序号信息 | | FirstThunk | IAT RVA，运行时填入函数地址 | | TimeDateStamp、ForwarderChain | 描述符相关字段 | | Characteristics | 与 OriginalFirstThunk 共用的联合字段 |</p>
+<p>正常系统装载器会把 IAT 中的占位内容换成真实函数地址；手工加载也必须做，否则目标执行到导入函数时 IAT 里仍不是可调用的地址。OriginalFirstThunk == 0 时退回使用 FirstThunk：</p>
+<pre><code>
+DWORD importNameTableRva = lpImportTable-&gt;OriginalFirstThunk;
+if (importNameTableRva == 0) {
+    importNameTableRva = lpImportTable-&gt;FirstThunk;
+}
+</code></pre>
+<p>名称导入的每个导入名称表项是一个 DWORD，指向 IMAGE_IMPORT_BY_NAME：前 2 字节是 Hint，其后是函数名字符串，所以函数名地址要 +2：</p>
+<pre><code>
+mov eax, [lpImportNameTable]
+mov eax, [eax]
+add eax, lpImageBase
+add eax, 2
+invoke GetProcAddress, hModule, eax
+</code></pre>
+<p>C++ 相当于：</p>
+<pre><code>
+DWORD thunkRva = *lpimportNameTable;
+const char* functionName =
+    (const char*)((BYTE*)lpImageBase + thunkRva + 2);
+
+FARPROC functionAddress =
+    GetProcAddress(hModule, functionName);
+</code></pre>
+<p>最后把函数地址写入 IAT：</p>
+<pre><code>
+lpimportAddressTable[dwIndex] =
+    (DWORD)(uintptr_t)functionAddress;
+</code></pre>
+<p>(DWORD)(uintptr_t) 先把函数指针转换为整数地址，再存入 32 位 DWORD；当前项目是 Win32/x86，uintptr_t 让指针转整数的意图更明确。</p>
+<p>完整循环，导入描述符的终止条件是所有关键字段都为零：</p>
+<pre><code>
+while (true) {
+    if (lpImportTable-&gt;OriginalFirstThunk == 0 &amp;&amp;
+        lpImportTable-&gt;TimeDateStamp == 0 &amp;&amp;
+        lpImportTable-&gt;ForwarderChain == 0 &amp;&amp;
+        lpImportTable-&gt;Name == 0 &amp;&amp;
+        lpImportTable-&gt;FirstThunk == 0) {
+        break;
+    }
+
+    DWORD importNameTableRva =
+        lpImportTable-&gt;OriginalFirstThunk;
+    if (importNameTableRva == 0) {
+        importNameTableRva = lpImportTable-&gt;FirstThunk;
+    }
+
+    PDWORD lpimportNameTable =
+        (PDWORD)((BYTE*)lpImageBase + importNameTableRva);
+    PDWORD lpimportAddressTable =
+        (PDWORD)((BYTE*)lpImageBase +
+                 lpImportTable-&gt;FirstThunk);
+
+    const char* dllName =
+        (const char*)((BYTE*)lpImageBase +
+                      lpImportTable-&gt;Name);
+
+    HMODULE hModule = LoadLibraryA(dllName);
+    if (hModule == nullptr) {
+        printf(&quot;LoadLibraryA失败: %lu\n&quot;, GetLastError());
+        return 0;
+    }
+
+    DWORD dwIndex = 0;
+    while (*lpimportNameTable != 0) {
+        DWORD thunkRva = *lpimportNameTable;
+        const char* functionName =
+            (const char*)((BYTE*)lpImageBase + thunkRva + 2);
+
+        FARPROC functionAddress =
+            GetProcAddress(hModule, functionName);
+        if (functionAddress == nullptr) {
+            return 0;
+        }
+
+        lpimportAddressTable[dwIndex] =
+            (DWORD)(uintptr_t)functionAddress;
+
+        ++dwIndex;
+        ++lpimportNameTable;
+    }
+
+    ++lpImportTable;
+}
+</code></pre>
+<h3>问题代码与修正点</h3>
+<p>1. 描述符结束条件曾写成「所有字段都不为零时退出」，方向反了；描述符表用全零项作为终止标记，应判断关键字段全部为零。 2. IAT 下标多乘了一次 4：<code>lpimportAddressTable[dwIndex * 4]</code> 应为 <code>[dwIndex]</code>。PDWORD 数组下标已按 sizeof(DWORD)==4 自动缩放；汇编 <code>mov [ebx + edx*4], eax</code> 是手动做了 DWORD 步长，C++ 指针下标已包含步长。 3. <code>dwIndex--</code> 第一次循环后会从 0 下溢为 0xFFFFFFFF；老师汇编是 <code>inc dwIndex</code>，C++ 应为 <code>++dwIndex</code>。 4. 外层描述符循环中直接 <code>continue</code>：若 continue 前没有 <code>++lpImportTable</code>，会反复处理同一个描述符形成死循环；应先移动描述符或改成嵌套条件结构。 5. LoadLibrary 字符集：dllName 是 const char*，应写 <code>HMODULE hModule = LoadLibraryA(dllName)</code>；工程启用 Unicode 时裸 LoadLibrary 宏可能映射到 LoadLibraryW，类型不匹配。 6. 名称导入和序号导入没有区分：thunkRva + 2 只适用于按名称导入；最高位表示序号导入时需按序号调用 GetProcAddress，本次代码尚未实现该分支。</p>
+<h2>入口点跳转、OEP 和汇编/C++ 混合编程</h2>
+<p>AddressOfEntryPoint 是入口 RVA，不是绝对地址：</p>
+<pre><code>
+DWORD oep = (DWORD)(
+    (BYTE*)lpImageBase +
+    lpNtHeader-&gt;OptionalHeader.AddressOfEntryPoint);
+</code></pre>
+<p>即 OEP VA = ImageBase + AddressOfEntryPoint = 0x01000000 + 0x0001F1E0 = 0x0101F1E0。这里的 OEP 是目标 PE 原始入口点语境下的入口地址，不是「入口断点」；只有调试器在该地址设置断点时，才表现为断点。</p>
+<p>目标文件复制和导入修补完成后，LoadPE 返回 OEP 地址，汇编 Stub 把返回地址变成 ret 要弹出的新地址：</p>
+<pre><code>
+StartStub PROC
+    push eax
+    call LoadPE
+
+    test eax, eax
+    jz load_failed
+
+    xchg DWORD PTR [esp], eax
+    ret
+
+load_failed:
+    pop eax
+    ret
+StartStub ENDP
+</code></pre>
+<p>栈变化：</p>
+<pre><code>
+进入 StartStub：[esp] = 调用者返回地址
+push eax：       [esp] = 调用者原来的 EAX
+call LoadPE：    LoadPE 返回后 EAX = 目标 OEP，[esp] 仍是保存的原 EAX
+xchg [esp],eax： [esp] = 目标 OEP，EAX = 原来的 EAX
+ret：            弹出目标 OEP，EIP 跳到目标程序入口
+</code></pre>
+<p>失败路径 pop eax; ret 恢复原寄存器并返回 main。</p>
+<p>C++ 侧声明：</p>
+<pre><code>
+extern &quot;C&quot; void __cdecl StartStub();
+extern &quot;C&quot; DWORD __cdecl LoadPE();
+
+int main()
+{
+    StartStub();
+    return 1;
+}
+</code></pre>
+<p>汇编侧：</p>
+<pre><code>
+.386
+.model flat, C
+
+EXTERN LoadPE:PROC
+PUBLIC StartStub
+
+StartStub PROC
+    push eax
+    call LoadPE
+    test eax, eax
+    jz load_failed
+    xchg DWORD PTR [esp], eax
+    ret
+
+load_failed:
+    pop eax
+    ret
+StartStub ENDP
+
+END
+</code></pre>
+<p>注意：</p>
+<ul>
+<li><code>EXTERN LoadPE:PROC</code> 声明 LoadPE 在其他目标文件中定义；<code>PUBLIC StartStub</code> 让链接器把 StartStub 公开给 C++，不是导出到 DLL 导出表。</li>
+<li><code>.model flat, C</code> 影响 x86 C 命名和调用约定；手写 <code>_LoadPE</code>、<code>_StartStub</code> 会多一个下划线，导致符号无法解析。</li>
+<li><code>extern "C"</code> 关闭 C++ 名字修饰；<code>__cdecl</code> 使 C++ 和汇编使用同一调用约定。</li>
+<li>ret 的作用不是「普通 return OEP」，而是把 OEP 放到栈顶后让 CPU 通过 ret 改变 EIP。</li>
+<li>目标 OEP 能否稳定运行还取决于导入、重定位、TLS、栈和运行环境是否准备完毕；本次示例只展示了部分流程。</li>
+</ul>
+<p>链接错误记录：</p>
+<pre><code>
+loadpe.obj : error LNK2001: 无法解析的外部符号 _StartStub
+padding.obj : error LNK2001: 无法解析的外部符号 __LoadPE
+LNK1120: 2 个无法解析的外部命令
+</code></pre>
+<p>原因是汇编里手写了带下划线的 <code>_LoadPE</code>、<code>_StartStub</code>，同时 <code>.model flat, C</code> 又按 C 规则处理符号，名称装饰不匹配。修正为 <code>EXTERN LoadPE:PROC</code>、<code>PUBLIC StartStub</code>、<code>call LoadPE</code>。这是符号名修正，不是 PE 解析逻辑修正。</p>
+<p>SAFESEH 错误：</p>
+<pre><code>
+padding.obj : error LNK2026: 模块对于 SAFESEH 映像是不安全的
+LNK1281: 无法生成 SAFESEH 映像
+</code></pre>
+<p>x86 链接器对异常处理表的安全选项与该 MASM 对象不匹配。课堂实验可把链接器 Image Has Safe Exception Handlers 设为 No（/SAFESEH:NO），或让汇编对象按 SAFESEH 规则生成；它与 StartStub 的控制流本身不是同一个错误。</p>
+<h2>分阶段验证</h2>
+<p>每一步都建立在前一步内存布局正确之上：基址错误则节复制目标地址错误；头和节复制成功但 IAT 未填写，入口调用导入函数仍会失败；OEP 返回了但 Stub 不能正确换栈，控制流也不能转移。</p>
+<p>| 阶段 | 验证内容 | 通过标准 | |---|---|---| | 1 | GetAlignment | 输入几个大小和对齐值，结果为向上取整 | | 2 | 基址 | actualImageBase == OptionalHeader.ImageBase | | 3 | 头 | MZ、PE、SizeOfImage、节数量可打印 | | 4 | 节 | 逐节打印源地址、目的地址、复制长度 | | 5 | 导入描述符 | 能打印 DLL 名称并遇到全零终止项 | | 6 | IAT | GetProcAddress 成功，写入地址后索引递增 | | 7 | OEP | 打印 ImageBase + AddressOfEntryPoint | | 8 | Stub | 链接成功，StartStub 能调用 LoadPE | | 9 | 入口 | 在授权实验环境验证目标程序是否能继续运行 |</p>
+<p>节循环中临时输出：</p>
+<pre><code>
+printf(&quot;section=%s VA=%08X raw=%08X rawSize=%08X copy=%08X\n&quot;,
+       lpSectionHeader-&gt;Name,
+       lpSectionHeader-&gt;VirtualAddress,
+       lpSectionHeader-&gt;PointerToRawData,
+       lpSectionHeader-&gt;SizeOfRawData,
+       size);
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>头复制最后是为了让目标映像头出现在目标基址开头，但这会覆盖外层程序原本的头；因此加载器代码必须放在目标 SizeOfImage 之外。</li>
+<li>lpNtHeader 在文件映射阶段指向源文件；UnmapViewOfFile 之后必须重新从 lpImageBase 解析目标头，不能继续使用已解除映射的源指针。</li>
+<li>MEM_SIZE 够大只说明缓冲区容量够，不代表导入、重定位和权限已全部正确。</li>
+<li>直接调用 LoadPE() 后 return 只会回到 main；要跳到目标 OEP，才需要 StartStub 的 xchg [esp], eax; ret 技巧。</li>
+</ul>
+<h2>Dump 导入表修复与 IAT 跳板</h2>
+<p>壳或运行时解密后，IAT 可能已经恢复，但原始导入描述符、INT、DLL 名称和 IMAGE_IMPORT_BY_NAME 不一定完整。运行时 IAT 中的值通常是 VA（API VA = 模块基址 + API RVA），只在当前进程地址空间有效，不能原样写回磁盘。<strong>标准修复需要重建 DLL 名称、函数名或序号、IMAGE_IMPORT_DESCRIPTOR、INT、IAT 和 IMAGE_IMPORT_BY_NAME</strong>，而不是只保存 API VA。</p>
+<p>ImportREC 典型流程：</p>
+<pre><code>
+真实 OEP → Dump → IAT Autosearch → Get Imports
+→ 检查 Invalid Imports → Fix Dump → 从磁盘重新启动验证
+</code></pre>
+<p>判断某个地址是不是函数地址的常用线索：</p>
+<p>1. 地址是否位于某个已加载 PE 映像； 2. 目标内存是否有执行权限； 3. 用模块导出表的 EAT 反查 RVA； 4. 对目标反汇编，看它是函数入口、数据还是跳板； 5. 结合 Hook、调用轨迹和运行时捕获信息。</p>
+<p>更强的工具会递归跟踪多层跳板并自动分析：IAT 槽 → Stub → JMP/CALL → 下一层 Stub → 最终函数。跟踪级别包括静态反汇编、动态 Hook 和运行事件/标志捕获。</p>
+<p>修复时先记录 IAT 槽地址和值，判断它是 VA、RVA 还是普通数据；已知模块基址时 RVA = VA - ModuleBase，然后解析模块内存中的 MZ/PE 头和导出目录寻找匹配的 EAT 项；若目标是跳板则继续反汇编跟踪，记录每一层的地址和指令语义。</p>
+<p>注意：</p>
+<ul>
+<li>遍历模块列表查导出表不是唯一办法；没有模块列表时还可使用原始导入表、已知基址、内存中的 PE 头和导出表、调试器信息或运行时解析记录。</li>
+<li>IAT 改成地址 A、A 再 JMP 到真实函数，是跳板、Hook 或间接调用思路，不等于标准导入表修复。</li>
+<li>EAT 命中不等于一定是函数；导出表也能导出变量。</li>
+<li>多层递归也不保证成功；动态计算地址、自修改代码、间接寄存器跳转和异常控制流都可能需要动态分析。</li>
+</ul>
+<h2>手动模拟 LoadLibrary 与 MyLoadDll</h2>
+<p>MyLoadDll 流程：</p>
+<pre><code>
+CreateFile
+→ CreateFileMapping / MapViewOfFile
+→ 验证 DOS/NT 头
+→ VirtualAlloc(SizeOfImage)
+→ 复制 PE 头
+→ 按节复制原始数据
+→ 重定位
+→ 处理导入
+→ 修改节权限
+→ TLS/初始化/DllMain
+→ 返回映像基址
+</code></pre>
+<p>句柄和指针初始化：</p>
+<pre><code>
+HANDLE hFile = INVALID_HANDLE_VALUE;
+HANDLE hMapFile = NULL;
+UCHAR* lpMapAddress = NULL;
+UCHAR* lpBaseAddress = NULL;
+HMODULE hModule = NULL;
+</code></pre>
+<p>MapViewOfFile 只是把原始文件映射到进程地址空间，得到的是文件布局，不会自动按 SectionAlignment 形成可运行的内存映像，因此还要申请 SizeOfImage，并把每个节复制到 imageBase + Section.VirtualAddress。UCHAR 通常是 unsigned char，指针按字节移动，适合访问原始文件。hFile 初始化为 INVALID_HANDLE_VALUE 是因为 CreateFile 失败返回该值；CreateFileMapping 失败返回 NULL。</p>
+<p>MyLoadDll 返回 hModule = (HMODULE)lpBaseAddress，这里的 HMODULE 实际表示手动映像基址，不代表系统 Loader 已登记完整的模块状态。</p>
+<p>PE32 与 x64 兼容性：</p>
+<ul>
+<li>DWORD 适合 PE32 的 RVA、FOA 和 32 位字段；ULONG_PTR、DWORD_PTR 或 ULONGLONG 用于指针宽度相关值；</li>
+<li>PE32 常见重定位类型是 HIGHLOW（3）；PE32+ 是 DIR64（10）；</li>
+<li>x64 Windows 前四个整型或指针参数通常在 RCX、RDX、R8、R9，返回值在 RAX；</li>
+<li>x86 Win32 常见 WINAPI/stdcall，调用约定影响栈传参和栈平衡。</li>
+</ul>
+<p>注意：</p>
+<ul>
+<li>直接 ReadFile 也可以读取文件；文件映射不是手动映射，前者只是读取方式，后者还要组织内存映像。</li>
+<li>IMAGE_BASE_RELOCATION 是 8 字节结构体，PIMAGE_BASE_RELOCATION 是指针类型；不能用 sizeof(PIMAGE_BASE_RELOCATION) 代替结构体大小。</li>
+<li>申请内存、复制节并不等于完整加载；导入、重定位、TLS、节权限、入口初始化、线程通知和卸载都可能影响兼容性。</li>
+<li>DllMain 有 DLL_PROCESS_ATTACH、DLL_THREAD_ATTACH、DLL_THREAD_DETACH、DLL_PROCESS_DETACH 等通知，不是简单调用一次就完成。</li>
+<li>手动映射模块不一定进入系统模块列表，GetModuleHandle、FreeLibrary 和线程通知不会自动完全适配；它有时能减少基于模块列表的暴露，但不能保证隐藏或防止所有 API Hook。</li>
+</ul>
+<p>课堂示例的问题点：</p>
+<p>| 位置 | 问题 | |---|---| | VirtualAlloc | 通常应考虑 MEM_RESERVE 与 MEM_COMMIT | | 节复制 | 对齐后的长度不能导致越过文件大小 | | 重定位 | 32 位 DWORD 处理不能直接移植到 x64 | | VirtualFree | MEM_RELEASE 时大小必须为 0，MEM_FREE 不是正确释放标志 | | 映射视图 | 完成读取后要在合适位置 UnmapViewOfFile | | 初始化顺序 | 导入、重定位、TLS、权限处理应在入口执行前完成 |</p>
+<p>样例中导入、权限和初始化位置只有注释占位，不能把它称为完整 LoadLibrary 替代品。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C 与汇编混合编程 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">C 与汇编混合编程</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>C 与汇编混合编程</h1>
+<p>本笔记聚焦 32 位 Win32 平台下 C 与 MASM 汇编的混合编程机制。混合编程是指在同一个项目中，C 源文件和汇编源文件各自独立编译，最后由链接器拼接成一个可执行文件——C 可以调用汇编写的函数，汇编也可以调用 C 写的函数。</p>
+<h2>核心机制：编译和链接是分开的</h2>
+<p>C 编译器和汇编器各自独立工作，互不知道对方存在。链接器在最后把多个 <code>.obj</code> 拼成一个 <code>.exe</code>。</p>
+<pre><code>
+main.c  ──C编译器──→  main.obj  ─┐
+                                  ├──链接器──→ program.exe
+add.asm ──汇编器──→  add.obj   ─┘
+</code></pre>
+<p><strong>C 编译器不需要看到汇编代码</strong>，只需要一个函数声明（<code>extern</code>），就能生成 <code>call</code> 指令，目标地址先空着，留给链接器填。</p>
+<h3>三个工具各干一件事</h3>
+<p>| 工具 | 输入 | 输出 | 职责 | |------|------|------|------| | C 编译器 (cl.exe) | .c | .obj | 把 C 代码翻译成机器码 | | 汇编器 (ml.exe) | .asm | .obj | 把汇编代码翻译成机器码 | | 链接器 (link.exe) | 多个 .obj + .lib | .exe | 符号解析 + 地址重定位 + 合并段 |</p>
+<h3>链接器的两个核心工作</h3>
+<p><strong>1. 符号解析（找地址）</strong></p>
+<ul>
+<li>main.obj 说："我需要 <code>_add</code>"（对应 C 的 <code>extern</code>）</li>
+<li>add.obj 说："我提供 <code>_add</code>"（对应汇编的 <code>public</code>）</li>
+<li>链接器匹配两边，把地址填进 <code>call</code> 指令</li>
+</ul>
+<p><strong>2. 地址重定位（改地址）</strong></p>
+<p>每个 obj 内部地址都从 0 开始，直接拼接会冲突。链接器把所有代码重新排列，跳转地址全部改成新的。</p>
+<h2>C 调用汇编函数</h2>
+<p><strong>汇编侧（add.asm）</strong>：</p>
+<pre><code>
+.386
+.model flat, c              ; 用 C 调用约定，MASM 自动处理下划线
+public add                  ; 导出 add
+
+.code
+add proc c a:DWORD, b:DWORD ; c 约定，参数自动压栈
+    mov eax, a
+    add eax, b
+    ret
+add endp
+end
+</code></pre>
+<p><strong>C 侧（main.c）</strong>：</p>
+<pre><code>
+extern int add(int a, int b);   // 声明：这个函数在别的文件里
+
+int main() {
+    int result = add(3, 5);
+    return 0;
+}
+</code></pre>
+<h2>汇编调用 C 函数</h2>
+<p><strong>C 侧（utils.c）</strong>：</p>
+<pre><code>
+int add(int a, int b) {
+    return a + b;
+}
+</code></pre>
+<p><strong>汇编侧（main.asm）</strong>：</p>
+<pre><code>
+.386
+.model flat, c
+option casemap:none
+
+add proto c a:DWORD, b:DWORD   ; 声明 C 函数
+
+.code
+start:
+    invoke add, 3, 5           ; 调用 C 函数
+    ; eax = 8
+    ret
+end start
+</code></pre>
+<h2>符号对应关系</h2>
+<p>| 操作 | 汇编 | C | |------|------|---| | 定义函数 | <code>add proc ... add endp</code> | <code>int add(int a, int b) { ... }</code> | | 导出（声明公开） | <code>public add</code> | 不用写，默认公开（非 static） | | 导入（声明外部） | <code>extrn add</code> | <code>extern int add(int, int);</code> |</p>
+<h2>extern "C" 的作用</h2>
+<p>C++ 会给函数名加修饰（name mangling），C 不会。</p>
+<p>| 编译器 | <code>int add(int, int)</code> 编译后的符号名 | |--------|----------------------------------| | C | <code>_add</code> | | C++ | <code>?add@@YAHHH@Z</code> |</p>
+<p>C++ 调用汇编时，如果不加 <code>extern "C"</code>，C++ 编译出 <code>?add@@YAHHH@Z</code>，但汇编导出的是 <code>_add</code>，链接器对不上，链接失败。</p>
+<pre><code>
+// C++ 文件
+extern &quot;C&quot; int add(int a, int b);   // 告诉 C++ 别改名，用 C 的命名规则
+</code></pre>
+<p>C 语言不需要 <code>extern "C"</code>，只有 C++ 才需要。</p>
+<h3>头文件兼容写法</h3>
+<pre><code>
+#ifdef __cplusplus
+extern &quot;C&quot; {
+#endif
+
+int add(int a, int b);
+
+#ifdef __cplusplus
+}
+#endif
+</code></pre>
+<p><code>__cplusplus</code> 是 C++ 编译器自动定义的宏，C 编译器不定义它。这样同一个头文件 C 和 C++ 都能用。</p>
+<h2>C 运行时库 (CRT) 的版本与初始化</h2>
+<p>汇编调用 C 函数时，如果调用的是 C 标准库函数（printf、malloc 等），会遇到 CRT 初始化问题。</p>
+<h3>新旧 CRT 的区别</h3>
+<p>| | 旧版 (VC6 时代) | 新版 (VS2015+) | |---|----------------|----------------| | 动态库 | <code>msvcrt.dll</code> | <code>ucrtbase.dll</code> (UCRT) | | 静态库 | <code>libc.lib</code> / <code>libcmt.lib</code> | <code>libucrt.lib</code> / <code>ucrt.lib</code> | | 配套工具 | MASM 6.14 | 新版 ml.exe (VS 自带) | | 初始化函数 | 导出，能手动调 | 不导出，调不了 |</p>
+<h3>为什么汇编调 CRT 会崩</h3>
+<p>C 程序的真正入口不是 <code>main</code>，是 <code>mainCRTStartup</code>：</p>
+<pre><code>
+程序启动
+  → mainCRTStartup()     ← CRT 初始化在这里
+      → _heap_init()      ← 初始化堆（malloc 依赖）
+      → _ioinit()         ← 初始化 IO（printf/stdout 依赖）
+      → _cinit()          ← 初始化全局变量、浮点状态
+      → main()            ← 才调你的 main
+      → exit()            ← 清理后退出
+</code></pre>
+<p>汇编程序的入口是 <code>start:</code>，直接跳过了 CRT 初始化。如果调 <code>printf</code> 这类 CRT 函数，它依赖的内部状态（stdout 句柄、缓冲区、locale）没初始化，轻则输出乱码，重则崩溃。</p>
+<h3>哪些 CRT 函数能直接用</h3>
+<p>| 函数 | 能不能用 | 原因 | |------|---------|------| | <code>strcpy</code> / <code>strlen</code> | ✓ | 纯内存操作，不依赖状态 | | <code>printf</code> | ✗ | 依赖 stdout 初始化 | | <code>malloc</code> | ✗ | 依赖堆初始化 | | <code>exit</code> | ✓ | 但要用它退出，不能用 ExitProcess |</p>
+<h3>手动初始化 CRT（仅旧版 msvcrt）</h3>
+<p>新版 UCRT 的初始化函数不导出，无法手动调。旧版 msvcrt 可以：</p>
+<pre><code>
+.386
+.model flat, stdcall
+option casemap:none
+
+includelib msvcrt.lib
+
+; 旧版 CRT 初始化函数
+_heap_init proto c
+_ioinit   proto c
+_cinit    proto c
+
+; CRT 函数
+printf    proto c :ptr
+
+.data
+    fmt db &quot;Hello from CRT, value=%d&quot;, 0Ah, 0
+    val dd 42
+
+.code
+start:
+    ; === 手动初始化 CRT ===
+    call _heap_init      ; 1. 初始化堆
+    call _ioinit         ; 2. 初始化 IO
+    call _cinit          ; 3. 初始化全局变量/浮点
+
+    ; === CRT 已就绪，可以用了 ===
+    invoke printf, offset fmt, val
+
+    ; === 必须用 exit 退出，不能用 ExitProcess ===
+    push 0
+    call exit            ; 让 CRT 清理（刷新缓冲区、关句柄）
+end start
+</code></pre>
+<p><strong>三个关键点</strong>：</p>
+<p>1. <strong>顺序不能乱</strong>：堆 → IO → 全局变量。<code>_ioinit</code> 可能用 <code>malloc</code>，堆没初始化就崩 2. <strong>退出必须用 <code>exit</code></strong>：<code>ExitProcess</code> 直接杀进程不清理 CRT，printf 输出可能丢失（缓冲区没刷新） 3. <strong>只适用旧版</strong>：新版 UCRT 不导出这三个函数，无法手动初始化</p>
+<h3>实际建议：两种稳妥方案</h3>
+<p><strong>方案A：让 C 当入口（最稳）</strong></p>
+<p>让 C 文件提供 <code>main</code> 函数，C 编译器自动插入 CRT 初始化代码，汇编只是被调用的函数：</p>
+<pre><code>
+// main.c - CRT 自动初始化
+extern int asm_main();
+int main() {
+    return asm_main();   // 调汇编写的函数
+}
+</code></pre>
+<pre><code>
+; asm_main.asm - CRT 已初始化，随便用
+asm_main proc c
+    invoke printf, offset fmt    ; 能用，不会崩
+    ret
+asm_main endp
+</code></pre>
+<p><strong>方案B：不用 CRT，全用 Win32 API</strong></p>
+<p>| 想用的 CRT | 替代 API | |-----------|---------| | <code>printf</code> | <code>wsprintfA</code> + <code>OutputDebugStringA</code> | | <code>malloc</code> | <code>HeapAlloc</code> / <code>VirtualAlloc</code> | | <code>strlen</code> | 自己写几行汇编循环 | | <code>strcpy</code> | 自己写几行汇编循环 | | <code>exit</code> | <code>ExitProcess</code> |</p>
+<p>Win32 API 不依赖 CRT 初始化，汇编里直接调就行。shellcode 全用 API 就是这个思路。</p>
+<h2>四种混编方式</h2>
+<p>C 与汇编混合编程有四种常见方式：联合编译、静态库、动态库、内联汇编。</p>
+<h3>四种方式总览</h3>
+<p>| | 联合编译 | 静态库 | 动态库 | 内联汇编 | |---|---------|--------|--------|---------| | 汇编在 | .asm 文件 | .lib 文件 | .dll 文件 | C 代码里 | | 编译时 | obj 拼接 | obj 塞进 exe | 运行时加载 | 编译器处理 | | 需要源码 | 是 | 否 | 否 | 是 | | exe 体积 | 小 | 大 | 小 | 小 | | 运行时依赖 | 无 | 无 | 需要 dll | 无 | | 更新方便 | 否 | 否 | 是 | 否 | | 64 位支持 | ✓ | ✓ | ✓ | ✗（MSVC） | | 适用场景 | 协作开发 | 给二进制 | 插件/热更新 | 小块关键代码 |</p>
+<h3>1. 联合编译</h3>
+<p>两个源文件分别编译，链接器拼一起。前面"C 调用汇编函数"和"汇编调用 C 函数"两节讲的就是这种。</p>
+<pre><code>
+main.c + add.asm → 各自编译成 obj → 链接成一个 exe
+</code></pre>
+<p><strong>特点</strong>：给源码、需要编译器、最直接。</p>
+<h3>2. 静态库 (.lib)</h3>
+<p>把汇编编译成 obj，用 <code>lib.exe</code> 打包成 .lib。用的时候链接进来，代码在链接时塞进 exe。</p>
+<p><strong>制作静态库</strong>：</p>
+<pre><code>
+; add.asm - 编译成 add.obj
+.386
+.model flat, c
+public add
+.code
+add proc c a:DWORD, b:DWORD
+    mov eax, a
+    add eax, b
+    ret
+add endp
+end
+</code></pre>
+<pre><code>
+ml /c /coff add.asm          ; 编译成 add.obj
+lib /out:mylib.lib add.obj   ; 打包成 mylib.lib
+</code></pre>
+<p><strong>使用静态库（C 侧）</strong>：</p>
+<pre><code>
+#pragma comment(lib, &quot;mylib.lib&quot;)   // MSVC 专用，告诉链接器找这个 lib
+extern int add(int a, int b);
+
+int main() {
+    return add(3, 5);   // 链接器从 mylib.lib 找到 add 的代码塞进 exe
+}
+</code></pre>
+<p><strong>使用静态库（汇编侧）</strong>：</p>
+<pre><code>
+includelib mylib.lib
+add proto c a:DWORD, b:DWORD
+</code></pre>
+<p><strong>特点</strong>：</p>
+<p>| | 说明 | |---|------| | 代码在哪 | 链接时塞进 exe | | exe 体积 | 变大（包含库代码） | | 运行时依赖 | 无，单文件就能跑 | | 源码保护 | 不给源码，只给 lib | | 更新麻烦 | 库改了要重新链接整个程序 |</p>
+<p>Windows SDK 的 <code>kernel32.lib</code>、<code>user32.lib</code> 都是静态库（导入库，但用法一样）。</p>
+<h3>3. 动态库 (DLL)</h3>
+<p>汇编编成 DLL，运行时加载。</p>
+<p><strong>制作 DLL</strong>：</p>
+<pre><code>
+; add.asm - 编译成 DLL
+.386
+.model flat, stdcall
+option casemap:none
+
+include windows.inc
+
+public add
+
+.code
+add proc stdcall a:DWORD, b:DWORD
+    mov eax, a
+    add eax, b
+    ret
+add endp
+
+; DLL 入口点（必须有）
+LibMain proc hInstDLL:DWORD, reason:DWORD, reserved:DWORD
+    mov eax, TRUE        ; 返回 TRUE 表示加载成功
+    ret
+LibMain endp
+
+end LibMain
+</code></pre>
+<pre><code>
+ml /c /coff /Cp add.asm
+link /DLL /out:add.dll add.obj   ; 生成 add.dll + add.lib（导入库）
+</code></pre>
+<p><strong>使用 DLL - 隐式调用（最常用）</strong>：</p>
+<p>链接时用 DLL 生成的导入库 add.lib，程序启动时自动加载 DLL：</p>
+<pre><code>
+#pragma comment(lib, &quot;add.lib&quot;)
+__declspec(dllimport) int __stdcall add(int a, int b);
+
+int main() {
+    return add(3, 5);   // 像普通函数一样调
+}
+</code></pre>
+<p>找不到 DLL 启动就报错。</p>
+<p><strong>使用 DLL - 显式调用（LoadLibrary + GetProcAddress）</strong>：</p>
+<p>运行时决定加载哪个 DLL、什么时候加载：</p>
+<pre><code>
+#include &lt;windows.h&gt;
+
+typedef int (__stdcall *ADD_FUNC)(int, int);
+
+int main() {
+    HMODULE h = LoadLibraryA(&quot;add.dll&quot;);
+    ADD_FUNC my_add = (ADD_FUNC)GetProcAddress(h, &quot;add&quot;);
+    int result = my_add(3, 5);
+    FreeLibrary(h);
+    return result;
+}
+</code></pre>
+<p>插件机制、热更新都用这个。shellcode 注入本质上就是手动版的显式调用——LoadLibrary 加载 DLL 到目标进程。</p>
+<p><strong>特点</strong>：</p>
+<p>| | 说明 | |---|------| | 代码在哪 | 运行时从 DLL 加载 | | exe 体积 | 小 | | 运行时依赖 | 必须有 DLL 文件 | | 更新方便 | 换 DLL 不用重新编译 exe | | 源码保护 | 只给 DLL，不给源码 |</p>
+<h3>4. 内联汇编</h3>
+<p>C 代码里直接写汇编，不单独建文件。</p>
+<p><strong>MSVC 语法（VS 里用，仅 32 位）</strong>：</p>
+<pre><code>
+int add(int a, int b) {
+    __asm {
+        mov eax, a       ; 直接用 C 变量名
+        add eax, b
+        // 不用写 return，eax 就是返回值
+    }
+}
+</code></pre>
+<p><strong>常见用途</strong>：</p>
+<pre><code>
+// 读取控制寄存器（C 不能直接读）
+unsigned int get_cr0() {
+    __asm { mov eax, cr0 }
+}
+
+// CPUID
+void get_cpuid() {
+    __asm {
+        mov eax, 1
+        cpuid
+    }
+}
+
+// 原子操作
+int atomic_add(int* p, int v) {
+    __asm {
+        mov ecx, p
+        mov eax, v
+        lock xadd [ecx], eax
+    }
+}
+</code></pre>
+<p><strong>特点</strong>：</p>
+<p>| 优点 | 缺点 | |------|------| | 不用单独建 .asm 文件 | MSVC 64 位不支持，只能 32 位 | | 能直接访问 C 变量 | GCC/Clang 语法不同 | | 适合写几行关键代码 | 大段汇编不如单独文件清晰 | | 编译器自动处理栈帧 | 不能用宏、条件汇编等 MASM 特性 |</p>
+<p><strong>MSVC 64 位的替代方案</strong>——用内建函数：</p>
+<pre><code>
+#include &lt;intrin.h&gt;
+
+unsigned __int64 get_cr0() {
+    return __readcr0();        // 相当于 mov eax, cr0
+}
+
+int atomic_add(int* p, int v) {
+    return _InterlockedExchangeAdd((long*)p, v);  // 原子加法
+}
+</code></pre>
+<h3>选择建议</h3>
+<p>| 场景 | 选哪个 | |------|--------| | 和别人协作，给源码 | 联合编译 | | 只给二进制，不给源码 | 静态库 | | 运行时动态加载、插件机制 | 动态库 | | C 代码里夹几行汇编 | 内联汇编 | | shellcode 注入 | 都不是，直接写机器码字节 |</p>
+<h2>内联汇编伪指令详解</h2>
+<p>MSVC 内联汇编的内置汇编器不是完整的 MASM，只支持一小部分伪指令。</p>
+<h3>能用的伪指令</h3>
+<p>| 伪指令 | 作用 | 示例 | |--------|------|------| | <code>_emit</code> | 定义一个字节（替代 db） | <code>_emit 0x90</code> | | <code>ptr</code> | 指定访问宽度 | <code>dword ptr [esp+4]</code> | | 标签 <code>:</code> | 跳转标记 | <code>label1: jmp label1</code> | | <code>offset</code> | 取地址（仅 C 变量） | <code>mov eax, offset val</code> | | <code>align</code> | 地址对齐 | <code>align 4</code> | | <code>even</code> | 对齐到偶数 | <code>even</code> | | <code>LENGTH</code> | 取数组元素个数 | <code>mov eax, LENGTH arr</code> | | <code>TYPE</code> | 取变量大小 | <code>mov eax, TYPE val</code> | | <code>SIZE</code> | 取总字节数 | <code>mov eax, SIZE arr</code> |</p>
+<h3>不能用的伪指令</h3>
+<p>| 伪指令 | 为什么不能用 | 怎么替代 | |--------|------------|---------| | <code>db</code> / <code>dw</code> / <code>dd</code> | 内置汇编器不认 | 用 <code>_emit</code> | | <code>invoke</code> | 没有这个机制 | 手动 push + call | | <code>proto</code> | 没有函数声明 | 直接用 C 函数名 | | <code>public</code> / <code>extrn</code> | 不需要 | 直接用 C 变量/函数 | | <code>local</code> | 不能声明局部变量 | 用 C 变量代替 | | <code>MACRO</code> / <code>ENDM</code> | 不支持宏 | 用 C 的宏或函数 | | <code>IF</code> / <code>ELSE</code> / <code>ENDIF</code> | 不支持条件汇编 | 用 C 的 if/else | | <code>.data</code> / <code>.code</code> | 不支持段定义 | 数据放 C 变量里 | | <code>STRUCT</code> / <code>UNION</code> | 不支持 | 用 C 的 struct | | <code>option</code> | 不支持 | 无 | | <code>assume</code> | 不支持 | fs/gs 直接用 | | <code>includelib</code> | 不支持 | 在项目设置里配 | | <code>include</code> | 不支持 | 用 C 的 #include |</p>
+<h3>核心区别</h3>
+<p><strong>一句话区分</strong>：能直接操作指令和字节的伪指令基本能用，涉及"声明、定义、组织代码结构"的伪指令全不能用——这些交给 C 去做。</p>
+<p><strong>最常用的就三个</strong>：<code>_emit</code>（写机器码字节）、<code>ptr</code>（指定内存访问宽度）、标签（跳转）。</p>
+<h3>_emit 伪指令</h3>
+<p>MSVC 内联汇编里<strong>专用</strong>的数据定义伪指令，作用等同于 MASM 的 <code>db</code>。</p>
+<pre><code>
+__asm {
+    _emit 0xE9        // 等同于 db 0E9h，定义一个字节
+}
+</code></pre>
+<p><strong>为什么需要 _emit</strong>：MSVC 内联汇编不支持 <code>db</code>，会直接编译报错。<code>db</code> 是 MASM 的伪指令，只有 .asm 文件里才能用。MSVC 内联汇编的编译器不是 MASM，是 MSVC 自己的内置汇编器，不认 <code>db</code>。</p>
+<p><strong>_emit 和 db 的区别</strong>：</p>
+<p>| | <code>_emit</code> | <code>db</code> | |---|---------|------| | 属于 | MSVC 内联汇编专用 | MASM 通用 | | 语法 | <code>_emit 0x90</code> | <code>db 90h</code> | | 支持情况 | MSVC 全版本稳定 | 内联汇编里不能用 | | 一次定义量 | 只能一个字节 | 可多个：<code>db 1, 2, 3</code> | | 十六进制写法 | <code>0x90</code>（C 风格） | <code>90h</code>（汇编风格） |</p>
+<p><strong>多字节数据要手动拆成小端序</strong>：</p>
+<p>| MASM | MSVC 内联汇编 | |------|--------------| | <code>db 1, 2, 3</code> | <code>_emit 1</code> <code>_emit 2</code> <code>_emit 3</code> | | <code>dw 0x1234</code> | <code>_emit 0x34</code> <code>_emit 0x12</code> | | <code>dd 0xDEADBEEF</code> | <code>_emit 0xEF</code> <code>_emit 0xBE</code> <code>_emit 0xAD</code> <code>_emit 0xDE</code> |</p>
+<p><strong>最常见用途</strong>——写 shellcode 和 hook 跳转：</p>
+<pre><code>
+// 构造 jmp 跳转（hook 时常用）
+__asm {
+    _emit 0xE9               // jmp 的 opcode
+    _emit 0x00               // 偏移字节1
+    _emit 0x00               // 偏移字节2
+    _emit 0x00               // 偏移字节3
+    _emit 0x00               // 偏移字节4
+}
+</code></pre>
+<h3>调函数的固定写法（因为没有 invoke）</h3>
+<pre><code>
+__asm {
+    push 0              // 参数从右往左压
+    push 0
+    call dword ptr [func]   // 手动 call
+    add esp, 8          // cdecl 要自己清栈
+}
+</code></pre>
+<h2>裸函数 (__declspec(naked))</h2>
+<p>裸函数是 MSVC 的特性，用 <code>__declspec(naked)</code> 声明，<strong>编译器不生成函数序言和结语</strong>——栈帧全由自己管。</p>
+<h3>普通函数 vs 裸函数</h3>
+<p>普通函数编译后，编译器自动加序言/结语：</p>
+<pre><code>
+; 编译器实际生成的普通函数
+push ebp              ; ← 序言（自动加的）
+mov ebp, esp
+sub esp, ...          ; ← 分配局部变量空间
+; ...你的代码...
+mov esp, ebp          ; ← 结语（自动加的）
+pop ebp
+ret
+</code></pre>
+<p>裸函数什么都不加：</p>
+<pre><code>
+__declspec(naked) int add(int a, int b) {
+    __asm {
+        mov eax, [esp+4]    // 参数 a（没有 ebp 栈帧，直接从栈上读）
+        add eax, [esp+8]    // 参数 b
+        ret                  // 必须自己写 ret
+    }
+}
+</code></pre>
+<h3>对比</h3>
+<p>| | 普通函数 | 裸函数 | |---|---------|--------| | 序言 | 自动生成 push ebp / mov ebp,esp | 没有 | | 结语 | 自动生成 pop ebp / ret | 没有 | | 参数访问 | <code>[ebp+8]</code> | <code>[esp+4]</code> | | 局部变量 | <code>[ebp-4]</code> 等 | 要自己 sub esp 分配 | | ret | 自动 | 必须自己写 | | 适合场景 | 正常编程 | shellcode / hook / 特殊栈操作 |</p>
+<h3>裸函数的适用场景</h3>
+<p><strong>1. 写 shellcode</strong>——没有栈帧开销，代码干净，可直接提取机器码：</p>
+<pre><code>
+__declspec(naked) void shellcode() {
+    __asm {
+        push 0
+        push 0
+        push 0
+        push 0
+        mov eax, 0x77D507EA    ; MessageBoxA 地址
+        call eax
+        ret
+    }
+}
+</code></pre>
+<p><strong>2. Hook（钩子）</strong>——栈布局精确控制，不插额外指令：</p>
+<pre><code>
+__declspec(naked) void hook_func() {
+    __asm {
+        pushad              ; 保存寄存器
+        ; ...处理逻辑...
+        popad               ; 恢复寄存器
+        jmp original_func   ; 跳回原函数
+    }
+}
+</code></pre>
+<p><strong>3. 自定义调用约定</strong>：</p>
+<pre><code>
+__declspec(naked) int fastcall_custom() {
+    __asm {
+        mov eax, ecx        ; ecx = 参数1, edx = 参数2
+        add eax, edx
+        ret
+    }
+}
+</code></pre>
+<h3>裸函数的坑</h3>
+<p><strong>1. 不能用局部变量</strong>——要自己 sub esp 分配：</p>
+<pre><code>
+__declspec(naked) void good() {
+    __asm {
+        sub esp, 4        // 手动分配 4 字节
+        mov [esp], 5      // 当局部变量用
+        add esp, 4        // 手动释放
+        ret
+    }
+}
+</code></pre>
+<p><strong>2. 忘了写 ret 会崩</strong>——执行完继续往下跑。</p>
+<p><strong>3. 参数偏移会变</strong>——push 后偏移要跟着调：</p>
+<pre><code>
+__declspec(naked) int test(int a, int b) {
+    __asm {
+        // [esp+0] = 返回地址, [esp+4] = a, [esp+8] = b
+        push ebx           // push 后偏移 +4
+        // [esp+8] = a, [esp+12] = b（偏移变了）
+        mov eax, [esp+8]
+        add eax, [esp+12]
+        pop ebx
+        ret
+    }
+}
+</code></pre>
+<h3>裸函数和 shellcode 的关系</h3>
+<p>| | 裸函数 | shellcode | |---|--------|-----------| | 谁写 | C 编译器 + 内联汇编 | 纯汇编 | | 运行在哪 | 本进程 | 目标进程 | | 地址 | 编译时确定 | 运行时确定（要 PIC） | | 调 API | 可以用 C 函数 | 必须手动 push + call |</p>
+<p>用裸函数写 shellcode 的好处是<strong>可以在 VS 里调试</strong>——先写成裸函数跑通，再提取机器码注入，比直接在 RadASM 里写纯汇编好调试得多。</p>
+<h2>内联汇编 vs 内联 Hook</h2>
+<p>这两个概念容易混淆，但完全不同。</p>
+<p>| | 内联汇编 (Inline Assembly) | 内联 Hook (Inline Hook) | |---|---------------------------|------------------------| | 是什么 | 一种写代码的方式 | 一种 Hook 技术 | | 干什么 | 在 C 代码里嵌汇编 | 修改函数入口拦截调用 | | "内联"的含义 | 嵌在 C 代码里 | 改的代码是原地替换（inline patch） |</p>
+<h3>内联 Hook 的原理</h3>
+<p>把目标函数入口处的指令改成跳转到你的函数：</p>
+<pre><code>
+目标函数原样：
+  0x401000: push ebp           ← 原始指令
+  0x401001: mov ebp, esp
+
+内联 Hook 后：
+  0x401000: jmp my_hook         ← 被 5 字节 jmp 覆盖了
+  0x401005: ...                 ← 后面原始指令被破坏
+</code></pre>
+<h3>内联 Hook 三步</h3>
+<p>1. <strong>保存原始字节</strong>——目标函数入口前 5 字节会被覆盖，先存起来 2. <strong>写入跳转</strong>——用 <code>jmp my_hook</code>（5 字节 <code>E9 xx xx xx xx</code>）覆盖入口 3. <strong>调原函数</strong>——恢复那 5 字节，调完再重新 hook；或用蹦床（trampoline）</p>
+<h3>为什么容易和内联汇编混</h3>
+<p>内联 Hook 的实现经常用内联汇编来写——因为要操作栈、寄存器、跳转，C 代码写不了：</p>
+<pre><code>
+__declspec(naked) void my_hook() {
+    __asm {
+        pushad              // 保存现场
+        // ...处理逻辑...
+        popad               // 恢复现场
+        jmp back_to_origin  // 跳回原函数
+    }
+}
+</code></pre>
+<h3>各种 Hook 方式对比</h3>
+<p>| Hook 类型 | 原理 | 优点 | 缺点 | |-----------|------|------|------| | 内联 Hook | 改函数入口字节 | 能拦截任何函数 | 线程安全难处理 | | IAT Hook | 改导入表里的函数指针 | 简单稳定 | 只能 hook API 调用 | | 消息 Hook | SetWindowsHookEx | 系统支持，合法 | 只能 hook 窗口消息 | | VEH Hook | 向量异常处理 | 不改代码 | 性能差（靠异常触发） |</p>
+<p><strong>一句话</strong>：内联汇编是工具（C 里写汇编），内联 Hook 是技术（改函数入口拦截）。内联 Hook 经常用内联汇编来实现。</p>
+<h2>内联汇编的实际价值</h2>
+<h3>日常开发几乎用不到</h3>
+<ul>
+<li>编译器优化比人写汇编强（多数场景）</li>
+<li>C/C++ 本身能搞定绝大多数事</li>
+<li>64 位 MSVC 直接不支持，限制了使用范围</li>
+</ul>
+<h3>对学逆向的人有特定价值</h3>
+<p>| 场景 | 有没有用 | |------|---------| | 写 shellcode | 很有用——裸函数 + _emit 写机器码，能在 VS 里直接调试 | | 逆向分析 | 有用——理解编译器怎么把 C 翻译成汇编 | | Hook 开发 | 有用——裸函数控制栈帧 | | 性能优化 | 没用——编译器比你写得好 | | 正常业务开发 | 没用——完全用不到 |</p>
+<h3>最大优势：调试方便</h3>
+<p>用 VS 裸函数写 shellcode，能设断点、看寄存器、单步走——调试效率比 RadASM 纯汇编高一个量级。跑通后提取机器码注入目标进程。</p>
+<h3>最大硬伤：64 位不支持</h3>
+<p>MSVC 64 位不支持内联汇编。64 位要用内建函数或单独写 .asm 文件。</p>
+<h3>选择建议</h3>
+<p>| 需求 | 建议用什么 | |------|-----------| | 学汇编、理解指令 | VS 内联汇编，方便调试 | | 写 32 位 shellcode | VS 裸函数 + _emit | | 写 64 位程序 | 单独 .asm 文件 + 联合编译 | | 正常开发 | 纯 C/C++，别碰汇编 |</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

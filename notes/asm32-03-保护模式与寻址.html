@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>保护模式与寻址 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">保护模式与寻址</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>保护模式与寻址</h1>
+<p>80386（1985）是 x86 系列第一颗真正的 32 位处理器，也是整个 IA-32 架构的奠基者。后续 80486、Pentium 在指令集层面只是 386 的超集（加流水线、缓存、SSE 等执行层优化，没动核心编程模型）。386 打下的保护模式 + 平坦内存模型，一直沿用到今天的 x86_64。</p>
+<p>16 位到 32 位不是推倒重来，而是三件事叠加：</p>
+<pre><code>
+① 寄存器加宽：AX → EAX（16位 → 32位）
+② 内存模型升级：分段模型（段基址×16+偏移） → 平坦模型（单一32位线性地址）
+③ 寻址方式扩充：固定7种基址变址组合 → 通用 ModRM + SIB 模型
+</code></pre>
+<h2>32 位 CPU 架构演变：保护模式与平坦内存模型</h2>
+<h3>实模式 vs 保护模式</h3>
+<p>| 维度 | 实模式（8086） | 保护模式（386+） | |------|---------------|-----------------| | 内存保护 | 无，程序可乱写任意地址 | 有，段级 DPL + 页级 R/W/U/S 权限 | | 段寄存器含义 | 段基址÷16 | 选择子，指向 GDT/LDT 里的描述符 | | 地址空间 | 1MB（20位） | 4GB（32位） | | 典型错误 | 乱写不会报错 | 访问越权内存触发 #GP，Windows 弹"访问冲突"（c0005 错误） |</p>
+<p>保护模式把 CPU 执行权限分成 4 个特权级（Ring 0~3）：内核跑 Ring 0，普通应用程序跑 Ring 3。每个段描述符里有 DPL（Descriptor Privilege Level）字段，CPU 访问段时检查 CPL（当前特权级）与目标 DPL 是否满足规则，不满足触发 #GP（General Protection Fault）——这正是 Windows "访问冲突"（0xC0000005）的底层来源。</p>
+<p>页一级还有更细粒度的权限位（页表项里的 R/W 位、U/S 位），U/S 位决定这一页是否允许用户态（Ring 3）访问。分工：<strong>段级权限管大块，页级权限管细粒度</strong>。</p>
+<h3>平坦内存模型（Flat Model）</h3>
+<p>保护模式下操作系统在 GDT 里建好段描述符（代码段、数据段），把基址都设成 0、限长设成 4GB。段寄存器形式上还在，实际"形同虚设"——写 <code>mov eax, [ebx]</code> 时 CPU 内部仍走段选择子→描述符→基址的转换，只是基址恒为 0，效果等价于直接用线性地址访问。这就是 <code>.model flat, stdcall</code> 里 "flat" 的来源：写汇编时完全不用操心段基址，所有地址都当简单 32 位线性地址处理。</p>
+<p>平坦模型消除了"同一份数据按不同段基址访问会得到不同有效地址"的复杂性，C/C++ 能直接把内存当一维数组看待，编译器生成代码也简单很多。代价是 8086 那套"基址变址+段超越"的寻址技巧基本失去实用意义——除非写需要手动操作 FS/GS 段（访问 TEB/PEB）的底层代码。</p>
+<h3>Intel 手册结构（拓展）</h3>
+<ul>
+<li><strong>Volume 1</strong>：基础架构，寄存器模型、数据类型、寻址模式</li>
+<li><strong>Volume 2（2A/2B/2C/2D）</strong>：指令集参考，按字母序列出每条指令的编码、操作数组合、标志位影响——写反汇编器/调试器最常翻</li>
+<li><strong>Volume 3（3A/3B/3C/3D）</strong>：系统编程指南，GDT/IDT/分页/任务切换/虚拟化——深入内核态/驱动逆向才用得上</li>
+</ul>
+<h2>寄存器扩展：8 个通用寄存器与段寄存器</h2>
+<p>386 把 8086 的 16 位通用寄存器全部扩展成 32 位，命名规则是在前面加 <strong>E</strong>（Extended）。段寄存器保持 16 位，但数量从 4 个增加到 6 个。</p>
+<h3>通用寄存器</h3>
+<pre><code>
+EAX  ← AX(低16位) ← AH(高8位) + AL(低8位)
+ECX  ← CX  ← CH + CL
+EDX  ← DX  ← DH + DL
+EBX  ← BX  ← BH + BL
+
+EBP  ← BP
+ESP  ← SP
+ESI  ← SI
+EDI  ← DI
+</code></pre>
+<p>兼容关系是<strong>子寄存器嵌套</strong>：EAX 的低 16 位就是 AX，AX 的低 8 位是 AL、高 8 位是 AH，三者共享同一片物理存储。这保证了为 8086 写的代码（只用 AX/AL）在 386 上不用改一行就能跑。EAX 的高 16 位没有单独的助记符访问，只能整体操作 EAX。</p>
+<p>386 在指令编码里靠 66h 前缀判断"操作数是 32 位还是 16 位"（没有前缀默认按段默认宽度）。在 x64dbg 里看到 EAX 说明是 32 位代码段；看到 AX 且前面有 66h 前缀，说明在 32 位段里临时用了 16 位操作数。</p>
+<h3>段寄存器（6 个）</h3>
+<pre><code>
+8086 4个：CS  DS  ES  SS
+386 新增：FS  GS
+</code></pre>
+<p>| 段寄存器 | 用途 | 引入时机 | |---------|------|---------| | CS | 代码段 | 8086 | | DS | 数据段（默认） | 8086 | | ES | 附加数据段 | 8086 | | SS | 栈段 | 8086 | | <strong>FS</strong> | 自由段（OS 当 TLS/TIB 锚点） | 386 新增 | | <strong>GS</strong> | 自由段（OS 当 per-CPU/TLS 锚点） | 386 新增 |</p>
+<p>FS/GS 存在的意义：留出两个"自由"段寄存器给操作系统内核当<strong>线程局部存储（TLS）的锚点</strong>用，不影响程序正常使用的 DS/ES。</p>
+<p>注意：反汇编里看到 <code>FS:[0]</code>、<code>FS:[30h]</code> 这类访问，第一反应是在访问操作系统线程/进程结构——Windows 32 位下 <code>FS:[0]</code> → TIB（线程信息块），<code>FS:[30h]</code> → PEB（进程环境块）；Linux 64 位下 <code>GS:[0]</code> → per-CPU 数据 / TLS 基址。这是反调试、线程信息读取的经典入口。</p>
+<h2>EFLAGS 标志寄存器</h2>
+<p>16 位 FLAGS 扩展成 32 位 EFLAGS，低 16 位与 FLAGS 完全兼容，高 16 位新增 8 个系统级标志位。64 位进一步扩展为 RFLAGS，低 32 位与 EFLAGS 完全兼容。32 个标志位按功能分三大类。</p>
+<h3>运算与状态标志（6 个，16/32 位一致）</h3>
+<p>反映算术、逻辑运算结果特征，8086 与 32 位 CPU 无区别。</p>
+<p>| 标志 | 位名 | 含义 | |------|------|------| | CF | 进位标志 | 无符号数运算产生进位/溢出 | | PF | 奇偶标志 | 运算结果低 8 位中二进制 1 的个数奇偶 | | AF | 辅助进位标志 | BCD 码运算时低 4 位向高 4 位进位 | | ZF | 零标志 | 运算结果等于 0 时置 1 | | SF | 符号标志 | 记录运算结果正负（最高位值） | | OF | 溢出标志 | 有符号数运算发生溢出 |</p>
+<p><strong>CF 管无符号溢出，OF 管有符号溢出</strong>，两者独立判断，同一条运算可能只置其中一个。</p>
+<h3>控制标志（2 个，16/32 位相同）</h3>
+<p>| 标志 | 含义 | |------|------| | DF | 方向标志，控制串指令地址自增/自减方向 | | IF | 中断允许标志，控制 CPU 是否响应可屏蔽硬件中断 |</p>
+<h3>系统级标志（8 个，32 位 EFLAGS 新增）</h3>
+<p>这是 32 位启用高 16 位后的新增项，用于特权级、多任务、内存保护——也是与 16 位的核心差异。</p>
+<p>| 标志 | 含义 | |------|------| | NT | 嵌套任务，任务链式调用、多任务切换使用 | | VM | 虚拟 8086 模式，32 位环境下运行 16 位 DOS 程序 | | AC | 对齐检查，配合 CR0 校验内存访问地址对齐 | | IOPL | I/O 特权级（占 2bit），标识当前任务 I/O 操作权限等级 | | RF | 恢复标志，配合调试异常，控制断点恢复时是否临时屏蔽 | | VIF | 虚拟中断标志，为虚拟 8086 模式服务的"虚拟化版"IF | | VIP | 虚拟中断挂起，配合 VIF 使用 | | ID | ID 标志，能否被软件修改这一位是检测 CPU 是否支持 CPUID 的经典手法 |</p>
+<p>逆向中绝大多数情况只关心<strong>第一类状态标志</strong>，因为 <code>CMP</code>/<code>TEST</code> 后跟条件跳转 <code>J*</code> 的模式全靠 CF/ZF/SF/OF 驱动。系统级标志出现在应用层代码里极其罕见，看到基本说明在分析操作系统内核或虚拟化相关代码。</p>
+<p>ID 标志的妙用：试着翻转 ID 位，翻转成功就说明支持 CPUID——很多系统信息工具的第一步探测。</p>
+<h2>32 位寻址方式：ModRM + SIB 通用模型</h2>
+<p>32 位寻址把 16 位"靠死记硬背几种固定搭配"的模式，换成"任意寄存器自由组合 + 比例因子硬件加速数组访问"的通用模型。机器码编码从单字节 ModRM 查表，变成 ModRM + 可选 SIB 字节的规则推导。</p>
+<h3>16 位寻址的老规矩（复习）</h3>
+<p>8086 只有这几种基址/变址寄存器能进 <code>[ ]</code>，固定搭配：</p>
+<pre><code>
+[BX]          [BX+SI]       [BX+SI+disp]
+[BP]          [BP+DI]       [BP+DI+disp]
+[SI]          [BX+DI]       ...
+[DI]
+[disp]
+</code></pre>
+<p><strong>核心限制：只有 BX/BP 能当基址，只有 SI/DI 能当索引</strong>，AX/CX/DX 永远不能出现在 <code>[ ]</code> 里。</p>
+<pre><code>
+MOV  AX, [BX+SI+4]    ; 合法
+MOV  AX, [AX]         ; 非法！AX不能寻址
+MOV  AX, [CX+DX]      ; 非法！这种组合不存在
+</code></pre>
+<h3>32 位寻址：彻底通用化</h3>
+<p>386 开始，<strong>任意通用寄存器都可以当基址或索引</strong>：</p>
+<pre><code>
+MOV  EAX, [EAX]         ; 合法
+MOV  EAX, [ECX+EDX]     ; 合法
+MOV  EAX, [EBX+ESI*4]   ; 合法
+MOV  EAX, [ESP+8]       ; 合法（连ESP都能用！16位的SP做不到）
+</code></pre>
+<p>| 特性 | 16位 | 32位 | |------|------|------| | 能当基址的寄存器 | 仅 BX、BP（2个） | 任意通用寄存器（8个） | | 能当索引的寄存器 | 仅 SI、DI（2个） | 任意通用寄存器（除ESP） | | 寻址组合数 | 固定7种 | 几乎任意搭配 |</p>
+<h3>新增比例因子（Scale）</h3>
+<p>16 位没有，32 位新增 <code>*1/*2/*4/*8</code>，专门为数组访问设计：</p>
+<pre><code>
+; 16位想访问 WORD数组array[i]，必须先手动算偏移
+MOV  AX, i
+SHL  AX, 1          ; 手动 ×2（WORD是2字节）
+MOV  SI, AX
+MOV  BX, [SI+array] ; 才能取到
+
+; 32位一条指令搞定，比例因子自动处理
+MOV  EAX, [array + ESI*4]    ; 自动 ESI×4，直接取DWORD数组第i个元素
+</code></pre>
+<p>| 比例因子 | 对应数组类型 | |---------|-------------| | *1 | BYTE 数组 | | *2 | WORD 数组 | | *4 | DWORD 数组（最常用，对应 int/指针） | | *8 | QWORD 数组 |</p>
+<p>注意：看到 <code>[reg + reg*N]</code> 这种带比例因子的寻址，第一反应是在访问数组——N=4 是 int/指针数组，N=2 是 short 数组。比例因子是编译器优化数组访问的信号，手写汇编很少主动用，看到它基本说明是编译器生成代码。</p>
+<h3>ModRM + SIB 编码：从查表到规则推导</h3>
+<p>16 位寻址靠 ModRM 的 r/m 字段直接对应那 7 种组合之一（单字节查表）。32 位组合太多单字节编不下，引入 <strong>SIB 字节（Scale-Index-Base）</strong>：</p>
+<pre><code>
+32位指令编码：
+  ModRM（1字节）→ 如果 r/m 字段是 100，说明&quot;还有更多信息&quot;
+  → 紧跟一个 SIB字节（1字节），编码 Scale / Index / Base
+  → 之后才是 disp（如果有）
+
+[EAX+EBX*4+8] 的编码:
+  ModRM: mod=01, reg=目标寄存器, r/m=100 (表示用SIB)
+  SIB:   scale=10(×4), index=EBX编号, base=EAX编号
+  disp8: 08h
+</code></pre>
+<p>用 1 字节 ModRM + 可选 1 字节 SIB 的两级编码，换来"任意寄存器组合 + 比例因子"的巨大灵活性。代价是带 SIB 的指令多 1 字节机器码，但绝大多数指令用不到 SIB（普通寄存器寻址 ModRM 单字节够用）。</p>
+<h3>有效地址公式</h3>
+<pre><code>
+有效地址 = Base寄存器 + (Index寄存器 × Scale) + 位移(disp)
+</code></pre>
+<p>| 寻址方式 | 示例 | 说明 | |---------|------|------| | 立即数寻址 | <code>mov eax, 1</code> | 操作数编码在指令里 | | 寄存器寻址 | <code>mov eax, ecx</code> | 操作数就是寄存器本身 | | 直接寻址 | <code>mov eax, [Number2]</code> | 地址是编译期常量 | | 寄存器间接寻址 | <code>mov eax, [ebx]</code> | 地址存在寄存器里 | | 寄存器相对寻址 | <code>mov eax, [ebx+4]</code> | 结构体固定偏移字段 | | 基址变址寻址 | <code>mov eax, [ebx+eax]</code> | 两寄存器相加 | | 相对基址变址寻址 | <code>mov eax, [ebx+eax+4]</code> | 数组里结构体元素的某字段 | | <strong>比例因子寻址（SIB）</strong> | <code>mov eax, [ebx+eax*4]</code> | 32 位新增，数组下标访问 |</p>
+<p>测试寻址方式时配合调试器观察：同一个表达式在 ModRM/SIB 字节层面到底编码成什么，比单纯记语法规则更有助于建立直觉。调试器里看到的字节，就是反汇编器 ModRM/SIB 解析代码要处理的对象。</p>
+<h2>指令前缀：66h 操作数大小覆盖与 67h 地址大小覆盖</h2>
+<p>386 既要兼容 16 位代码又要支持 32 位代码，但 opcode 字节是共用的。CPU 靠"当前代码段默认宽度" + "覆盖前缀"配合判断该按几个字节读取操作数。</p>
+<ul>
+<li><strong>66h</strong> = 操作数大小覆盖前缀（管数据宽度 16↔32）</li>
+<li><strong>67h</strong> = 地址大小覆盖前缀（管地址计算用 16 位还是 32 位寄存器）</li>
+</ul>
+<h3>核心规则：反转，不是固定指定</h3>
+<p>66h 不是"指定用 16 位"或"指定用 32 位"，而是<strong>相对于当前段默认宽度做反转</strong>：</p>
+<pre><code>
+当前代码段默认16位操作数：
+    没有66  → 这条指令操作数是16位
+    有66    → 这条指令操作数变成32位
+
+当前代码段默认32位操作数：
+    没有66  → 这条指令操作数是32位
+    有66    → 这条指令操作数变成16位
+
+公式：实际宽度 = 默认宽度 XOR 是否有66前缀
+</code></pre>
+<h3>"代码段默认宽度"由谁决定</h3>
+<p>保护模式下，段描述符里的 <strong>D 位（Default operation size）</strong> 决定：</p>
+<pre><code>
+段描述符里：
+  D=0 → 这个代码段默认操作数是16位（兼容8086/286）
+  D=1 → 这个代码段默认操作数是32位（386+原生模式）
+</code></pre>
+<p>MASM 里靠模式声明间接控制：</p>
+<pre><code>
+.MODEL SMALL          ; 16位段，D=0
+.CODE
+
+.MODEL FLAT           ; 32位段，D=1
+.CODE
+</code></pre>
+<p>实模式（DOS 下）约定默认 16 位，相当于隐含 D=0。</p>
+<h3>具体编码示例</h3>
+<p>场景 1：16 位段，<code>MOV AX, 1234h</code>（默认 16 位，不需要覆盖）</p>
+<pre><code>
+机器码: B8 34 12
+        ↑  └──┬──┘
+      opcode  16位立即数（小端）
+没有66前缀，默认16位刚好是想要的
+</code></pre>
+<p>场景 2：16 位段，<code>MOV EAX, 12345678h</code>（默认 16 位，想要 32 位 → 覆盖）</p>
+<pre><code>
+机器码: 66 B8 78 56 34 12
+        ↑  ↑  └────┬────┘
+       前缀 opcode  32位立即数
+有66前缀，把&quot;默认16位&quot;反转成&quot;32位&quot;
+</code></pre>
+<p>场景 3：32 位段，<code>MOV EAX, 12345678h</code>（默认 32 位，不需要覆盖）</p>
+<pre><code>
+机器码: B8 78 56 34 12
+没有66前缀
+</code></pre>
+<p>场景 4：32 位段，<code>MOV AX, 1234h</code>（默认 32 位，想要 16 位 → 覆盖）</p>
+<pre><code>
+机器码: 66 B8 34 12
+有66前缀，把&quot;默认32位&quot;反转成&quot;16位&quot;
+</code></pre>
+<h3>66h 的影响范围</h3>
+<p>不只改变立即数字节数，还影响：</p>
+<pre><code>
+MOV  AL, 12h         ; AL是8位寄存器，不受66影响
+ADD  AX, BX          ; 16位加法，在16位段不需要66
+ADD  EAX, EBX        ; 32位加法，在16位段需要66前缀
+PUSH AX              ; 16位段默认 → 压2字节
+PUSH EAX             ; 16位段里压4字节 → 需要66前缀
+</code></pre>
+<p>注意：AL/BL/CL 等 8 位寄存器有专门的 8 位 opcode 系列（靠 opcode 最低位区分），<strong>8 位操作数永远不受 66 影响</strong>——66 管的是 16↔32 之间的反转。</p>
+<h3>67h 管的是完全不同的事——地址计算</h3>
+<pre><code>
+; 67前缀的典型场景：在32位段里，临时用16位方式计算地址
+MOV  EAX, [BX+SI]    ; 32位段默认用32位寄存器算地址（应该是[EBX+ESI]）
+                     ; 这里写[BX+SI]，汇编器插入67前缀
+                     ; 告诉CPU&quot;地址计算这次用16位寄存器BX/SI&quot;
+                     ; 但取出的数据宽度（EAX）不受67影响，那是66管的事
+</code></pre>
+<pre><code>
+66前缀只回答：&quot;取出来的数据是16位还是32位？&quot;（操作数宽度）
+67前缀只回答：&quot;括号里的BX到底是16位的BX，还是该按32位的EBX算？&quot;（地址宽度）
+两者互不干扰，可以同时出现：
+  66 67  MOV  AX, [BX]   ; 32位段里：66把数据宽度从32拧回16(AX)
+                          ;            67把地址宽度从32拧回16(BX)
+</code></pre>
+<h3>惯用模式</h3>
+<p>32 位段里操作 16 位数据（比如解析 BMP 文件头里的 WORD 字段）：</p>
+<pre><code>
+; 32位段，读16位值
+MOVZX EAX, word ptr [ebx]    ; MOVZX 用 word ptr 指定16位源
+; 或者直接操作AX
+MOV  AX, [ebx]               ; 汇编器自动插入66前缀
+</code></pre>
+<p>逆向识别：在 32 位反汇编输出里看到 <code>66</code> 前缀（或反汇编器显示 <code>mov ax, ...</code> 而非 <code>mov eax, ...</code>），说明代码在 32 位段里临时用了 16 位操作数。常见于处理遗留文件格式（BMP/PCX 头）、硬件端口通信等场景。</p>
+<p>写源码时看不到 66/67 前缀，它是汇编器/反汇编器之间的"隐藏协议"：</p>
+<pre><code>
+.386
+.MODEL FLAT, STDCALL
+.CODE
+main PROC
+    mov  eax, 100     ; 汇编器知道这是32位段，直接用 B8，不插66
+    mov  ax, 50       ; 汇编器知道你想要16位，但段默认32位
+                      ; → 自动在机器码里塞入66前缀，源码里看不到
+    ret
+main ENDP
+</code></pre>
+<p>手写机器码或反汇编分析别人代码时才会真正"看见"这个字节。反汇编器实现时，遇到 66 前缀要把后续操作数宽度从默认值反转——这是 ModRM 解析中容易出 bug 的地方。</p>
+<h2>段超越前缀：64h(FS) 与 65h(GS)</h2>
+<p>x86 每个段寄存器在机器码里都有一个对应的前缀字节，放在指令最前面，临时指定这条指令用哪个段。64h 对应 FS，65h 对应 GS，都是 386 新增。</p>
+<p>| 前缀字节 | 段寄存器 | 引入时机 | |---------|---------|---------| | 2Eh | CS | 8086 | | 36h | SS | 8086 | | 3Eh | DS | 8086 | | 26h | ES | 8086 | | <strong>64h</strong> | <strong>FS</strong> | 386 新增 | | <strong>65h</strong> | <strong>GS</strong> | 386 新增 |</p>
+<h3>工作机制</h3>
+<pre><code>
+MOV  AX, [BX]          ; 默认用 DS 段（没有前缀）
+MOV  AX, ES:[BX]       ; 用前缀 26h，临时改成访问ES段
+MOV  AX, FS:[BX]       ; 用前缀 64h，临时改成访问FS段
+MOV  AX, GS:[BX]       ; 用前缀 65h，临时改成访问GS段
+</code></pre>
+<p>机器码层面真正的指令本体完全没变，只是前面多贴一个字节：</p>
+<pre><code>
+MOV AX, [BX]       →  8B 07          （没有前缀，走默认DS）
+MOV AX, ES:[BX]    →  26 8B 07       （多了26前缀，走ES）
+MOV AX, FS:[BX]    →  64 8B 07       （多了64前缀，走FS）
+MOV AX, GS:[BX]    →  65 8B 07       （多了65前缀，走GS）
+</code></pre>
+<h3>Windows 下访问 TIB/PEB（反调试经典）</h3>
+<p>Windows 32 位下，FS 段基址指向当前线程的 TIB（Thread Information Block），TIB 里存着栈顶、栈底、SEH 异常链、TLS 数组指针，以及指向 PEB 的指针。</p>
+<pre><code>
+; 读取当前线程栈底地址（TIB偏移4处是StackBase）
+MOV  EAX, FS:[4]      ; 机器码：64 A1 04 00 00 00
+
+; 经典反调试：检查PEB里的BeingDebugged字段
+MOV  EAX, FS:[30h]    ; EAX = PEB地址（TIB偏移30h指向PEB）
+MOV  AL, [EAX+2]      ; PEB+2 = BeingDebugged字段
+CMP  AL, 1
+JE   detected_debugger
+</code></pre>
+<p>注意：32 位 Windows 逆向中看到 <code>FS:[0]</code> / <code>FS:[30h]</code>，第一反应是在访问线程/进程结构，极可能是反调试或异常处理相关代码——FS:[0] 是 SEH 链头，FS:[30h] 是 PEB，这是逆向分析的高频信号。</p>
+<h3>Linux 64 位下访问 per-CPU 数据</h3>
+<p>Linux 64 位用 GS 段指向当前 CPU 的 per-cpu 数据结构或 TLS 基址：</p>
+<pre><code>
+; 读取当前CPU的per-cpu变量
+MOV  RAX, GS:[offset]
+</code></pre>
+<p>64 位下 CS/DS/SS/ES 段基址强制清零失效，唯独 FS/GS 仍有效。看到 <code>GS:[...]</code> 说明在访问线程局部或 per-CPU 数据——这是 x86 段机制在 64 位时代唯一"活下来"的功能。</p>
+<h2>ModRM 寄存器编号与宽度的关系</h2>
+<p>ModRM 字节里的 reg/r-m 字段都是 3 位，编码 0~7 八个值，对应 8 个寄存器家族。编号本身固定指向家族，具体取家族里的哪个尺寸（AL/AX/EAX）由 opcode + 66 前缀决定，<strong>与 67 前缀无关</strong>。</p>
+<h3>寄存器编号固定的家族映射</h3>
+<pre><code>
+编号:  000  001  010  011  100  101  110  111
+       (0)  (1)  (2)  (3)  (4)  (5)  (6)  (7)
+
+编号0 → AL / AX / EAX    编号4 → AH / SP / ESP
+编号1 → CL / CX / ECX    编号5 → CH / BP / EBP
+编号2 → DL / DX / EDX    编号6 → DH / SI / ESI
+编号3 → BL / BX / EBX    编号7 → BH / DI / EDI
+</code></pre>
+<p><strong>编号"0"永远指着"A 家族"</strong>，这点不会变。会变的是这次取 A 家族里的哪一个尺寸。</p>
+<h3>决定尺寸的两个因素</h3>
+<pre><code>
+① opcode 字节本身有没有指定&quot;这是8位操作&quot;
+② 如果不是8位，则由 66前缀 + 段默认宽度 决定是16还是32位
+</code></pre>
+<p>情况 A：opcode 自己规定 8 位。8 位和 16/32 位用不同的 opcode 基值：</p>
+<pre><code>
+; B0-B7系列：MOV reg8, imm8（8位版本）
+B0  →  MOV AL, imm8
+B1  →  MOV CL, imm8
+
+; B8-BFh系列：MOV reg16/32, imm16/32（16或32位版本）
+B8  →  MOV AX/EAX, imm16/32
+B9  →  MOV CX/ECX, imm16/32
+</code></pre>
+<pre><code>
+opcode = B0h        → 编号0 → AL    （8位，固定，不受66影响）
+opcode = B8h, 无66   → 编号0 → AX/EAX（取决于段默认宽度）
+opcode = B8h, 有66   → 编号0 → 跟段默认宽度反过来
+</code></pre>
+<p>情况 B：opcode 规定 16/32 位，66 登场：</p>
+<pre><code>
+opcode = B8h（已说明&quot;不是8位&quot;）
+  没有66 + 16位段 → AX
+  有66   + 16位段 → EAX
+  没有66 + 32位段 → EAX
+  有66   + 32位段 → AX
+</code></pre>
+<p>67 前缀完全不参与这个判断：</p>
+<pre><code>
+MOV  AL,  [BX]        ; 取出的数据是8位(AL)，由opcode决定，跟66/67都无关
+                      ; 寻址用BX(16位)算地址，32位段需要67前缀
+
+MOV  AX,  [EBX]       ; 取出的数据是16位(AX)，可能需要66反转默认32位
+                      ; 寻址用EBX(32位)算地址，16位段需要67前缀
+
+; 两个前缀独立，可同时出现
+66 67  MOV  AX, [BX]  ; 32位段：66把数据宽度从32拧回16(AX)
+                       ;         67把地址宽度从32拧回16(BX)
+</code></pre>
+<h2>MOVSX / MOVZX：符号扩展与零扩展指令</h2>
+<p>386 新增的两条数据搬运指令，在搬运的同时把小尺寸操作数扩展到大尺寸目标寄存器：</p>
+<ul>
+<li><strong>MOVSX</strong>（Move with Sign-Extend）：带符号扩展，高位填充符号位</li>
+<li><strong>MOVZX</strong>（Move with Zero-Extend）：零扩展，高位填充 0</li>
+</ul>
+<p>8086 时代做符号扩展要手写几条指令组合（先 <code>mov</code> 再用 <code>cbw</code>/<code>cwd</code>，或手动操作高位字节），且只能扩到累加器。386 的 MOVSX/MOVZX 可以直接把小尺寸操作数扩展到任意目标寄存器，源和目标的尺寸组合相对自由（8位→32位、16位→32位）。</p>
+<pre><code>
+; 假设 AL = 0FFh（即 -1 的8位补码）
+MOVSX EAX, AL    ; EAX = 0FFFFFFFFh（-1，符号位1填充高位）
+MOVZX EAX, AL    ; EAX = 000000FFh（255，高位补0）
+
+; 假设 AX = 8000h（即 -32768 的16位补码）
+MOVSX EAX, AX    ; EAX = 0FFFF8000h（-32768）
+MOVZX EAX, AX    ; EAX = 00008000h（32768）
+</code></pre>
+<p><strong>MOVSX 保留数值的符号含义</strong>（负数扩展后还是负数），<strong>MOVZX 把它当无符号位模式</strong>（扩展后值可能变大）。选哪条取决于数据是有符号还是无符号。</p>
+<pre><code>
+; 从内存读一个BYTE，零扩展到EAX参与运算
+MOVZX EAX, byte ptr [esi]      ; EAX = 0~255，高位清0
+
+; 从内存读一个有符号BYTE，符号扩展到EAX
+MOVSX EAX, byte ptr [esi]      ; EAX = -128~127，保留符号
+</code></pre>
+<p>逆向识别：看到 MOVSX 说明编译器在处理<strong>有符号</strong>的小尺寸数据（char/short），看到 MOVZX 说明在处理<strong>无符号</strong>的小尺寸数据（unsigned char/unsigned short）——C 语言的 <code>char</code> 默认是否有符号，看编译器用哪条就知道。32 位反汇编里几乎看不到 CBW/CWD/CWDE（MOVSX 的前身），取而代之的是 MOVSX/MOVZX，看到它们说明在处理窄类型数据的类型提升，是 C 编译器类型转换的典型产物。</p>
+<h3>取局部变量地址：ADDR vs OFFSET</h3>
+<pre><code>
+; 取局部变量地址传给API
+LOCAL buffer[256]:BYTE
+INVOKE GetModuleFileNameA, NULL, ADDR buffer, 256
+</code></pre>
+<p><code>OFFSET</code> 只能取全局变量（编译期固定地址）的地址；<code>ADDR</code> 可以取局部变量（栈上）的地址，汇编器展开为 <code>LEA</code> 指令。局部变量在栈上，地址运行时才确定，必须用 ADDR/LEA。</p>
+<h2>VS + MASM 开发环境配置</h2>
+<p>在 Visual Studio 里集成 MASM 汇编器（ml.exe），让 <code>.asm</code> 文件参与项目构建，核心是两步配置：</p>
+<p>1. <strong>启用 MASM 构建自定义</strong>：右键项目 → 生成依赖项 → 生成自定义 → 勾选 masm。这让 VS 知道项目里有汇编文件需要用 ml.exe 处理。 2. <strong>给 .asm 文件指定项类型</strong>：右键指定的 <code>.asm</code> 文件 → 属性 → 从生成中排除选<strong>否</strong>，项类型选 <strong>Microsoft Macro Assembler</strong>。</p>
+<p>注意：MASM 构建自定义启用后，VS 不会自动把所有 .asm 文件都交给 ml.exe——必须逐个文件指定项类型。这是 VS 的设计，不是 bug。VS 的构建系统基于"项类型"决定每个文件用什么工具处理（C/C++ 用 cl.exe，资源用 rc.exe），这套机制允许一个项目里混编 C++ 和汇编。</p>
+<h3>工具链拓展：inc2l 与 l2inc</h3>
+<p>MASM 可以用工具自己更新头文件/库：</p>
+<ul>
+<li><strong>l2inc</strong>：从 <code>.lib</code> 库生成新的 <code>.inc</code> 头文件，提取库里所有函数并写出声明</li>
+<li><strong>inc2l</strong>：把 <code>.inc</code> 头文件生成 <code>.lib</code> 库</li>
+</ul>
+<p>这让 MASM 生态不依赖官方头文件更新，社区可以自己维护。</p>
+<h2>对话框资源 ID：.rc 与 .asm 的双轨定义</h2>
+<p><code>ml.exe</code>（汇编器）和 <code>rc.exe</code>（资源编译器）是两个互不相通的独立工具，各自处理自己的文件，不会读对方的定义。同一个控件 ID 必须在两边各定义一次：</p>
+<ul>
+<li><strong>C 语法</strong>，写在 <code>resource.h</code> 里：<code>#define IDC_BUTTON1 1002</code>，给 <code>.rc</code> 用</li>
+<li><strong>MASM 语法</strong>，写在 <code>.asm</code>（或它 include 的 <code>.inc</code>）里：<code>IDC_BUTTON1 equ 1002</code>，给汇编代码用</li>
+</ul>
+<p>两边数字必须人工保持一致，但语法、文件都不同，不能共用一份。</p>
+<h3>resource.h 是谁生成的</h3>
+<p>用 VS 图形化对话框编辑器拖控件时，VS 自动同步维护两个文件：往 <code>text.rc</code> 里加控件描述（<code>PUSHBUTTON "Button3",IDC_BUTTON3,...</code>），同时往 <code>resource.h</code> 里加对应 <code>#define</code>。这两步绑定，不需手动同步。</p>
+<p>resource.h 底部的 <code>_APS_NEXT_RESOURCE_VALUE</code>/<code>_APS_NEXT_CONTROL_VALUE</code> 是 VS 编辑器自己用来记"下一个新建对象该分配什么 ID"的内部计数器，包在 <code>#ifdef APSTUDIO_INVOKED</code> 里，只在 VS 编辑器打开时生效。<code>.rc</code> 开头的 <code>TEXTINCLUDE</code>/<code>DESIGNINFO</code>/<code>AFX_DIALOG_LAYOUT</code> 同理，全是 VS 脚手架，删了不影响运行，只是没法再用 VS 图形界面正常打开这个 .rc。</p>
+<h3>main.asm 这边完全不会自动同步</h3>
+<p>VS 只负责同步 <code>.rc</code> 和 <code>resource.h</code> 之间的一致性，不管 <code>.asm</code> 项目。VS 里新增控件 → <code>.rc</code> 和 <code>resource.h</code> 自动同步，但 <code>main.asm</code> 完全不知道新 ID 存在——直到哪天在 <code>DlgProc</code> 里写 <code>cmp ..., IDC_BUTTON3</code> 才报"未定义符号"。</p>
+<p><strong>每次在 VS 里新增/修改控件后，要手动去 <code>resource.h</code> 确认新分配的数字，再去 <code>.asm</code> 里补一行对应的 <code>equ</code>。</strong> 这是纯汇编项目特有的麻烦，C++ 项目里 IDE 会自动处理。</p>
+<h3>控件 ID 的作用机制</h3>
+<p>用户点击控件时，Windows 给对话框的窗口过程发一条 <code>WM_COMMAND</code> 消息，<code>wParam</code> 的低 16 位就是触发它的控件 ID。<code>DlgProc</code> 靠比对这个值和 <code>IDC_BUTTON1</code> 等判断到底是哪个控件被操作——这是控件和代码逻辑之间唯一的连接点，Windows 不传控件名字，只传数字 ID。</p>
+<h3>为什么默认从 1002 开始</h3>
+<p>1. <strong>避开系统保留 ID</strong>：Windows 给标准对话框按钮预留了固定低位数字（<code>IDOK=1</code>、<code>IDCANCEL=2</code>、<code>IDABORT=3</code>、<code>IDRETRY=4</code>），VS 默认把自定义控件从 1000 往后分配避免撞上 2. <strong>资源 ID 和控件 ID 分开计数</strong>：对话框/图标/菜单这类"资源"用较小数字起步（101、102...），对话框内部"控件"从 1000 往上——纯可读性约定，让人一眼从数字范围判断是资源 ID 还是控件 ID</p>
+<p>数字本身可以改成任意不重复值，只要 <code>.rc</code> 和 <code>.asm</code> 两边对得上即可。</p>
+<pre><code>
+; main.asm 或 include 的 .inc 里
+IDC_BUTTON1   equ 1001
+IDC_BUTTON2   equ 1002
+IDC_EDIT1     equ 1003
+</code></pre>
+<pre><code>
+; DlgProc 里处理控件消息
+DlgProc PROC hDlg:HWND, uMsg:UINT, wParam:WPARAM, lParam:LPARAM
+    cmp  uMsg, WM_COMMAND
+    jne  default_proc
+    mov  eax, wParam
+    and  eax, 0FFFFh        ; 取低16位 = 控件ID
+    cmp  eax, IDC_BUTTON1
+    je   handle_btn1
+    cmp  eax, IDC_BUTTON2
+    je   handle_btn2
+    ...
+</code></pre>
+<h2>调试工具：OllyDbg vs x64dbg</h2>
+<p>两者都是用户态可视化调试器，核心功能（下断点、单步、查看寄存器/栈/内存/反汇编）类似，差异主要在架构支持、维护状态、脚本能力。</p>
+<p>| 维度 | OllyDbg（OD） | x64dbg | |------|--------------|--------| | 架构支持 | 仅 x86-32 | x32dbg/x64dbg 两个独立程序，原生支持64位 | | 维护状态 | 2014年左右停更 | 开源项目，持续维护 | | 脚本自动化 | 原生不具备（依赖第三方插件） | 内置脚本引擎 | | 插件生态 | 老牌生态，但停滞 | 刻意保持和OD插件API部分兼容，迁移成本低 | | 对抗现代反调试 | 较弱 | 较强，社区活跃 |</p>
+<h3>断点机制（两者原理相同）</h3>
+<p>| 断点类型 | 原理 | 优点 | 缺点 | |---------|------|------|------| | <strong>软件断点</strong> | 把目标地址指令字节替换成 <code>CC</code>（int3） | 数量不限 | 修改内存，易被自校验/反调试检测 | | <strong>硬件断点</strong> | CPU 调试寄存器 DR0~DR3 存地址，DR7 存控制位 | 不修改内存，对反调试隐蔽 | 数量有限（一般4个） | | <strong>内存断点</strong> | 修改页表权限位，让目标页变不可读/写/执行 | 监控整块内存何时被访问 | 改权限可能影响性能，粒度是页 |</p>
+<p>软件断点在内存里留下 <code>CC</code> 字节——反调试代码常扫描自身代码段是否有 <code>CC</code> 来检测调试器。硬件断点不修改内存所以更隐蔽，但数量受 DR0~DR3 限制只有 4 个。内存断点通过页权限触发，适合"不知道具体哪条指令访问这块内存"的监控场景。</p>
+<h2>CRT 在汇编程序中的注意事项</h2>
+<p>纯汇编程序如果不走标准 CRT 入口（直接以 <code>start</code> 为入口，链接时 <code>/ENTRY:start</code>），就没有 CRT 自动初始化过程，直接调用某些依赖初始化状态的 CRT 函数可能崩溃或行为异常。C 运行时库很多函数依赖全局运行时状态（如堆管理器内部数据结构）先初始化好；C 程序里真正的入口点是 <code>mainCRTStartup</code>，它在调用 <code>main</code> 之前帮你做初始化。纯汇编程序跳过这一步，直接调 CRT 函数等于在未初始化的状态下使用。</p>
+<p>如果只是需要内存操作、字符串处理这类基础功能，更稳妥的做法是直接调 Win32 API 绕开 CRT：</p>
+<p>| 需求 | CRT 函数（有初始化风险） | Win32 API（推荐） | |------|------------------------|------------------| | 内存分配 | <code>malloc</code> | <code>HeapAlloc</code> | | 字符串拷贝 | <code>strcpy</code> | <code>lstrcpyA</code> | | 字符串长度 | <code>strlen</code> | <code>lstrlenA</code> | | 内存拷贝 | <code>memcpy</code> | <code>CopyMemory</code> / <code>RtlMoveMemory</code> |</p>
+<p>绕开 CRT 直接调 Win32 API 也更贴近"理解底层在做什么"的学习方式——你写的每个调用都是显式的，没有被 CRT 的黑盒初始化遮蔽。</p>
+<h2>附：MASM32 框架定位</h2>
+<p>MASM32 框架（<code>windows.inc</code>/<code>user32.inc</code>/<code>kernel32.inc</code> 这套头文件 + 配套 lib）本质上是对 Win32 API 的一层"声明封装"：</p>
+<ul>
+<li>提供几乎所有 Win32 API 的 <code>PROTO</code> 原型声明，让你能用 <code>invoke</code> 代替手写 push 序列</li>
+<li>提供常用 Windows 数据结构定义（<code>WNDCLASSEXA</code>、<code>MSG</code>、<code>RECT</code> 等）</li>
+<li>提供系统常量的 <code>equ</code> 定义（<code>MB_OK</code>、<code>WS_OVERLAPPEDWINDOW</code> 等）</li>
+<li>配套简化常见任务的宏</li>
+</ul>
+<p>框架带来开发效率，代价是把调用约定展开、参数压栈这些底层细节藏起来了。对于"理解 32 位编程模型"的目标，建议手写 <code>extrn</code> + 手动 push 一次，<code>invoke</code> + PROTO 一次，而不是全程依赖框架。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

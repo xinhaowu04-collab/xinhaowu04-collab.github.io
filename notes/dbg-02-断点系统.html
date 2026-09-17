@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>断点系统 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">断点系统</h1>
+<div class="meta"><span class="cat">调试器</span></div>
+<article>
+<h1>断点系统</h1>
+<h2>断点方式对比</h2>
+<p>| 方式 | 原理 | 优点 | 缺点 | |------|------|------|------| | 0xCC (INT3) | 替换指令首字节为 CC，触发 EXCEPTION_BREAKPOINT | 简单、精确到字节 | 遍历 CC 可被检测 | | 其他异常指令 | CLI/INT3/INTO 等能产生异常的指令 | 绕过 CC 遍历检测 | 需要特权指令知识 | | 内存断点 | VirtualProtectEx 改页属性，触发 EXCEPTION_ACCESS_VIOLATION | 不改代码、防 CC 遍历 | 按页生效、性能开销 | | 硬件断点 | DR0-DR3 寄存器 + DR7 控制 | 精确、不影响性能 | 最多 4 个 | | 校验和检测 | 定期校验代码完整性 | 能检测所有代码修改 | 不能定位断点位置 |</p>
+<p><strong>反断点检测升级路线</strong>：遍历 0xCC → 校验和检测 → 内存断点 → 硬件断点 → 时间检测</p>
+<h2>软件断点 BP</h2>
+<h3>基本原理</h3>
+<p>软件断点把目标地址的第一个字节改成 <code>int 3</code>（机器码 CCh）。命中后必须完成：</p>
+<pre><code>
+恢复原来的1字节
+EIP 回退1字节
+执行原指令
+永久断点重新写回 CCh
+</code></pre>
+<h3>恢复长度必须是 1 字节</h3>
+<p><code>bOriginal</code> 可以使用 DWORD 保存，结构体对齐不受影响；但实际恢复机器码时必须只写 1 字节：</p>
+<pre><code>
+invoke DbgWriteProcessMemory, [esi].dwAddress, eax, 1
+</code></pre>
+<p>如果恢复 4 字节，会覆盖断点地址后面的三字节，破坏原指令流。</p>
+<h3>永久断点的重新插入</h3>
+<p>命中永久断点时不能立刻重新写 CCh，否则 EIP 回退后会再次执行 int3，形成无限断点循环。正确流程：</p>
+<pre><code>
+命中 BP
+→ 恢复原字节
+→ EIP--
+→ 记录待恢复断点 g_stepBreakPoint
+→ 设置 TF
+→ 执行一条原指令
+→ EXCEPTION_SINGLE_STEP
+→ 重新写入 CCh
+</code></pre>
+<p>一次性断点不需要重新写入。这也是 P 在 call 下一条指令处使用临时断点的基础。</p>
+<h3>已验证结果</h3>
+<p>在 00401000、0040100E 同时设置 BP 后，两处均能命中；永久断点执行原指令后能够重新插入。</p>
+<h2>内存断点原理</h2>
+<h3>核心流程</h3>
+<pre><code>
+下断点: VirtualProtectEx 改页属性为 PAGE_NOACCESS
+    ↓
+程序访问该页 → 触发 EXCEPTION_ACCESS_VIOLATION (0xC0000005)
+    ↓
+调试器收到异常 → 恢复原页属性 → 设单步(Trap Flag)
+    ↓
+程序执行触发异常的那条指令 → 单步异常
+    ↓
+调试器收到单步 → 重新设回 PAGE_NOACCESS → 程序继续
+</code></pre>
+<p>注意：不先恢复内存属性就继续执行，会在同一条访问指令上递归产生访问异常。</p>
+<h3>EXCEPTION_RECORD 关键字段</h3>
+<p>| 字段 | 含义 | |------|------| | <code>ExceptionInformation[0]</code> | 操作类型：0=读，1=写，8=执行（DEP） | | <code>ExceptionInformation[1]</code> | 被访问的内存地址（不是指令地址） | | <code>ExceptionAddress</code> | 触发异常的指令地址（EIP） |</p>
+<p>注意：ExceptionAddress 是指令地址，ExceptionInformation[1] 是指令想访问的内存地址，两者不同。</p>
+<h3>页对齐</h3>
+<p>VirtualProtectEx 按 4KB（1000h）页生效，断点地址 <code>& 0xFFFFF000</code> 取页起始地址（如 00402008 → 页首 00402000）。判断命中时先比较访问地址与断点地址是否属于同一页，再判断访问地址是否落在实际监控范围内。</p>
+<h2>BREAKPOINT 结构体设计</h2>
+<pre><code>
+BREAKPOINT STRUCT
+    dwNum      DWORD ?   ; 序号
+    dwAddress  DWORD ?   ; 地址
+    dwState    DWORD ?   ; 0=删除 1=禁用 2=启用
+    dwKind     DWORD ?   ; 0=int3断点 1=内存断点 2=硬件断点
+    bOriginal  DWORD ?   ; int3用：原数据
+    dwType     DWORD ?   ; 0=一次性 1=永久
+    dwBytes    DWORD ?   ; 内存断点用：监控大小
+    dwOldProto DWORD ?   ; 内存断点用：原页属性
+    dwMemType  DWORD ?   ; 内存断点用：1读/2写/3执行/4访问
+BREAKPOINT ENDS
+</code></pre>
+<p>用 dwKind 字段区分断点种类，共用一个结构体数组 g_bps[256]。</p>
+<h2>内存断点实现</h2>
+<h3>下断点 DbgMemBreakPoint</h3>
+<pre><code>
+DbgMemBreakPoint(addr, bytes, type, memType)
+    OpenProcess → hProcess
+    VirtualProtectEx(hProcess, addr, bytes, PAGE_NOACCESS, &amp;dwOldProto)
+    遍历 g_bps 找空槽(dwState==0)：
+        存 dwAddress, dwBytes, dwOldProto, dwType, dwMemType, dwState=2, dwKind=1
+</code></pre>
+<h3>命令解析 CmdMemBreakPoint</h3>
+<pre><code>
+bm 地址 字节数 类型 内存类型
+例: bm 401000 4 1 2  → 在401000下4字节永久写断点
+</code></pre>
+<p>参数解析：第一个 token 在字符串开头，循环前先存 lpAddress，遇到空格后存后续参数。</p>
+<h3>访问违例处理 ExecAccess</h3>
+<pre><code>
+ExecAccess:
+    dwAccessAddr = ExceptionInformation[4]   ; 被访问地址（MASM中[4]是第二个DWORD）
+    dwAccessType = ExceptionInformation[0]   ; 操作类型
+
+    遍历 g_bps:
+        if dwKind==1 &amp;&amp; dwState==2:          ; 内存断点且启用
+            页范围 = dwAddress &amp; 0xFFFFF000
+            if 触发地址在同页:
+                OpenProcess
+                VirtualProtectEx 恢复原属性(dwOldProto)
+                存 g_MemBpAddr = dwAddress
+
+                if 触发地址在断点范围内:
+                    等命令循环
+
+                CloseHandle
+                g_IsMemStep = 1
+                DbgSetStep(设Trap Flag)
+                return DBG_CONTINUE
+
+    return DBG_EXCEPTION_NOT_HANDLED          ; 没找到匹配断点
+</code></pre>
+<h3>单步处理 ExecStep</h3>
+<pre><code>
+ExecStep:
+    if g_IsMemStep == 1:                      ; 内存断点的单步
+        g_IsMemStep = 0
+        DbgFindBreakPoint(g_MemBpAddr) → esi
+        if 找到:
+            VirtualProtectEx 重设 PAGE_NOACCESS
+            CloseHandle
+        return DBG_CONTINUE                   ; 不等命令，直接放行
+
+    ; 正常单步（用户按t）
+    显示寄存器
+    等命令循环
+    return DBG_CONTINUE
+</code></pre>
+<h3>多断点与同页冲突</h3>
+<p>老师贴出的 C++ 代码只使用一组全局变量（g_BmAddress / g_BmOldProto / g_BmType / g_BmBytes），实际只支持一个 BM 重复命中，不支持多个 BM。当前汇编版使用断点数组，已经能扩展为不同页面的多个 BM。</p>
+<p>同一页面上的多个逻辑断点更复杂，因为页面保护以页为单位。完整支持需要：每个页面只保存一次原始属性；一个页面记录多个监控范围；异常时遍历该页的所有范围；页面内仍有有效断点时继续保持保护。</p>
+<h2>关键问题记录</h2>
+<h3>DbgMemBreakPoint 漏存 dwBytes</h3>
+<p>下断点时忘了把 nBytes 存到结构体的 dwBytes 字段。恢复保护时 VirtualProtectEx 大小为 0 失败，页一直 NOACCESS，指令执行不了，死循环崩溃。</p>
+<h3>MASM 数组索引是字节偏移</h3>
+<pre><code>
+ExceptionInformation[1]   ; 这是地址+1字节，不是第二个元素！
+ExceptionInformation[4]   ; 这才是第二个DWORD元素
+</code></pre>
+<p>MASM 的 <code>[n]</code> 是字节偏移，不是元素索引。DWORD 数组第二个元素要 <code>[4]</code>。</p>
+<h3>MASM .if 表达式折叠陷阱</h3>
+<pre><code>
+; 错误写法 —— MASM 会折叠成错误的寻址
+.if eax &lt; [esi].dwAddress + [esi].dwBytes
+; 编译成: cmp eax, [esi + esi*1 + 0x1C]  ← 完全错误的地址
+
+; 正确写法 —— 先算出来
+mov edx, [esi].dwAddress
+add edx, [esi].dwBytes
+.if eax &gt;= [esi].dwAddress &amp;&amp; eax &lt; edx
+</code></pre>
+<p>MASM 把同一个基址寄存器的两个结构体字段相加，当成了一个寻址表达式折叠，而不是两次内存读取再相加。<strong>两个结构体字段相加必须手动用寄存器算。</strong></p>
+<h3>invoke 覆盖 caller-saved 寄存器</h3>
+<pre><code>
+mov eax, ExceptionInformation[1]    ; eax = 被访问地址
+invoke OpenProcess, ...             ; eax = 进程句柄（覆盖了！）
+invoke VirtualProtectEx, ...        ; eax = 返回值（又覆盖了）
+.if eax &gt;= [esi].dwAddress          ; eax 已经不是地址了
+</code></pre>
+<p>stdcall 下 eax/ecx/edx 是 caller-saved，invoke 会覆盖。需要保存到 LOCAL 变量。</p>
+<h3>dwMemType 编码不一致</h3>
+<p>自定义编码 1=读/2=写/3=执行/4=访问，Windows 编码 0=读/1=写/8=执行。两套编码对不上，<code>.if eax == [esi].dwMemType</code> 永远不匹配，暂时去掉了类型判断。</p>
+<h3>g_MemBpAddr 要存断点地址</h3>
+<p>存触发地址（ExceptionInformation[1]）会导致 DbgFindBreakPoint 找不到断点（同页不同偏移）。要存断点的 dwAddress。</p>
+<h2>硬件断点 BA</h2>
+<h3>调试寄存器</h3>
+<p>| 寄存器 | 作用 | |--------|------| | DR0～DR3 | 最多保存 4 个硬件断点地址 | | DR6 | 命中状态：B0=1 表示 DR0 命中，B1/B2/B3 同理 | | DR7 | 启用、访问类型、长度配置 |</p>
+<p>DR7 每个槽位包含：Lx 局部启用位、Gx 全局启用位、RWx 访问类型、LENx 长度。</p>
+<p>常用编码：</p>
+<p>| 字段 | 值 | 含义 | |------|-----|------| | RW | 0 | 执行 | | RW | 1 | 写入 | | RW | 3 | 读写访问 | | LEN | 0 | 1 字节 | | LEN | 1 | 2 字节 | | LEN | 3 | 4 字节 |</p>
+<p>执行型硬件断点长度固定按 1 字节处理。数据断点地址应满足长度对齐要求。</p>
+<h3>线程属性</h3>
+<p>DR0～DR7 属于线程上下文，给线程 A 设置 DR0 不会自动影响线程 B。完整实现有两种语义：</p>
+<ul>
+<li><strong>线程级 BA</strong>：只修改当前线程</li>
+<li><strong>进程级 BA</strong>：给现有所有线程设置，并在创建新线程时继续应用</li>
+</ul>
+<h3>与现有断点结构结合</h3>
+<p>可继续使用现有 BREAKPOINT 数组（dwKind=2 表示硬件断点），复用地址、状态、长度、访问类型字段，另需记录硬件槽位 0～3 和所属线程 ID（若实现线程级管理）。</p>
+<h3>一次性与重复断点</h3>
+<ul>
+<li>一次性硬件断点：命中后清除对应 DR7.Lx</li>
+<li>重复执行型硬件断点：命中 → 暂时关闭对应槽位 → 设置 TF 执行当前指令 → 单步异常 → 重新开启该槽位</li>
+</ul>
+<p>老师示例只使用 DR0，并在命中后关闭 L0；如果后续没有重新启用，就只能算一次性硬件断点。</p>
+<h2>特权指令断点</h2>
+<h3>原理</h3>
+<p>用特权指令（如 CLI/STI）代替 0xCC 作为断点指令。特权指令在 Ring3 执行会触发 STATUS_PRIVILEGED_INSTRUCTION (0xC0000096)，而不是 EXCEPTION_BREAKPOINT。</p>
+<p>与 INT3 断点的区别：</p>
+<p>| | INT3 断点 | 特权指令断点 | |---|-----------|-------------| | 触发异常 | EXCEPTION_BREAKPOINT | STATUS_PRIVILEGED_INSTRUCTION | | 恢复后 EIP | 需要 -1（INT3 执行后 EIP 已越过 CC） | 不需要回退（特权指令没有执行，EIP 还指着它） |</p>
+<h3>处理流程 ExecPrivilegedIns</h3>
+<pre><code>
+ExecPrivilegedIns:
+    if ExceptionAddress == g_BpAddress:
+        恢复原指令
+        DbgGetRegs → DbgSetRegs（不需要 EIP-1）
+        if 永久断点:
+            g_IsBreakStep = TRUE
+            DbgSetStep
+        等命令循环
+</code></pre>
+<h3>cd 03 绕过 0xCC 扫描</h3>
+<p><code>int3</code> 有两种编码：<code>0xCC</code>（单字节，通常的 INT3 断点）和 <code>0xCD 0x03</code>（两字节 <code>cd 03</code>）。功能相同，但 0xCC 扫描检测通常只扫 0xCC，用 <code>cd 03</code> 做断点可以绕过这种检测。老师的代码注释里也有 <code>//WORD g_BpCode = 0x03CD;</code> 作为备选断点指令。</p>
+<h3>各种断点指令对比</h3>
+<p>| 指令 | 编码 | 触发异常码 | EIP回退 | 绕过0xCC扫描 | |------|------|-----------|---------|-------------| | int3 | CC | EXCEPTION_BREAKPOINT (0x80000003) | 需要-1 | 不能 | | cd 03 | CD 03 | EXCEPTION_BREAKPOINT (0x80000003) | 需要-2 | 能 | | cli | FA | STATUS_PRIVILEGED_INSTRUCTION (0xC0000096) | 不需要 | 能 | | sti | FB | STATUS_PRIVILEGED_INSTRUCTION (0xC0000096) | 不需要 | 能 |</p>
+<h3>反调试检测方式</h3>
+<p>| 检测方式 | 原理 | 能防住的断点 | |----------|------|-------------| | 0xCC 扫描 | 遍历代码段找 0xCC 字节 | int3 (0xCC) | | 校验和检测 | 计算代码段 CRC/累加和，与原始值比对 | 所有改代码的断点（0xCC、cd 03、cli） | | 内存断点检测 | 检查页属性是否被改为 NOACCESS | 内存断点 | | 时间检测 | RDTSC 测量指令执行时间，单步会变慢 | 所有断点 |</p>
+<p><strong>结论</strong>：0xCC 扫描只能防最基础的 int3 断点；校验和能防所有改代码的断点；只有内存断点和硬件断点不改代码，但内存断点改页属性可被检测，硬件断点最难被检测。</p>
+<h2>DbgReadProcessMemory 加 VirtualProtectEx</h2>
+<p>内存断点把页设为 PAGE_NOACCESS 后，调试器自己读内存（如 u 命令反汇编）也会触发访问违例。做法：</p>
+<pre><code>
+DbgReadProcessMemory:
+    OpenProcess → hProcess
+    VirtualProtectEx(hProcess, addr, size, PAGE_READWRITE, &amp;dwOld)  ; 临时改为可读
+    ReadProcessMemory(hProcess, addr, buf, size)
+    VirtualProtectEx(hProcess, addr, size, dwOld, &amp;dwOld)            ; 恢复原属性
+    CloseHandle
+</code></pre>
+<p>读之前临时改成 PAGE_READWRITE，读完后恢复。这样 u 命令读内存断点页就不会失败。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

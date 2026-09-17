@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>对象传递与虚函数 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">对象传递与虚函数</h1>
+<div class="meta"><span class="cat">C++ 逆向</span></div>
+<article>
+<h1>对象传递与虚函数</h1>
+<h2>对象作为函数参数</h2>
+<pre><code>
+  按值传参分三档（看是否 trivial，trivial=空操作不生成代码）：
+    ① 完全 trivial（POD，无自定义拷贝构造/析构）：
+       小对象直接字节拷进栈参区（4/8字节=1~2个push）
+       构造/析构调用一个都看不到（trivial 析构不生成代码）
+
+    ② 析构非 trivial、拷贝构造 trivial：
+       调用方拷贝一份副本（无显式ctor调用）
+       → 被调函数结束时析构这份参数副本
+       ★ &quot;函数外构造、函数内析构&quot;
+
+    ③ 有自定义拷贝构造：
+       与大小无关，一律走地址：
+       调用方抬栈开临时空间 → call 拷贝构造(临时this, &amp;源)
+       → 把临时对象地址当参数传入
+</code></pre>
+<h2>拷贝构造 vs 移动构造</h2>
+<pre><code>
+  拷贝构造：ctor(this, &amp;src)，逐成员赋值，不碰源的指针
+  移动构造：源指针成员搬到 this 后，把源指针置空
+    → 汇编铁证：源对象 +N 偏移处被写 0，就是 move（资源所有权转移）
+</code></pre>
+<h2>对象作为返回值</h2>
+<pre><code>
+  生命周期铁律：函数内构造、函数外（调用方作用域）析构
+  大对象走隐藏指针返回（调用方开空间、地址当第一参数）
+  RVO/NRVO：
+    return Point(1,2)（无名临时）：
+      直接在调用方给的隐藏指针上原地构造，拷贝构造整个消失
+    return 局部命名对象：NRVO（MSVC /O2 常做）同样原地构造
+      优化不到才走 拷贝/移动构造 + 析构局部
+  识别：调用方析构了一个&quot;自己没构造过&quot;的对象
+        （构造发生在被调函数里）→ 返回值对象
+</code></pre>
+<h2>虚函数机制</h2>
+<pre><code>
+  对象偏移0 = vptr，指向 .rdata 的函数指针数组（虚表）
+
+  构造函数：给 [this+0] 写虚表地址 ← 识别构造的强特征
+    有继承时写入多次：先基类虚表后派生虚表
+    → 两次 vptr 写入 = 继承链证据
+
+  析构函数：反向恢复，把 vptr 改回基类虚表
+  多态调用模板：
+      mov  eax, [ecx]          ; 取虚表
+      call dword ptr [eax+8]   ; 虚表偏移 4×N（N从0起）
+</code></pre>
+<h2>虚表结构与RTTI</h2>
+<pre><code>
+  找虚表的锚点：构造函数里 mov [reg], offset 虚表
+  槽位惯例：第0/1槽 = 析构代理族（scalar/vector deleting dtor）
+            → 认虚表先认析构代理
+  边界判断：连续函数指针序列；或借编译器生成的标号
+
+  RTTI（MSVC 默认开 /GR）：
+    虚表[-1]（前一格）指向 RTTI Complete Object Locator
+    → 顺藤摸到 type descriptor
+    → 内嵌类名字符串 .?AV类名@@（含命名空间）
+    → 剥掉符号的二进制也能还原类名
+
+  实操：IDA 字符串窗口(Shift+F12) 搜 &quot;.?AV&quot; 扫全程序类名
+  vs c/c++ 所有选项 启用运行时类型信息 选择关闭 可关 RTTI；
+  但用了 dynamic_cast/typeid 会强制开启
+  多继承：对象里有多个 vptr（每个含虚函数的基类一个）
+</code></pre>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

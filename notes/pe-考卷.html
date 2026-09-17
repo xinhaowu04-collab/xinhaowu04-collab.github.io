@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PE文件格式综合考卷 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">PE文件格式综合考卷</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>PE文件格式综合考卷</h1>
+<p><strong>姓名：________  日期：________  总分：100分</strong></p>
+<hr>
+<h2>一、选择题（每题2分，共30分）</h2>
+<p>1. PE文件的签名"PE\0\0"对应的十六进制值是什么？</p>
+<ul>
+<li>A. 0x4D5A</li>
+<li>B. 0x4550</li>
+<li>C. 0x5A4D</li>
+<li>D. 0x5045</li>
+</ul>
+<p>2. IMAGE_DOS_HEADER中的哪个字段指向PE头的位置？</p>
+<ul>
+<li>A. e_magic</li>
+<li>B. e_lfanew</li>
+<li>C. e_cblp</li>
+<li>D. e_minalloc</li>
+</ul>
+<p>3. 导出表位于数据目录的哪个索引位置？</p>
+<ul>
+<li>A. DataDirectory[0]</li>
+<li>B. DataDirectory[1]</li>
+<li>C. DataDirectory[5]</li>
+<li>D. DataDirectory[13]</li>
+</ul>
+<p>4. 导入表位于数据目录的哪个索引位置？</p>
+<ul>
+<li>A. DataDirectory[0]</li>
+<li>B. DataDirectory[1]</li>
+<li>C. DataDirectory[5]</li>
+<li>D. DataDirectory[12]</li>
+</ul>
+<p>5. RVA转换为FOA的正确公式是（已定位到所属节）？</p>
+<ul>
+<li>A. FOA = RVA - VirtualAddress + PointerToRawData</li>
+<li>B. FOA = PointerToRawData + (RVA - VirtualAddress)</li>
+<li>C. FOA = VirtualAddress + RVA</li>
+<li>D. FOA = RVA + ImageBase</li>
+</ul>
+<p>6. 重定位表位于数据目录的哪个索引？</p>
+<ul>
+<li>A. DataDirectory[3]</li>
+<li>B. DataDirectory[5]</li>
+<li>C. DataDirectory[6]</li>
+<li>D. DataDirectory[11]</li>
+</ul>
+<p>7. PE32中常见的重定位类型是什么？</p>
+<ul>
+<li>A. IMAGE_REL_BASED_ABSOLUTE</li>
+<li>B. IMAGE_REL_BASED_HIGH</li>
+<li>C. IMAGE_REL_BASED_HIGHLOW</li>
+<li>D. IMAGE_REL_BASED_DIR64</li>
+</ul>
+<p>8. 延迟导入表位于数据目录的哪个索引？</p>
+<ul>
+<li>A. DataDirectory[11]</li>
+<li>B. DataDirectory[12]</li>
+<li>C. DataDirectory[13]</li>
+<li>D. DataDirectory[14]</li>
+</ul>
+<p>9. TLS表位于数据目录的哪个索引？</p>
+<ul>
+<li>A. DataDirectory[7]</li>
+<li>B. DataDirectory[8]</li>
+<li>C. DataDirectory[9]</li>
+<li>D. DataDirectory[10]</li>
+</ul>
+<p>10. IMAGE_IMPORT_DESCRIPTOR数组如何结束？</p>
+<ul>
+<li>A. NumberOfImports字段指定数量</li>
+<li>B. 遇到全零描述符</li>
+<li>C. Size字段指定大小</li>
+<li>D. 固定16个描述符</li>
+</ul>
+<p>11. EAT中的RVA如何判断是函数转发？</p>
+<ul>
+<li>A. RVA为0</li>
+<li>B. RVA大于ImageBase</li>
+<li>C. RVA落在导出目录范围内</li>
+<li>D. RVA指向代码段</li>
+</ul>
+<p>12. 重定位块的TypeOffset字段是多少位？</p>
+<ul>
+<li>A. 8位</li>
+<li>B. 16位</li>
+<li>C. 32位</li>
+<li>D. 64位</li>
+</ul>
+<p>13. 从TypeOffset中提取类型的正确方法是？</p>
+<ul>
+<li>A. TypeOffset & 0x0FFF</li>
+<li>B. TypeOffset >> 12</li>
+<li>C. TypeOffset & 0xF000</li>
+<li>D. TypeOffset << 4</li>
+</ul>
+<p>14. TLS回调函数数组如何结束？</p>
+<ul>
+<li>A. 固定3个回调</li>
+<li>B. 遇到NULL指针</li>
+<li>C. TLS目录指定数量</li>
+<li>D. 回调返回FALSE</li>
+</ul>
+<p>15. Overlay是什么？</p>
+<ul>
+<li>A. PE头部的保留字段</li>
+<li>B. 节表之后的空间</li>
+<li>C. 文件正常结构末尾之外的数据</li>
+<li>D. 资源节的别名</li>
+</ul>
+<hr>
+<h2>二、填空题（每空1分，共20分）</h2>
+<p>1. PE文件的DOS签名是________（ASCII），对应的十六进制是________。</p>
+<p>2. VA的计算公式是：VA = ________ + ________。</p>
+<p>3. 导出表的三张核心表是：________ (EAT)、________ (名称指针表)、________ (名称序号表)。</p>
+<p>4. 按名称查找导出函数的索引链是：在________中找到下标i → ________[i]得到EAT下标 → ________[EAT下标]得到函数RVA。</p>
+<p>5. 重定位块头大小是________字节，包含字段________和________。</p>
+<p>6. 重定位条目数量计算公式：EntryCount = (________ - 8) / ________。</p>
+<p>7. 延迟导入描述符大小是________字节，包含________个DWORD字段。</p>
+<p>8. TLS模板的总大小计算公式：TLS块大小 = ________ - ________ + ________。</p>
+<p>9. IMAGE_IMPORT_BY_NAME结构开头2字节是________，函数名字符串从偏移________开始。</p>
+<p>10. 绑定导入表位于DataDirectory[________]，它保存的是________而不是函数地址。</p>
+<hr>
+<h2>三、判断题（每题1分，共10分）</h2>
+<p>1. PE文件中，同一个RVA在不同节中可能对应不同的FOA。（  ）</p>
+<p>2. ImageBase是PE文件加载后的实际基址。（  ）</p>
+<p>3. 所有导出函数都有名称。（  ）</p>
+<p>4. EAT项为0表示序号空洞，不对应有效导出。（  ）</p>
+<p>5. 重定位表只在DLL中需要，EXE不需要。（  ）</p>
+<p>6. OriginalFirstThunk和FirstThunk在文件中指向相同的位置。（  ）</p>
+<p>7. 延迟导入的DLL在程序启动时就会被加载。（  ）</p>
+<p>8. TLS回调函数在程序入口点之前执行。（  ）</p>
+<p>9. Dump出的内存映像可以直接作为PE文件运行。（  ）</p>
+<p>10. 函数转发的EAT RVA指向另一个模块的函数地址。（  ）</p>
+<hr>
+<h2>四、简答题（每题5分，共20分）</h2>
+<h3>1. 请解释RVA、VA和FOA三者的区别和联系，并说明如何从RVA转换为FOA。</h3>
+<p><br><br><br></p>
+<h3>2. 说明导出表中按名称查找函数的完整流程，为什么不能直接用名称表的下标访问EAT？</h3>
+<p><br><br><br></p>
+<h3>3. 解释为什么Dump出的内存映像不能直接运行，需要修复哪些内容？</h3>
+<p><br><br><br></p>
+<h3>4. 简述延迟导入和普通导入的区别，延迟导入有什么优势和劣势？</h3>
+<p><br><br><br></p>
+<hr>
+<h2>五、结构分析题（每题5分，共10分）</h2>
+<h3>1. 分析IMAGE_EXPORT_DIRECTORY结构</h3>
+<p>已知一个DLL的导出目录如下：</p>
+<pre><code>
+Base: 1
+NumberOfFunctions: 10
+NumberOfNames: 7
+AddressOfFunctions RVA: 0x2000
+AddressOfNames RVA: 0x2100
+AddressOfNameOrdinals RVA: 0x2200
+</code></pre>
+<p>回答问题：</p>
+<ul>
+<li>EAT有多少个槽位？________</li>
+<li>有多少个函数有名称？________</li>
+<li>EAT的第3项对应的导出序号是？________</li>
+<li>如果某个函数的名称在名称表中的下标是5，如何获取其函数RVA？</li>
+</ul>
+<p><br><br></p>
+<h3>2. 分析IMAGE_BASE_RELOCATION结构</h3>
+<p>已知一个重定位块的前8字节为：</p>
+<pre><code>
+00 30 00 00 18 00 00 00
+</code></pre>
+<p>回答问题（小端序）：</p>
+<ul>
+<li>PageRva是？________</li>
+<li>SizeOfBlock是？________</li>
+<li>该块有多少个重定位条目？________</li>
+<li>如果第一个TypeOffset是0x3ABC，解析出Type和Offset分别是？</li>
+</ul>
+<p><br><br></p>
+<hr>
+<h2>六、代码阅读题（共10分）</h2>
+<p>阅读以下PE加载器代码片段，回答问题：</p>
+<pre><code>
+PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)lpFileBase;
+if (pDos-&gt;e_magic != 0x5A4D) return NULL;
+
+PIMAGE_NT_HEADERS pNt = (PIMAGE_NT_HEADERS)(lpFileBase + pDos-&gt;e_lfanew);
+if (pNt-&gt;Signature != 0x4550) return NULL;
+
+DWORD imageSize = pNt-&gt;OptionalHeader.SizeOfImage;
+LPVOID lpImageBase = VirtualAlloc(NULL, imageSize, MEM_COMMIT | MEM_RESERVE,
+                                   PAGE_EXECUTE_READWRITE);
+
+memcpy(lpImageBase, lpFileBase, pNt-&gt;OptionalHeader.SizeOfHeaders);
+
+PIMAGE_SECTION_HEADER pSection = IMAGE_FIRST_SECTION(pNt);
+for (int i = 0; i &lt; pNt-&gt;FileHeader.NumberOfSections; i++) {
+    LPVOID dest = (LPVOID)((DWORD)lpImageBase + pSection[i].VirtualAddress);
+    LPVOID src = (LPVOID)((DWORD)lpFileBase + pSection[i].PointerToRawData);
+    memcpy(dest, src, pSection[i].SizeOfRawData);
+}
+</code></pre>
+<p><strong>问题</strong>：</p>
+<p>1. 这段代码在做什么？（2分）</p>
+<p><br></p>
+<p>2. 0x5A4D和0x4550分别代表什么？（2分）</p>
+<p><br></p>
+<p>3. SizeOfHeaders包含哪些内容？（2分）</p>
+<p><br></p>
+<p>4. 这段代码缺少哪些重要步骤才能让PE正常运行？（至少列举3个，4分）</p>
+<p><br><br></p>
+<hr>
+<h2>七、综合应用题（共10分）</h2>
+<h3>场景：手动解析PE导出表</h3>
+<p>已知kernel32.dll加载到内存基址0x76D00000，其导出目录RVA为0x8A2E0，大小为0x567。</p>
+<p>通过工具查看导出表头：</p>
+<pre><code>
+Base: 1
+NumberOfFunctions: 1500
+NumberOfNames: 1489
+AddressOfFunctions RVA: 0x8A310
+AddressOfNames RVA: 0x8BCA0
+AddressOfNameOrdinals RVA: 0x8E630
+</code></pre>
+<p>其中第100个名称指针指向RVA 0x8F200，该位置是字符串"CreateFileA"。 对应的NameOrdinals[100] = 0x0062（98）。 EAT[98]的值为0x1D4F0。</p>
+<p><strong>请回答以下问题</strong>（每小题2分）：</p>
+<p>1. 导出目录的VA范围是？</p>
+<p><br></p>
+<p>2. CreateFileA的导出序号是多少？</p>
+<p><br></p>
+<p>3. CreateFileA的函数VA是多少？</p>
+<p><br></p>
+<p>4. 如何判断EAT[98]是函数地址还是转发字符串？</p>
+<p><br></p>
+<p>5. 如果要按序号99直接获取函数地址，正确的计算步骤是什么？</p>
+<p><br></p>
+<hr>
+<p><strong>答题结束，请仔细检查！</strong></p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

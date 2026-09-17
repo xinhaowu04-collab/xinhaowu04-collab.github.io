@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扩展数据目录 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">扩展数据目录</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>扩展数据目录</h1>
+<p>数据目录中除导入、导出、重定位之外的八个目录：绑定导入（11）、延迟导入（13）、异常（3）、安全/证书（4）、加载配置（10）、调试（6）、架构（7）、全局指针（8）。</p>
+<h2>绑定导入表</h2>
+<p>绑定导入表位于 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT]</code>（<code>DataDirectory[11]</code>），保存绑定时使用了哪个 DLL、DLL 当时的时间戳以及相关转发模块信息。真正提前算出的函数地址主要写在普通 IAT 中；绑定导入表本身不是函数地址表，也不会代替普通导入表。</p>
+<p>| 结构 | 主要内容 | 作用 | |---|---|---| | 普通导入表 | DLL 名称、函数名称或序号 | 告诉加载器需要导入谁 | | IAT | 运行时函数地址 | 告诉程序最终调用到哪里 | | 绑定导入表 | DLL 名称、时间戳、转发模块记录 | 验证 IAT 中提前写入的地址还能否使用 |</p>
+<p>主描述符，8 字节：</p>
+<pre><code>
+typedef struct _IMAGE_BOUND_IMPORT_DESCRIPTOR
+{
+    DWORD TimeDateStamp;
+    WORD  OffsetModuleName;
+    WORD  NumberOfModuleForwarderRefs;
+} IMAGE_BOUND_IMPORT_DESCRIPTOR;
+</code></pre>
+<p>| 偏移 | 大小 | 字段 | |---:|---:|---| | <code>+00</code> | 4 | <code>TimeDateStamp</code> | | <code>+04</code> | 2 | <code>OffsetModuleName</code> | | <code>+06</code> | 2 | <code>NumberOfModuleForwarderRefs</code> |</p>
+<p>紧跟在主描述符后的转发引用结构，也是 8 字节，只是最后 2 字节由转发引用数量变成了保留字段：</p>
+<pre><code>
+typedef struct _IMAGE_BOUND_FORWARDER_REF
+{
+    DWORD TimeDateStamp;
+    WORD  OffsetModuleName;
+    WORD  Reserved;
+} IMAGE_BOUND_FORWARDER_REF;
+</code></pre>
+<p>普通导入在启动时需要加载 DLL、查找函数，再把真实地址写入 IAT；绑定导入则提前完成地址解析：把预计函数地址提前写入普通 IAT，并在绑定导入表记录 DLL 名称和 <code>TimeDateStamp</code>。程序加载时，加载器验证当前 DLL 的时间戳是否仍匹配、DLL 是否位于绑定结果所依赖的加载位置；匹配时直接使用提前写好的 IAT 地址，DLL 更新或加载条件不匹配时放弃绑定结果，按普通导入表重新解析。如果 <code>DLL_A!FunctionA</code> 实际转发到 <code>DLL_B!FunctionB</code>，<code>DLL_B</code> 的版本同样影响绑定结果，因此主描述符后要保存 <code>IMAGE_BOUND_FORWARDER_REF</code>。</p>
+<p>解析步骤：</p>
+<pre><code>
+1. 检查 NumberOfRvaAndSizes &gt; 11。
+2. 将 DataDirectory[11].VirtualAddress 按 RVA 转为 FOA。
+3. 读取 8 字节 IMAGE_BOUND_IMPORT_DESCRIPTOR。
+4. 用“绑定导入表起点 + OffsetModuleName”定位 DLL 名称。
+5. 根据 NumberOfModuleForwarderRefs 读取紧跟的转发引用。
+6. 移动到下一个主描述符。
+7. 遇到 8 字节全零主描述符或达到目录 Size 边界时结束。
+</code></pre>
+<p>下一个主描述符的步进公式：</p>
+<pre><code>
+下一主描述符
+= 当前主描述符
+ + sizeof(IMAGE_BOUND_IMPORT_DESCRIPTOR)
+ + NumberOfModuleForwarderRefs × sizeof(IMAGE_BOUND_FORWARDER_REF)
+</code></pre>
+<p>注意：</p>
+<ul>
+<li><code>OffsetModuleName</code> 不是 RVA，也不是 FOA，而是相对整个绑定导入表起点的偏移；应先加绑定表根 RVA，不能直接 <code>RvaToFoa(OffsetModuleName)</code></li>
+<li>绑定导入表不保存逐个函数名，函数需求仍由普通导入结构描述</li>
+<li>绑定导入不保证永久有效，失效后回退到普通导入解析</li>
+<li>有转发引用时，下一个主描述符不一定是当前地址 + 8</li>
+</ul>
+<p>计算示例：</p>
+<pre><code>
+绑定导入表起始 RVA = 00004000
+OffsetModuleName     = 0038
+
+DLL 名称 RVA = 00004000 + 0038 = 00004038
+</code></pre>
+<p>磁盘读取 DLL 名称时，再对 <code>00004038</code> 执行 RVA 到 FOA 转换。</p>
+<pre><code>
+当前主描述符 FOA            = 00000600
+NumberOfModuleForwarderRefs = 2
+
+下一主描述符 FOA = 00000600 + 8 + 2 × 8 = 00000618
+</code></pre>
+<h2>延迟导入表</h2>
+<p>延迟导入表位于 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT]</code>（<code>DataDirectory[13]</code>），解决什么时候加载 DLL、什么时候解析函数地址的问题：程序启动时可以暂不加载某个 DLL，第一次真正调用相关函数时才执行加载与地址解析。</p>
+<p>延迟导入描述符有两套常见命名，布局一致：</p>
+<pre><code>
+typedef struct _IMAGE_DELAYLOAD_DESCRIPTOR
+{
+    union
+    {
+        DWORD AllAttributes;
+        struct
+        {
+            DWORD RvaBased           : 1;
+            DWORD ReservedAttributes : 31;
+        };
+    } Attributes;
+
+    DWORD DllNameRVA;
+    DWORD ModuleHandleRVA;
+    DWORD ImportAddressTableRVA;
+    DWORD ImportNameTableRVA;
+    DWORD BoundImportAddressTableRVA;
+    DWORD UnloadInformationTableRVA;
+    DWORD TimeDateStamp;
+} IMAGE_DELAYLOAD_DESCRIPTOR;
+</code></pre>
+<pre><code>
+typedef struct ImgDelayDescr
+{
+    DWORD grAttrs;
+    DWORD rvaDLLName;
+    DWORD rvaHmod;
+    DWORD rvaIAT;
+    DWORD rvaINT;
+    DWORD rvaBoundIAT;
+    DWORD rvaUnloadIAT;
+    DWORD dwTimeStamp;
+} ImgDelayDescr;
+</code></pre>
+<p>每个描述符 8 个 <code>DWORD</code>，共 32 字节。一个描述符对应一个延迟 DLL，最后用 32 字节全零描述符结束。</p>
+<p>| 偏移 | <code>IMAGE_DELAYLOAD_DESCRIPTOR</code> | <code>ImgDelayDescr</code> | 含义 | |---:|---|---|---| | <code>+00</code> | <code>Attributes</code> | <code>grAttrs</code> | 属性；现代格式常用 RVA 模式 | | <code>+04</code> | <code>DllNameRVA</code> | <code>rvaDLLName</code> | DLL 名称 | | <code>+08</code> | <code>ModuleHandleRVA</code> | <code>rvaHmod</code> | 保存 <code>HMODULE</code> 的变量位置 | | <code>+0C</code> | <code>ImportAddressTableRVA</code> | <code>rvaIAT</code> | 延迟 IAT | | <code>+10</code> | <code>ImportNameTableRVA</code> | <code>rvaINT</code> | 延迟 INT | | <code>+14</code> | <code>BoundImportAddressTableRVA</code> | <code>rvaBoundIAT</code> | 可选延迟绑定 IAT | | <code>+18</code> | <code>UnloadInformationTableRVA</code> | <code>rvaUnloadIAT</code> | 可选卸载 IAT | | <code>+1C</code> | <code>TimeDateStamp</code> | <code>dwTimeStamp</code> | 延迟绑定验证时间戳 |</p>
+<p>| 表 | 保存什么 | |---|---| | 延迟 INT | 函数名称或序号，即“找谁” | | 延迟 IAT | 当前调用地址，即“去哪里” |</p>
+<p>PE32 的延迟 INT 表项仍可按 <code>IMAGE_THUNK_DATA32</code> 理解：最高位为 1 表示按序号导入；最高位为 0 时，低 31 位指向 <code>IMAGE_IMPORT_BY_NAME</code>。</p>
+<p>普通导入与延迟导入的时间线：</p>
+<pre><code>
+普通导入：
+进程启动 → 加载 DLL → 查找函数 → 填普通 IAT → 进入入口点
+
+延迟导入：
+进程启动 → 暂不解析目标 DLL
+        → 第一次调用 → 延迟加载桩
+        → LoadLibrary → GetProcAddress
+        → 写延迟 IAT → 调用真实函数
+</code></pre>
+<p>启动时，延迟 IAT 通常保存链接器生成的延迟加载桩地址。第一次调用时，默认辅助逻辑通常由 <code>__delayLoadHelper2</code> 完成：</p>
+<pre><code>
+读取当前延迟描述符和 IAT 表项
+  ↓
+检查 ModuleHandleRVA 指向的变量
+  ↓
+句柄为空？
+  ├─ 是：LoadLibrary(DLL 名称)，保存 HMODULE
+  └─ 否：复用已有 HMODULE
+  ↓
+根据延迟 INT 判断按名称还是按序号导入
+  ↓
+GetProcAddress
+  ↓
+真实函数地址写回延迟 IAT
+  ↓
+进入真实函数
+</code></pre>
+<p>同一 DLL 中其他尚未调用的延迟函数，第一次调用时仍要解析自己的地址，但 DLL 通常已加载，无需再次 <code>LoadLibrary</code>。延迟导入适用于可能不会使用、很晚才使用或属于可选功能的 DLL；代价是缺少 DLL 或函数的错误会从程序启动时推迟到第一次调用时。</p>
+<p>解析描述符：</p>
+<pre><code>
+1. 检查 NumberOfRvaAndSizes &gt; 13。
+2. 将 DataDirectory[13].VirtualAddress 从 RVA 转为 FOA。
+3. 每次读取 32 字节描述符。
+4. 现代常见 RvaBased=1 时，各地址字段按 RVA 定位。
+5. DllNameRVA → DLL 名称。
+6. ImportNameTableRVA → 延迟 INT。
+7. ImportAddressTableRVA → 延迟 IAT。
+8. ModuleHandleRVA → 保存 HMODULE 的变量。
+9. 可选解析 Bound IAT 和 Unload IAT。
+10. 遇到全零描述符或达到目录 Size 时结束。
+</code></pre>
+<p>解析失败分为两类：<code>LoadLibrary</code> 失败是 DLL 不存在或无法加载；<code>GetProcAddress</code> 失败是 DLL 存在但没有目标名称或序号。默认辅助函数可能抛出相应异常，也可通过延迟加载通知钩子改变处理方式。</p>
+<h3>延迟卸载</h3>
+<p>延迟卸载不是长时间不用便自动卸载，而是显式恢复当前延迟导入状态。链接时启用 <code>/DELAY:UNLOAD</code>，程序可请求卸载：</p>
+<pre><code>
+__FUnloadDelayLoadedDLL2(&quot;USER32.dll&quot;);
+</code></pre>
+<p>卸载所需三项：</p>
+<p>| 字段/表 | 作用 | |---|---| | <code>ModuleHandleRVA</code> | 取得并清空 DLL 句柄 | | <code>ImportAddressTableRVA</code> | 当前正在使用、已被改写的延迟 IAT | | <code>UnloadInformationTableRVA</code> | 延迟 IAT 初始状态的精确副本 |</p>
+<p>逻辑：</p>
+<pre><code>
+找到目标延迟描述符
+  ↓
+把 Unload IAT 复制回 Delay IAT
+  ↓
+清空模块句柄变量
+  ↓
+FreeLibrary(hModule)
+</code></pre>
+<p>下一次调用时，延迟 IAT 又指向加载桩，因此重新执行延迟加载。<code>FreeLibrary</code> 只是减少引用计数；若还有其他引用，DLL 不一定立即从进程中消失。</p>
+<p>状态变化示例：</p>
+<p>| 时刻 | 延迟 IAT | 卸载 IAT | 模块句柄 | |---|---|---|---| | 启动 | <code>00401080</code> 延迟桩 | <code>00401080</code> 副本 | <code>0</code> | | 第一次调用后 | <code>76ABCDEF</code> 真实地址 | 仍为 <code>00401080</code> | 有效句柄 | | 延迟卸载后 | 恢复 <code>00401080</code> | 仍为 <code>00401080</code> | 清零 | | 再次调用后 | 再次写入真实地址 | 保持原副本 | 重新获得 |</p>
+<p>注意：</p>
+<ul>
+<li>延迟导入不是完全不加载 DLL；如果普通导入或其他模块也需要它，DLL 可能已被加载</li>
+<li><code>ModuleHandleRVA</code> 是保存句柄的变量位置，不是句柄值本身</li>
+<li>延迟 IAT 在第一次调用后会被真实地址覆盖；延迟 INT 通常不变</li>
+<li><code>Attributes.RvaBased=1</code> 是现代常见格式；解析器仍应检查属性，不应无条件假设旧格式相同</li>
+<li>延迟绑定 IAT 是可选结构，时间戳或加载条件不匹配时需要重新解析</li>
+<li>延迟卸载不是删除描述符、INT 或 IAT，只是恢复运行时状态</li>
+<li>只调用 <code>FreeLibrary</code> 而不恢复延迟 IAT，会留下可能已经失效的函数地址</li>
+<li><code>/DELAY:NOUNLOAD</code> 或未启用 <code>/DELAY:UNLOAD</code> 时，没有可靠的显式卸载支持</li>
+<li>卸载前必须保证无线程仍在执行 DLL 代码，也不能继续使用缓存的函数地址或 DLL 内部数据指针</li>
+</ul>
+<p>计算示例：</p>
+<pre><code>
+ImageBase       = 00400000
+延迟 IAT 的 RVA = 00005400
+延迟 IAT 的 VA  = 00400000 + 00005400 = 00405400
+
+第一次调用前：
+[00405400] = 00401080    ; 延迟加载桩
+
+第一次解析后：
+[00405400] = 76ABCDEF    ; 假设的 MessageBoxA 真实地址
+</code></pre>
+<pre><code>
+第一次调用：
+call [00405400]
+  → 00401080
+  → LoadLibrary(&quot;USER32.dll&quot;)
+  → GetProcAddress(&quot;MessageBoxA&quot;)
+  → [00405400] = 76ABCDEF
+  → 调用 76ABCDEF
+
+第二次调用：
+call [00405400]
+  → 76ABCDEF
+</code></pre>
+<h2>异常表</h2>
+<p>异常表位于 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION]</code>（<code>DataDirectory[3]</code>），不是发生过哪些异常的日志，而是让系统在异常发生时找到当前函数、恢复调用者栈和寄存器，并定位异常处理信息。其具体结构由 CPU 架构决定，不能把所有 PE 都按同一种结构解析。</p>
+<p>| 架构 | 主要机制 | |---|---| | x86 / <code>014Ch</code> | 栈上的 SEH 链，<code>DataDirectory[3]</code> 常为空 | | x64 / <code>8664h</code> | <code>.pdata</code> 中的 <code>RUNTIME_FUNCTION</code> 表驱动展开 | | ARM/ARM64 | 各自的压缩异常表格式，不能套用 x64 布局 |</p>
+<p>x86 的异常注册记录可以概念化为：</p>
+<pre><code>
+struct EXCEPTION_REGISTRATION_RECORD
+{
+    EXCEPTION_REGISTRATION_RECORD* Next;
+    PVOID Handler;
+};
+</code></pre>
+<p>每项 8 字节；线程的 SEH 链头通过 <code>FS:[0]</code> 取得，链尾常用 <code>FFFFFFFF</code> 表示。</p>
+<p>x64 的 <code>.pdata</code> 常由连续的 12 字节 <code>RUNTIME_FUNCTION</code> 组成，三个字段都是 RVA，表项通常按 <code>BeginAddress</code> 排序：</p>
+<pre><code>
+typedef struct _RUNTIME_FUNCTION
+{
+    DWORD BeginAddress;
+    DWORD EndAddress;
+    DWORD UnwindInfoAddress;
+} RUNTIME_FUNCTION;
+</code></pre>
+<p>x86 发生异常时大致沿栈上的 SEH 链分派：</p>
+<pre><code>
+异常发生
+  ↓
+从 FS:[0] 取得当前线程 SEH 链
+  ↓
+按 Next 依次尝试 Handler
+  ↓
+某处理器成功：恢复执行
+无人处理：程序终止
+</code></pre>
+<p>x64 采用表驱动方式：</p>
+<pre><code>
+异常 RIP - ImageBase = 异常 RVA
+  ↓
+在 .pdata 查找覆盖该 RVA 的 RUNTIME_FUNCTION
+  ↓
+UnwindInfoAddress 指向 .xdata 中的 UNWIND_INFO
+  ↓
+读取 UNWIND_CODE，恢复栈与非易失寄存器
+  ↓
+调用异常处理器，或继续展开到调用者
+</code></pre>
+<p><code>UNWIND_INFO</code> 开头描述版本、标志、序言长度、展开码数量、帧寄存器和偏移，后面是 <code>UNWIND_CODE[]</code>，还可能附带异常处理器 RVA 和语言相关数据。例如函数序言：</p>
+<pre><code>
+push rbx
+sub  rsp, 40h
+</code></pre>
+<p>展开时要反向恢复：增加 <code>RSP</code>、恢复 <code>RBX</code>、取得返回地址，再回到调用者。可以记成：</p>
+<pre><code>
+.pdata：当前地址属于哪个函数？
+.xdata：这个函数的栈怎样恢复？
+</code></pre>
+<p>解析步骤：</p>
+<pre><code>
+1. 先读 FileHeader.Machine。
+2. 再决定异常目录的解析器。
+3. x86：不要强行套 RUNTIME_FUNCTION；关注运行时 SEH 链和加载配置中的 SafeSEH。
+4. x64：目录 RVA → FOA，按 12 字节读取 RUNTIME_FUNCTION。
+5. 验证 BeginAddress &lt; EndAddress，范围有序且位于映像内。
+6. 用 UnwindInfoAddress 定位 .xdata，按 UNWIND_INFO 版本和标志解析。
+7. 所有数量、可选字段和链式信息都要做目录/文件边界检查。
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>异常表不是异常日志</li>
+<li>x86 的 <code>DataDirectory[3]</code> 经常为 0，并不等于 x86 不支持异常</li>
+<li>12 字节 <code>RUNTIME_FUNCTION</code> 是 x64 重点格式，不是普通 x86 PE32 的统一格式</li>
+<li>x86 SafeSEH 表在加载配置目录中，不是 <code>DataDirectory[3]</code></li>
+<li>调试目录中的 <code>IMAGE_DEBUG_TYPE_EXCEPTION</code> 也不等于异常数据目录</li>
+<li><code>.pdata</code>、<code>.xdata</code> 是常见节名；解析时以数据目录和地址为准</li>
+<li>x64 找不到 <code>RUNTIME_FUNCTION</code> 时，简单叶函数可按叶函数规则取得返回地址，但不能把所有缺失条目都草率视为合法</li>
+</ul>
+<p>计算示例：</p>
+<pre><code>
+ImageBase = 0000000140000000
+异常 RIP  = 0000000140001235
+
+异常 RVA = 0000000140001235 - 0000000140000000 = 00001235
+</code></pre>
+<p>假设 <code>.pdata</code> 表项 <code>BeginAddress = 00001200</code>、<code>EndAddress = 00001280</code>、<code>UnwindInfoAddress = 00003000</code>。因为 <code>00001200 <= 00001235 < 00001280</code>，异常属于该函数，展开信息 VA 为 <code>0000000140000000 + 00003000 = 0000000140003000</code>。</p>
+<h2>安全目录与证书表</h2>
+<p>安全目录和证书表是同一套数据的两个层次：</p>
+<pre><code>
+安全目录 DataDirectory[4]
+  ├─ VirtualAddress：证书表的磁盘 FOA
+  └─ Size：证书表总大小
+        ↓
+一个或多个 WIN_CERTIFICATE 变长记录
+</code></pre>
+<p>入口是 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY]</code>（<code>DataDirectory[4]</code>）。字段虽然叫 <code>VirtualAddress</code>，含义却是文件偏移 FOA，而不是 RVA；证书表通常不作为映像内容映射进内存。</p>
+<p>证书记录：</p>
+<pre><code>
+typedef struct _WIN_CERTIFICATE
+{
+    DWORD dwLength;
+    WORD  wRevision;
+    WORD  wCertificateType;
+    BYTE  bCertificate[1];
+} WIN_CERTIFICATE;
+</code></pre>
+<p>固定头 8 字节，<code>bCertificate</code> 变长：</p>
+<p>| 偏移 | 大小 | 字段 | |---:|---:|---| | <code>+00</code> | 4 | <code>dwLength</code>，当前记录总长度 | | <code>+04</code> | 2 | <code>wRevision</code> | | <code>+06</code> | 2 | <code>wCertificateType</code> | | <code>+08</code> | 变长 | <code>bCertificate</code> |</p>
+<p>常见值：</p>
+<p>| 字段 | 值 | 含义 | |---|---:|---| | <code>wRevision</code> | <code>0100h</code> | <code>WIN_CERT_REVISION_1_0</code> | | <code>wRevision</code> | <code>0200h</code> | 常见的 <code>WIN_CERT_REVISION_2_0</code> | | <code>wCertificateType</code> | <code>0001h</code> | X.509 类型 | | <code>wCertificateType</code> | <code>0002h</code> | 常见 PKCS#7 SignedData | | <code>wCertificateType</code> | <code>0003h</code> | 保留 | | <code>wCertificateType</code> | <code>0004h</code> | 特定堆栈签名类型 |</p>
+<p>安全/证书表用于验证文件完整性、识别发布者以及按信任策略判断签名链，不负责加密整个 PE，也不能证明程序行为绝对安全。Authenticode 签名概念流程：</p>
+<pre><code>
+计算 PE 的 Authenticode 摘要
+  ↓
+发布者使用私钥签名摘要
+  ↓
+生成 PKCS#7 SignedData
+  ↓
+写入 WIN_CERTIFICATE
+  ↓
+更新 DataDirectory[4]
+</code></pre>
+<p><code>bCertificate</code> 中可能包含签名者证书、发布者信息、摘要算法、文件摘要、签名结果、中间证书链和时间戳签名。发布者私钥不会写进 PE，PE 中只有公钥证书及用私钥产生的签名。</p>
+<p>验证时：</p>
+<pre><code>
+从 DataDirectory[4] 读取证书表
+  ↓
+解析 PKCS#7、取得证书与签名
+  ↓
+重新计算 PE 摘要
+  ↓
+用证书公钥验证签名
+  ↓
+结合证书链和信任策略判断结果
+</code></pre>
+<p>计算 Authenticode 摘要时，要对会因签名写入而变化的区域做特殊排除：<code>OptionalHeader.CheckSum</code>、证书表的数据目录项、证书表数据本身。</p>
+<p>证书表由一个或多个 8 字节对齐的变长记录组成，没有全零终止项：</p>
+<pre><code>
+证书表起点 = DataDirectory[4].VirtualAddress  // 直接当 FOA
+证书表终点 = 起点 + DataDirectory[4].Size
+
+当前记录长度 = dwLength
+当前记录对齐跨度 = (dwLength + 7) &amp; ~7
+下一记录 FOA = 当前记录 FOA + 对齐跨度
+</code></pre>
+<p>解析检查：</p>
+<pre><code>
+1. VirtualAddress 和 Size 是否非零。
+2. FOA + Size 是否超过文件大小。
+3. dwLength 是否至少为 8。
+4. dwLength 是否落在证书表剩余范围内。
+5. 对齐后的下一记录是否越界或不前进。
+6. 持续到目录 Size 边界，不依赖全零记录。
+7. 基础 PE 解析器可先显示 FOA、长度、版本和类型；PKCS#7 深层解析属于 ASN.1/密码学层。
+</code></pre>
+<p>注意：</p>
+<ul>
+<li><code>DataDirectory[4].VirtualAddress</code> 是 PE 数据目录中特殊的 FOA，不要做 RVA 到 FOA 转换，也不要加 <code>ImageBase</code> 在内存映像中寻找证书表</li>
+<li>安全目录是地址牌，证书表是地址牌指向的数据</li>
+<li>证书表不是 SafeSEH 表；SafeSEH 位于加载配置目录</li>
+<li><code>bCertificate[1]</code> 表示变长尾部，不是证书只能有 1 字节</li>
+<li>每条 <code>WIN_CERTIFICATE</code> 按 8 字节对齐，<code>dwLength</code> 与步进后的对齐跨度可能不同</li>
+<li>有签名不等于程序一定安全；签名主要证明内容与签名匹配、发布者身份及信任链状态</li>
+<li>证书表常在最后一个节之后，但不能把常见位置当成绝对规则，应以目录 FOA 和 Size 为准</li>
+</ul>
+<p>计算示例 A：</p>
+<pre><code>
+DataDirectory[4].VirtualAddress = 0000A600  // 直接是 FOA
+DataDirectory[4].Size           = 000005B0
+
+当前记录 FOA = 0000A600
+dwLength      = 000002A3
+对齐跨度      = 000002A8
+下一记录 FOA = 0000A600 + 000002A8 = 0000A8A8
+</code></pre>
+<p>计算示例 B：</p>
+<pre><code>
+证书表 FOA  = 0000A600
+证书表 Size = 00000400
+证书表终点  = 0000AA00
+
+第一条：
+dwLength         = 000003A5
+wRevision        = 0200
+wCertificateType = 0002
+
+对齐跨度         = 000003A8
+下一记录 FOA     = 0000A9A8
+</code></pre>
+<h2>加载配置表</h2>
+<p>加载配置表位于 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG]</code>（<code>DataDirectory[10]</code>）。它不是用来决定哪些节加载进内存的表，也不负责加载 DLL，而是编译器、链接器交给 Windows 加载器和运行库的一组运行时配置及安全信息。常见内容包括 <code>/GS</code> 安全 Cookie、x86 SafeSEH、CFG、进程堆配置、代码完整性以及更现代的安全缓解元数据。</p>
+<p>PE32 常见结构前半部分：</p>
+<pre><code>
+typedef struct _IMAGE_LOAD_CONFIG_DIRECTORY32
+{
+    DWORD Size;
+    DWORD TimeDateStamp;
+    WORD  MajorVersion;
+    WORD  MinorVersion;
+    DWORD GlobalFlagsClear;
+    DWORD GlobalFlagsSet;
+    DWORD CriticalSectionDefaultTimeout;
+    DWORD DeCommitFreeBlockThreshold;
+    DWORD DeCommitTotalFreeThreshold;
+    DWORD LockPrefixTable;
+    DWORD MaximumAllocationSize;
+    DWORD VirtualMemoryThreshold;
+    DWORD ProcessHeapFlags;
+    DWORD ProcessAffinityMask;
+    WORD  CSDVersion;
+    WORD  DependentLoadFlags;
+    DWORD EditList;
+    DWORD SecurityCookie;
+    DWORD SEHandlerTable;
+    DWORD SEHandlerCount;
+    DWORD GuardCFCheckFunctionPointer;
+    DWORD GuardCFDispatchFunctionPointer;
+    DWORD GuardCFFunctionTable;
+    DWORD GuardCFFunctionCount;
+    DWORD GuardFlags;
+    // 新版本后面还有代码完整性、动态重定位、EHContinuation、XFG 等字段
+} IMAGE_LOAD_CONFIG_DIRECTORY32;
+</code></pre>
+<p>它是可变长度结构，而不是全零结束的数组；第一字段 <code>Size</code> 决定当前文件实际包含到哪里。结构随系统与工具链演进不断增长：旧文件可能只有基础字段，新文件还可能包含 SafeSEH、CFG、EH Continuation、XFG 等。解析时必须同时限制于：结构内部 <code>Size</code>、<code>DataDirectory[10].Size</code>、文件或映像剩余边界。</p>
+<h3>/GS SecurityCookie</h3>
+<p><code>SecurityCookie</code> 保存的是安全 Cookie 变量的 VA，不是 Cookie 数值本身。对可能被栈溢出影响的函数，编译器在进入函数时将 Cookie 相关值放入栈帧，返回前重新计算并比较；不同意味着栈可能被破坏，进入安全失败处理。</p>
+<h3>x86 SafeSEH</h3>
+<pre><code>
+DWORD SEHandlerTable;  // 表的 VA
+DWORD SEHandlerCount;  // 表项数量
+</code></pre>
+<p><code>SEHandlerTable</code> 指向已排序的合法异常处理器 RVA 列表。x86 异常分派取得处理器地址后，可检查它是否属于白名单，从而降低 SEH 处理器被篡改后的控制流劫持风险。</p>
+<h3>CFG</h3>
+<pre><code>
+GuardCFCheckFunctionPointer
+GuardCFDispatchFunctionPointer
+GuardCFFunctionTable
+GuardCFFunctionCount
+GuardFlags
+</code></pre>
+<p>当程序执行间接调用（例如 <code>call eax</code>），CFG 用元数据检查目标是否是合法间接调用目标，不合法时阻止调用。现代 CFG 表项可能携带附加元数据，不能永远假定每项固定 4 字节；实际解释还受 <code>GuardFlags</code> 相关位影响。</p>
+<p>解析步骤：</p>
+<pre><code>
+1. 检查 NumberOfRvaAndSizes &gt; 10。
+2. DataDirectory[10].VirtualAddress 按正常 RVA 转 FOA。
+3. 判断 PE32 还是 PE32+。
+4. 先确认至少可读取 Size。
+5. 用 min(内部 Size, 目录 Size, 剩余边界) 决定可读范围。
+6. 对存在于该 Size 范围内的字段再解释。
+7. SecurityCookie、SEHandlerTable、GuardCFFunctionTable 等内部指针字段按 VA 处理：先减 ImageBase 得 RVA，再转 FOA。
+8. 检查所有子表计数乘法、步进和范围是否溢出或越界。
+</code></pre>
+<p>运行时按场景使用不同配置：</p>
+<pre><code>
+函数返回       → /GS Cookie 检查
+x86 异常分派   → SafeSEH 合法处理器检查
+间接 call/jmp  → CFG 目标检查
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>加载配置表不负责加载节或 DLL</li>
+<li>不能把旧 PE 强制解释成当前 SDK 最大结构；必须先看 <code>Size</code></li>
+<li>目录入口是 RVA，但结构内部很多指针是 VA</li>
+<li><code>SecurityCookie</code> 字段是 Cookie 变量地址，不是 Cookie 值</li>
+<li><code>SEHandlerTable</code> 字段本身是 VA；表内每个处理器又是 RVA，这是两层不同含义</li>
+<li>SafeSEH 表不等于 <code>DataDirectory[3]</code> 异常表</li>
+<li>CFG 不是只检查一种 <code>call eax</code> 指令，该指令只是用来说明间接控制流</li>
+<li><code>DataDirectory[10]</code> 和证书目录不同；前者是 RVA，后者的地址字段是 FOA</li>
+</ul>
+<p>计算示例：</p>
+<pre><code>
+文件中的加载配置 Size = 00000048
+当前 SDK 结构体大小   = 000000C0
+</code></pre>
+<p>只能读取前 <code>48h</code> 字节，不能访问 <code>48h</code> 之后的字段。</p>
+<pre><code>
+ImageBase      = 00400000
+SecurityCookie = 00406000  // VA
+
+Cookie RVA = 00406000 - 00400000 = 00006000
+</code></pre>
+<pre><code>
+SEHandlerTable = 00407000  // 表的 VA
+SEHandlerCount = 3
+
+表项 RVA：
+00001200 → 处理器 VA 00401200
+00001500 → 处理器 VA 00401500
+00001900 → 处理器 VA 00401900
+</code></pre>
+<h2>调试表</h2>
+<p>调试表位于 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG]</code>（<code>DataDirectory[6]</code>），告诉调试器或符号工具：PE 带有哪些调试数据、数据多大、在文件和映像中的位置，以及怎样匹配 PDB。它通常不参与程序正常加载和执行；缺少 PDB 时程序仍可运行，只是函数名、源码行、局部变量和类型信息可能不完整。</p>
+<p>目录 <code>VirtualAddress</code> 是 <code>IMAGE_DEBUG_DIRECTORY</code> 数组的 RVA。数组没有全零终止项，数量按目录 <code>Size</code> 计算。</p>
+<pre><code>
+typedef struct _IMAGE_DEBUG_DIRECTORY
+{
+    DWORD Characteristics;
+    DWORD TimeDateStamp;
+    WORD  MajorVersion;
+    WORD  MinorVersion;
+    DWORD Type;
+    DWORD SizeOfData;
+    DWORD AddressOfRawData;
+    DWORD PointerToRawData;
+} IMAGE_DEBUG_DIRECTORY;
+</code></pre>
+<p>每项 28 字节（<code>1Ch</code>）：</p>
+<p>| 偏移 | 大小 | 字段 | |---:|---:|---| | <code>+00</code> | 4 | <code>Characteristics</code>，保留，通常 0 | | <code>+04</code> | 4 | <code>TimeDateStamp</code> | | <code>+08</code> | 2 | <code>MajorVersion</code> | | <code>+0A</code> | 2 | <code>MinorVersion</code> | | <code>+0C</code> | 4 | <code>Type</code> | | <code>+10</code> | 4 | <code>SizeOfData</code> | | <code>+14</code> | 4 | <code>AddressOfRawData</code> | | <code>+18</code> | 4 | <code>PointerToRawData</code> |</p>
+<p>常见 <code>Type</code>：</p>
+<p>| 值 | 类型 | 说明 | |---:|---|---| | <code>0</code> | <code>UNKNOWN</code> | 未知 | | <code>1</code> | <code>COFF</code> | 旧式 COFF 调试信息 | | <code>2</code> | <code>CODEVIEW</code> | 常见 PDB 身份信息 | | <code>3</code> | <code>FPO</code> | x86 帧指针省略信息 | | <code>4</code> | <code>MISC</code> | 其他调试信息 | | <code>5</code> | <code>EXCEPTION</code> | <code>.pdata</code> 副本类调试数据 | | <code>7</code> | <code>OMAP_TO_SRC</code> | 映像地址到源映像地址映射 | | <code>8</code> | <code>OMAP_FROM_SRC</code> | 源映像地址到映像地址映射 | | <code>16</code> | <code>REPRO</code> | 可重现构建信息 | | <code>17</code> | Embedded Portable PDB | 嵌入式便携 PDB | | <code>19</code> | PDB Checksum | PDB 内容校验信息 | | <code>20</code> | Extended DLL Characteristics | 扩展 DLL 特征 |</p>
+<p>调试目录是两层结构：第一层是 <code>IMAGE_DEBUG_DIRECTORY</code> 数组，每项给出 Type、大小和地址；第二层是每项指向的实际调试数据。</p>
+<p>最常见的 <code>Type=2</code> CodeView 数据以机器字节 <code>52 53 44 53</code>（ASCII <code>RSDS</code>）开头，可概念化为：</p>
+<pre><code>
+struct CV_INFO_PDB70
+{
+    DWORD Signature;      // &quot;RSDS&quot;
+    GUID  Guid;           // 16 字节
+    DWORD Age;
+    char  PdbFileName[];  // 以 \0 结尾
+};
+</code></pre>
+<p>| 偏移 | 大小 | 内容 | |---:|---:|---| | <code>+00</code> | 4 | <code>RSDS</code> | | <code>+04</code> | 16 | PDB GUID | | <code>+14</code> | 4 | Age | | <code>+18</code> | 变长 | PDB 路径 |</p>
+<p>调试器读取 GUID、Age 和路径提示，从本地目录或符号服务器寻找 PDB，并用 GUID + Age 判断是否匹配。PDB 路径本身不是可靠的匹配凭据。</p>
+<p>解析步骤：</p>
+<pre><code>
+1. 检查 NumberOfRvaAndSizes &gt; 6。
+2. 将 DataDirectory[6].VirtualAddress 从 RVA 转 FOA。
+3. 数量 = DataDirectory[6].Size / 1Ch。
+4. 逐个读取 IMAGE_DEBUG_DIRECTORY。
+5. 解析磁盘文件中的调试数据时，直接使用 PointerToRawData。
+6. 解析内存映像时，使用 AddressOfRawData 这个 RVA。
+7. 对 Type=CODEVIEW 检查 SizeOfData、RSDS、GUID、Age 和路径终止符。
+</code></pre>
+<p>边界检查：目录 Size 至少为 <code>1Ch</code> 且最好能被 <code>1Ch</code> 整除；<code>PointerToRawData + SizeOfData</code> 不得超过文件；CodeView 数据至少能容纳固定的 24 字节前缀；PDB 路径必须在 <code>SizeOfData</code> 范围内遇到 <code>\0</code>。</p>
+<p>注意：</p>
+<ul>
+<li><code>PointerToRawData</code> 已经是 FOA，不能再做 RVA 到 FOA</li>
+<li><code>AddressOfRawData</code> 是映像中的 RVA，数据没映射时可以为 0</li>
+<li><code>SizeOfData</code> 不包含 28 字节 <code>IMAGE_DEBUG_DIRECTORY</code> 自身</li>
+<li>调试表不是 PDB 本体；普通本地 VC++ PE 常只保存 PDB 身份与路径提示</li>
+<li>.NET 等场景可用 Type 17 嵌入 Portable PDB，但不能据此认为所有 <code>RSDS</code> 都包含完整 PDB</li>
+<li>Release 版本也可能有调试目录；有调试目录而找不到 PDB，程序仍可运行</li>
+<li><code>TimeDateStamp</code> 在可重现构建中可能由哈希相关值生成，不一定是真实编译时间</li>
+<li><code>MajorVersion/MinorVersion</code> 是相应调试数据格式信息，不是 Windows 或程序版本</li>
+<li><code>Type=5</code> 的调试异常数据不等于 <code>DataDirectory[3]</code> 异常目录</li>
+</ul>
+<p>计算示例：</p>
+<pre><code>
+DataDirectory[6].VirtualAddress = 00003000
+DataDirectory[6].Size           = 00000038
+
+目录数量 = 00000038 / 1Ch = 2
+
+00003000 RVA → 00001800 FOA
+第 1 项 FOA = 00001800
+第 2 项 FOA = 00001800 + 1Ch = 0000181C
+</code></pre>
+<p>第 1 项数据：</p>
+<pre><code>
+Type             = 00000002  // CodeView
+SizeOfData       = 00000070
+AddressOfRawData = 00005100  // RVA
+PointerToRawData = 00002D00  // FOA
+</code></pre>
+<p>磁盘解析直接读 <code>fileBuffer + 00002D00</code>。RSDS 身份示例：</p>
+<pre><code>
+52 53 44 53
+GUID = {11223344-5566-7788-99AA-BBCCDDEEFF00}
+Age  = 1
+Path = C:\build\project\app.pdb
+</code></pre>
+<h2>架构目录</h2>
+<p>架构目录位于 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_ARCHITECTURE]</code>（<code>DataDirectory[7]</code>），只有普通 <code>IMAGE_DATA_DIRECTORY</code> 的 <code>VirtualAddress</code> 和 <code>Size</code> 两个字段。在当前标准 PE 中该项是保留项，要求为 0，没有可统一继续解析的结构。</p>
+<p>PE 早期预留了一个与特定 CPU 架构相关的数据槽位，但后来没有形成当前通用的结构，因此规范保留并置零。部分旧头文件或库把索引 7 称为 <code>IMAGE_DIRECTORY_ENTRY_COPYRIGHT</code> 或 <code>CopyrightTableDirectory</code>，它们仍指向同一个目录索引。</p>
+<p>解析处理：</p>
+<pre><code>
+1. 检查 NumberOfRvaAndSizes &gt; 7。
+2. 读取 DataDirectory[7] 原始值。
+3. VA=0 且 Size=0：显示“保留/不存在”。
+4. 任一非零：显示原始值并标记“保留项非零”。
+5. 不按虚构的固定结构继续展开。
+</code></pre>
+<p>判断 CPU 架构要看 <code>IMAGE_FILE_HEADER.Machine</code>：</p>
+<p>| <code>Machine</code> | 架构 | |---:|---| | <code>014Ch</code> | x86 / I386 | | <code>8664h</code> | x64 / AMD64 | | <code>01C0h</code> | ARM | | <code>AA64h</code> | ARM64 |</p>
+<p>注意：</p>
+<ul>
+<li>架构数据目录不是判断 x86/x64 的位置，应读 <code>FileHeader.Machine</code></li>
+<li>它当前没有通用表结构，不要发明结构体或固定数组</li>
+<li>保留项非零可能来自旧工具、非标准私有数据、壳/保护程序或文件损坏；仅凭非零不能判断恶意</li>
+<li><code>Copyright</code> 与 <code>Architecture</code> 是同一索引在不同接口中的历史命名，不是两张表</li>
+</ul>
+<h2>全局指针目录</h2>
+<p>全局指针目录位于 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_GLOBALPTR]</code>（<code>DataDirectory[8]</code>）。名字虽然带表，实际上不是保存所有全局变量地址的指针数组，而是直接给出某些架构的全局指针寄存器（GP）所使用的 RVA：</p>
+<p>| 字段 | 特殊含义 | |---|---| | <code>VirtualAddress</code> | 全局指针寄存器基准值的 RVA | | <code>Size</code> | 规范要求为 0 |</p>
+<p>某些历史 RISC 或非 x86 架构约定用 GP 指向常用全局数据区域，访问变量时只需要 <code>[GP + 小偏移]</code>。运行时公式：</p>
+<pre><code>
+实际 GP = 模块实际加载基址 + DataDirectory[8].VirtualAddress
+</code></pre>
+<p>因为该目录项给的是要形成 GP 的 RVA，并非指向一个结构体或数组，所以 <code>Size=0</code> 不等于这一项必定不存在，可能出现 <code>VirtualAddress != 0</code> 而 <code>Size == 0</code>。</p>
+<p>解析处理：</p>
+<pre><code>
+1. 检查 NumberOfRvaAndSizes &gt; 8。
+2. 读取 DataDirectory[8]。
+3. 将 VirtualAddress 显示为“全局指针 RVA”。
+4. 首选 GP = OptionalHeader.ImageBase + RVA。
+5. 运行时 GP = 实际加载基址 + RVA。
+6. 检查 Size 是否为 0；非零时提示格式异常。
+7. 不按数组继续读取，也通常不必 RVA→FOA 后再取一个 DWORD。
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>它不保存所有全局变量、名称、类型、数量或真实地址列表</li>
+<li><code>.data</code>、<code>.rdata</code>、未初始化数据区才可能承载具体全局数据；名称和类型往往需要 PDB</li>
+<li>不要计算 <code>Size / 4</code> 作为表项数</li>
+<li><code>Size=0</code> 在这里是规范要求，不应直接判定目录不存在或损坏</li>
+<li>常见 x86 PE32 与 x64 PE 中此项通常全零，这是正常现象</li>
+<li>实际加载基址可能受 ASLR 影响，不能永远用首选 <code>ImageBase</code> 计算运行时 GP</li>
+</ul>
+<p>计算示例：</p>
+<pre><code>
+ImageBase = 10000000
+GlobalPtr RVA = 00008000
+Size          = 00000000
+
+GP = 10000000 + 00008000 = 10008000
+</code></pre>
+<p>若全局变量 RVA 为 <code>00008050</code>：</p>
+<pre><code>
+变量 VA = 10000000 + 00008050 = 10008050
+相对 GP 偏移 = 10008050 - 10008000 = 50h
+</code></pre>
+<p>访问可概念化为 <code>[GP + 50h]</code>。若 ASLR 后实际基址为 <code>20000000</code>，运行时 <code>GP = 20000000 + 00008000 = 20008000</code>。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

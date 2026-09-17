@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>导入表与 IAT · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">导入表与 IAT</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>导入表与 IAT</h1>
+<p>导入表描述当前 EXE/DLL 需要从哪些外部 DLL 导入哪些函数，以及加载器应把解析出的真实函数地址写到哪里。PE 可选头中的数据目录数组负责定位导入表等各类数据表。</p>
+<h2>PE 数据目录</h2>
+<p>可选头中的数据目录数组，每项都是：</p>
+<pre><code>
+typedef struct _IMAGE_DATA_DIRECTORY {
+    DWORD VirtualAddress;
+    DWORD Size;
+} IMAGE_DATA_DIRECTORY, *PIMAGE_DATA_DIRECTORY;
+</code></pre>
+<p>它不是具体的数据表，而是目录索引项：<code>VirtualAddress</code> 是这类数据的起始位置（通常是 RVA），<code>Size</code> 是覆盖大小。</p>
+<p>| 索引 | 常量 | 含义 | |---:|---|---| | 0 | <code>IMAGE_DIRECTORY_ENTRY_EXPORT</code> | 导出表 | | 1 | <code>IMAGE_DIRECTORY_ENTRY_IMPORT</code> | 导入表 | | 2 | <code>IMAGE_DIRECTORY_ENTRY_RESOURCE</code> | 资源表 | | 3 | <code>IMAGE_DIRECTORY_ENTRY_EXCEPTION</code> | 异常表 | | 4 | <code>IMAGE_DIRECTORY_ENTRY_SECURITY</code> | 安全表 | | 5 | <code>IMAGE_DIRECTORY_ENTRY_BASERELOC</code> | 重定位表 | | 6 | <code>IMAGE_DIRECTORY_ENTRY_DEBUG</code> | 调试表 | | 7 | <code>IMAGE_DIRECTORY_ENTRY_ARCHITECTURE</code> | 架构指定数据表 | | 8 | <code>IMAGE_DIRECTORY_ENTRY_GLOBALPTR</code> | 全局指针表 | | 9 | <code>IMAGE_DIRECTORY_ENTRY_TLS</code> | TLS 表 | | 10 | <code>IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG</code> | 加载配置表 | | 11 | <code>IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT</code> | 绑定导入表 | | 12 | <code>IMAGE_DIRECTORY_ENTRY_IAT</code> | IAT 目录 | | 13 | <code>IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT</code> | 延迟导入表 | | 14 | <code>IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR</code> | COM 描述表 |</p>
+<p>通常按 16 个目录项理解，实际有效数量要看可选头的 <code>NumberOfRvaAndSizes</code>。</p>
+<p>目录项使用 RVA 而不是固定 VA，因为模块可能不加载在首选基址，而模块内相对位置不变：<code>VA = 实际模块基址 + RVA</code>。例如基址 <code>00400000h</code> + RVA <code>00002560h</code> = VA <code>00402560h</code>。换基址或受 ASLR 影响时，无需把每个目录项改成绝对地址。</p>
+<p>注意：<code>IMAGE_DIRECTORY_ENTRY_SECURITY</code>（安全目录）是特例，其 <code>VirtualAddress</code> 在常见 PE 语境下表示文件中的位置，而不是内存 RVA，不能机械地一概而论。</p>
+<p>解析导入表的基本步骤：</p>
+<pre><code>
+1. 读取 Optional Header 中的 DataDirectory 数组
+2. 取 DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]
+3. 用 VirtualAddress 找到第一个 IMAGE_IMPORT_DESCRIPTOR
+4. 按 20 字节读取描述符
+5. 直到遇到全零描述符
+</code></pre>
+<p>文件分析时 <code>VirtualAddress</code> 不能直接当文件偏移，需先找到所属节，用节的 <code>VirtualAddress</code> 与 <code>PointerToRawData</code> 做 RVA→FOA 转换。</p>
+<h3>易错点</h3>
+<p>| 误解 | 正确理解 | |---|---| | <code>VirtualAddress</code> 一定是内存绝对地址 | 通常是 RVA，加实际模块基址才是 VA | | 数据目录项本身就是导入表 | 它只是指出导入表在哪里、范围多大 | | <code>IMAGE_DIRECTORY_ENTRY_IAT</code> 等于某个 <code>FirstThunk</code> | 下标 12 是整个 IAT 区域的目录入口；每个 DLL 的 IAT 位置由对应描述符的 <code>FirstThunk</code> 给出 |</p>
+<h2>IMAGE_IMPORT_DESCRIPTOR</h2>
+<p>一个 DLL 对应一个描述符，多个描述符连续排列，最后用全零描述符结束；PE32 中每个描述符 20 字节。</p>
+<pre><code>
+typedef struct _IMAGE_IMPORT_DESCRIPTOR {
+    union {
+        DWORD Characteristics;
+        DWORD OriginalFirstThunk;
+    } DUMMYUNIONNAME;
+    DWORD TimeDateStamp;
+    DWORD ForwarderChain;
+    DWORD Name;
+    DWORD FirstThunk;
+} IMAGE_IMPORT_DESCRIPTOR;
+</code></pre>
+<p>| 字段 | 指向 | |---|---| | <code>Name</code> | DLL 名称字符串的 RVA | | <code>OriginalFirstThunk</code> | INT（导入名称表） | | <code>FirstThunk</code> | IAT（导入地址表） | | <code>TimeDateStamp</code> | 绑定导入相关时间戳 | | <code>ForwarderChain</code> | 旧式绑定导入中的转发链信息 |</p>
+<p>导入一个函数至少需要三类信息：从哪个 DLL 导入、导入哪个函数（名称或序号）、解析后真实地址写到哪里。因此描述符不把所有内容塞在一起，而是用 RVA 分别指向名称、INT 和 IAT。</p>
+<p><code>TimeDateStamp</code> 与绑定导入有关：</p>
+<pre><code>
+0          → 通常表示未绑定
+FFFFFFFFh  → 新式绑定，真实时间戳在绑定导入目录
+其他值     → 旧式绑定时使用的 DLL 时间戳
+</code></pre>
+<p><code>ForwarderChain</code> 也是旧式绑定信息，现代普通导入分析中通常不是重点，不能单凭它判断现代转发函数。</p>
+<p>遍历描述符数组：</p>
+<pre><code>
+1. 读取 Name，得到 DLL 名称
+2. 读取 OriginalFirstThunk，找到 INT
+3. 读取 FirstThunk，找到 IAT
+4. 逐项分析 INT 中的 thunk
+5. 读取下一个描述符，直到 20 字节全为 0
+</code></pre>
+<h3>易错点</h3>
+<p>| 误解 | 正确理解 | |---|---| | 一个描述符就是一个函数 | 一个描述符对应一个 DLL，函数列表在它指向的 INT/IAT 数组中 | | <code>Name</code> 字段直接存放 DLL 名称 | <code>Name</code> 是指向以 0 结尾的 ASCII DLL 名称字符串的 RVA | | <code>OriginalFirstThunk=0</code> 就是描述符结束 | 只有整个 20 字节全为 0 才是数组结束 | | <code>Characteristics</code> 和 <code>OriginalFirstThunk</code> 是两个独立字段 | 它们在同一个 union 中共用同一 DWORD，导入语境解释为 <code>OriginalFirstThunk</code> |</p>
+<h2>IMAGE_THUNK_DATA32：按名称与按序号导入</h2>
+<p>32 位 thunk 是一个 4 字节值：</p>
+<pre><code>
+typedef struct _IMAGE_THUNK_DATA32 {
+    union {
+        DWORD ForwarderString;
+        DWORD Function;
+        DWORD Ordinal;
+        DWORD AddressOfData;
+    } u1;
+} IMAGE_THUNK_DATA32;
+</code></pre>
+<p>union 中这些名字是同一个 4 字节数据的不同解释，不是四份内存。</p>
+<p>判断规则：</p>
+<pre><code>
+最高位为 1（0x80000000）→ 按序号导入，低 16 位是 Ordinal
+最高位为 0              → 按名称导入，其余部分是 IMAGE_IMPORT_BY_NAME 的 RVA
+</code></pre>
+<p>64 位 PE 使用 8 字节 thunk，最高位掩码为 <code>0x8000000000000000</code>。</p>
+<pre><code>
+if (thunk &amp; 0x80000000) {
+    ordinal = thunk &amp; 0x0000FFFF;       // 按序号导入
+} else {
+    addressOfData = thunk &amp; 0x7FFFFFFF; // 按名称导入
+}
+</code></pre>
+<p>示例：<code>80000005h</code> 最高位为 1、低 16 位为 <code>0005h</code>，即按序号导入、序号 5；<code>00002560h</code> 最高位为 0，即按名称导入、名称结构 RVA 为 <code>2560h</code>。</p>
+<p><code>IMAGE_IMPORT_BY_NAME</code> 布局：</p>
+<pre><code>
+typedef struct _IMAGE_IMPORT_BY_NAME {
+    WORD  Hint;
+    CHAR  Name[1];
+} IMAGE_IMPORT_BY_NAME;
+</code></pre>
+<p>RVA <code>2560h</code> 处的字节示例：</p>
+<pre><code>
+00 00 4D 65 73 73 61 67 65 42 6F 78 41 00
+└┬─┘ └──────────────┬──────────────────┘
+ Hint           &quot;MessageBoxA&quot;
+</code></pre>
+<p>若映像基址为 <code>00400000h</code>，则 <code>00400000h + 00002560h = 00402560h</code> 是加载后的 VA；<code>00002560h</code> 是 RVA，二者不是同一个地址概念。</p>
+<h3>易错点</h3>
+<p>| 误解 | 正确理解 | |---|---| | thunk 里直接保存函数名 | 按名称导入时保存的是 <code>IMAGE_IMPORT_BY_NAME</code> 的 RVA | | 最高位是函数地址的一部分 | 对导入 thunk 来说，最高位是名称/序号模式标志 | | <code>Hint</code> 就是函数序号 | <code>Hint</code> 是查找提示值，不等同于真正的导出序号 |</p>
+<h2>INT、IAT 与加载器填充</h2>
+<p>INT = Import Name Table（导入名称表），IAT = Import Address Table（导入地址表）。描述符通过 <code>OriginalFirstThunk</code> 指向 INT、<code>FirstThunk</code> 指向 IAT。</p>
+<p>INT 的重点是"要导入谁"，IAT 的重点是"导入后实际在哪里"。加载器先按导入信息查找 DLL 导出函数，再把真实地址写入 IAT；程序调用导入 API 时通过 IAT 间接调用。</p>
+<p>| 阶段 | INT | IAT | |---|---|---| | 加载前 | 名称/序号查找信息 | 通常也是名称/序号查找信息 | | 加载后 | 不变 | 被真实函数地址覆盖 |</p>
+<p>加载器处理流程：</p>
+<pre><code>
+1. 根据 Name 加载 DLL
+2. 选择查询表：OriginalFirstThunk 非 0 用 INT；为 0 时用 FirstThunk 指向的 IAT
+3. 逐个解析名称或序号
+4. 在 DLL 导出表中找到真实地址
+5. 将真实地址写入 FirstThunk 指向的 IAT 槽位
+6. 遇到零值 thunk 结束该 DLL 的函数列表
+</code></pre>
+<p>典型调用形式：</p>
+<pre><code>
+call dword ptr [IAT槽位]
+jmp  dword ptr [IAT槽位]
+</code></pre>
+<p>例如 <code>FirstThunk = 3000h</code>、基址 <code>00400000h</code>，IAT 首槽位为 <code>00403000h</code>，CPU 从 <code>[00403000h]</code> 取出真实函数地址后间接转移。<strong><code>FirstThunk</code> 是指向 IAT 的 RVA，不是间接跳转指令本身。</strong></p>
+<h3>易错点</h3>
+<p>| 误解 | 正确理解 | |---|---| | IAT 永远只保存函数地址 | 加载前它通常保存查找信息，加载后才被真实地址覆盖 | | "INT 被抹零"是 INT 数组每项清零 | 本课语境指 <code>OriginalFirstThunk</code> 字段为 0，加载器改用 IAT 查找 | | IAT 和 INT 必须各有一份 | <code>OriginalFirstThunk=0</code> 时 IAT 可兼任查询表和最终地址表 |</p>
+<h2>导入描述符数组的结束与 Size</h2>
+<p>导入目录项中 <code>VirtualAddress</code> 指向第一个描述符，<code>Size</code> 是描述符区域的大小标记。描述符数组以完整全零描述符结束（<code>OriginalFirstThunk</code>、<code>TimeDateStamp</code>、<code>ForwarderChain</code>、<code>Name</code>、<code>FirstThunk</code> 全为 0）。</p>
+<p>课堂结论：Windows 加载器遍历描述符时主要按全零描述符判断结束，而不是只按 <code>DataDirectory[1].Size</code> 计算数量；修改 <code>Size</code> 后某些情况下系统仍会走到全零项。但 <code>Size</code> 并非没有价值，PE 工具和验证器可能用它限制解析范围、判断越界、估算表大小、检查结构合法性。</p>
+<p>示例：USER32、KERNEL32 两个描述符加一个全零结束项，<code>Size = 3 × 14h = 3Ch</code>。</p>
+<p>注意：不能据此认为 <code>Size</code> 可以随便填——规范 PE 和不同工具仍可能校验它；非法 RVA、损坏名称或越界数据也可能导致加载失败。</p>
+<h2>修改 Name、代理 DLL 与导入表重定向</h2>
+<p><code>Name</code> 是 DLL 名称字符串的 RVA，修改它系统就按新名称加载 DLL（如 <code>Original.dll</code> → <code>MyProxy.dll</code>）。这称为代理 DLL / 导入表重定向；只有利用 DLL 搜索顺序而不修改 EXE 导入名的情形，才接近传统的 DLL 搜索顺序劫持。</p>
+<p>仅改名称不够：加载器会按新 <code>Name</code> 加载 DLL，并按 INT 中的名称/序号从新 DLL 解析所有需要的导出。新 DLL 必须存在，且要导出 EXE 实际导入的函数。</p>
+<p>典型代理关系：</p>
+<pre><code>
+EXE 调用 FuncA → MyProxy.dll!FuncA →（转发）→ Original.dll!FuncA
+</code></pre>
+<p>分析时先记录：原 DLL 名称、实际导入的函数名、按名称还是按序号、位数（PE32/PE32+）。代理 DLL 只需覆盖 EXE 实际导入的函数，不必机械转发原 DLL 全部导出；按序号和修饰名要特别小心。</p>
+<p>名称字符串修改：短或等长字符串可能可以在原位置改写；更长字符串需要在别处放新名称，并把 <code>Name</code> 或对应 thunk 改为新 RVA。</p>
+<p>常见失败：</p>
+<p>| 情形 | 结果 | |---|---| | DLL 不存在 | <code>STATUS_DLL_NOT_FOUND</code>（C0000135） | | DLL 能加载但缺少所需导出 | <code>STATUS_ENTRYPOINT_NOT_FOUND</code>（C0000139） |</p>
+<h2>搬迁导入表与新增导入项</h2>
+<p>原导入表后没有足够空间增加新描述符时，可以新增一个节，把导入相关数据搬到新节，并追加自己的导入描述符：</p>
+<pre><code>
+新节中的导入描述符数组
+├─ 原 DLL1 描述符
+├─ 原 DLL2 描述符
+├─ MyCode.dll 描述符
+└─ 全零结束描述符
+</code></pre>
+<p>新增导入项的目的，是让 Windows 在启动阶段自动加载新 DLL。描述符本身不执行机器码，执行来源是新 DLL 被加载后的初始化流程。</p>
+<p>高层流程（限授权实验样本）：</p>
+<pre><code>
+1. 新增一个节，准备保存新的导入数据
+2. 复制原有导入描述符及相关名称、INT、IAT、IMAGE_IMPORT_BY_NAME
+3. 在原描述符之后追加自己的描述符：
+   Name → &quot;MyCode.dll&quot;，OriginalFirstThunk → 自己的 INT，FirstThunk → 自己的 IAT
+4. 在数组末尾放全零描述符
+5. 修改 DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress，按实际范围更新 Size
+6. 同步检查节对齐、节数量、SizeOfImage 等 PE 头字段
+7. 在隔离环境中验证加载和导出解析
+</code></pre>
+<p>不能只搬描述符的 20 字节——<code>Name</code>、<code>OriginalFirstThunk</code>、<code>FirstThunk</code> 都是指向其他数据的 RVA，相关数据要一起搬迁，或保证原 RVA 仍然有效。</p>
+<p>新增节涉及的元数据：<code>VirtualAddress</code>、<code>VirtualSize</code>、<code>PointerToRawData</code>、<code>SizeOfRawData</code>、<code>SectionAlignment</code>、<code>FileAlignment</code>、<code>Characteristics</code>、<code>SizeOfImage</code>、<code>NumberOfSections</code>。</p>
+<p>注意：</p>
+<ul>
+<li>把机器码放进新节不会自动执行；新增导入项借助的是新 DLL 加载后的初始化代码。</li>
+<li>新描述符应放在结束项之前，并重新放置全零结束项。</li>
+<li>额外加载 DLL 可能被工具、安全软件、签名验证或缺失依赖发现；修改 PE 还可能使数字签名失效，绑定导入、延迟导入等特殊结构也需单独检查。</li>
+</ul>
+<h2>API 欺骗与运行时恢复</h2>
+<p>思路：把导入信息中的真实 API 名称改成另一个名字，让静态分析工具看到假 API；程序运行后再动态获得真实 API 地址并写回对应 IAT 槽位。</p>
+<pre><code>
+磁盘上的 INT：        &quot;GetTickCount&quot;        ← 假名字
+系统初次解析后 IAT：  GetTickCount 真实地址
+运行时修复后 IAT：    MessageBoxA 真实地址  ← 原始 API
+</code></pre>
+<p>静态工具从磁盘导入表读函数名，名称被替换后显示的导入列表与真实运行时调用不一致。调用点不必改变（仍是 <code>call dword ptr [IAT槽位]</code>），只要在第一次调用前把 IAT 槽位改回真实地址，调用最终仍会转到真实 API。</p>
+<p>概念流程：</p>
+<pre><code>
+1. 修改 IMAGE_IMPORT_BY_NAME.Name 中的真实函数名
+2. 让加载器先按假名字填充 IAT
+3. 程序早期代码动态找到真实 DLL 和真实 API
+4. 找到原来的 IAT 槽位，写入真实函数地址
+5. 后续调用通过 IAT 进入真实 API
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>静态工具看到的是磁盘上的假导入名；运行时内存中的 IAT 再被恢复为真实地址。静态文件导入信息和运行时内存 IAT 是两个阶段，分析时不能混为一谈。</li>
+<li>假 API 在修复前若被调用，参数和调用约定不匹配可能导致崩溃；函数原型不兼容时（如 <code>MessageBoxA</code> 与 <code>GetTickCount</code>）不能直接互换。</li>
+<li>通常改的是 <code>IMAGE_IMPORT_BY_NAME.Name</code>；若移动名称结构，还要更新相应 RVA。</li>
+<li>加载后相关页面可能受保护，实际修改需要考虑内存保护。</li>
+</ul>
+<h2>IAT Hook</h2>
+<p>IAT Hook 是直接修改某模块 IAT 槽位中的函数地址，让经过该槽位的调用先进入自定义函数：</p>
+<pre><code>
+原来：  IAT 槽位 → OriginalFunction
+Hook 后：IAT 槽位 → MyHookFunction
+</code></pre>
+<p>调用点 <code>call dword ptr [IAT槽位]</code> 不变，替换槽位内容即改变调用路径。Hook 函数可以记录参数、改变行为，或再调用保存下来的原函数。</p>
+<p>两类 IAT 写入要区分：</p>
+<p>| 写入内容 | 性质 | |---|---| | 原始真实 API 地址 | IAT 修复、导入隐藏、运行时重写 | | 自己的 Hook 函数地址 | 典型 IAT Hook |</p>
+<p>IAT Hook 只影响经过该模块该槽位的调用。直接调用、其他模块自己的 IAT、运行时另行 <code>GetProcAddress</code> 获取的地址、系统调用等都可能绕过它。IAT 是模块局部的，Hook 一个槽位不能拦截整个进程的所有调用；它比改代码入口更少侵入，但也可能被重新解析、IAT 保护等方式绕过。</p>
+<h2>整体结构与术语关系</h2>
+<p>导入表把"描述数据"（DLL 名、函数名/序号、Hint）和"运行时数据"（函数真实地址）拆开，所以一个 <code>IMAGE_IMPORT_DESCRIPTOR</code> 只保存多个 RVA，而不直接放完整名称和地址。</p>
+<p>完整指针链：</p>
+<pre><code>
+DataDirectory[1]
+→ IMAGE_IMPORT_DESCRIPTOR 数组
+→ Name → DLL 名称字符串
+→ OriginalFirstThunk → INT: IMAGE_THUNK_DATA32[]
+   → 按名称：AddressOfData RVA → IMAGE_IMPORT_BY_NAME（Hint + 函数名）
+   → 按序号：最高位 1 + 低 16 位 Ordinal
+→ FirstThunk → IAT: IMAGE_THUNK_DATA32[]
+   → 加载前：查找信息；加载后：真实函数地址
+→ call/jmp [IAT槽位]
+</code></pre>
+<p>磁盘解析：<code>RVA → 所属节 → FOA</code>；观察运行中进程：<code>VA = 实际模块基址 + RVA</code>，IAT 槽位内容是当前阶段的查找信息或真实地址。</p>
+<p>| 概念 | 不要混淆成 | 正确关系 | |---|---|---| | RVA | 文件偏移或固定 VA | 相对模块基址的位置 | | VA | RVA 本身 | 实际模块基址 + RVA | | FOA | 内存地址 | 磁盘文件中的偏移 | | <code>FirstThunk</code> | 间接跳转指令 | 指向 IAT 的 RVA | | IAT 槽位地址 | 槽位中函数的真实地址 | 槽位是存放地址的地方，槽位内容才可能是函数地址 | | INT 中的 thunk | 函数名字符串本身 | 按名称导入时是指向名称结构的 RVA |</p>
+<h2>学习边界与复习优先级</h2>
+<p>本次真正展开的是导入目录；导出、资源、异常、安全、重定位、调试、TLS、加载配置、绑定导入、延迟导入、COM 描述等目录目前只是点名介绍，"老师讲过名字"不等于"已经掌握解析"。</p>
+<p>正常开发由编译器、链接器自动生成导入表，更常用 <code>LoadLibrary</code>/<code>GetProcAddress</code>、插件架构、延迟加载、兼容层等正规机制；手动修改导入表、代理 DLL、API 隐藏和 IAT 修改属于授权实验、保护研究或逆向学习场景，只在自己拥有或明确授权的样本、隔离环境中进行。</p>
+<p>复习优先级：</p>
+<pre><code>
+1. 记住导入表结构关系
+2. 会区分 RVA、VA、文件偏移
+3. 会解释 INT/IAT 加载前后变化
+4. 能判断 Name/OFT/FT 修改会影响什么
+5. 再学习导出表、重定位、资源、TLS 等目录
+</code></pre>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

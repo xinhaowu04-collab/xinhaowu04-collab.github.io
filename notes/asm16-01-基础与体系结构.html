@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8086 基础与体系结构 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">8086 基础与体系结构</h1>
+<div class="meta"><span class="cat">16 位汇编</span></div>
+<article>
+<h1>8086 基础与体系结构</h1>
+<p>聚焦 8086 实模式，涉及 286+ 保护模式或 x86-64 的内容会明确标注。</p>
+<h2>8086 汇编与计算机体系结构</h2>
+<p>8086 汇编语言是 Intel 8086 CPU 的助记符表示，属于机器语言的文本形式。计算机体系结构基于冯·诺依曼架构，核心是"存储程序"——指令和数据存放在同一存储器中。</p>
+<h3>指令与翻译层面</h3>
+<p>| 层次 | 说明 | |------|------| | 机器指令 | 操作码 + 操作数（二进制编码） | | 汇编语言 | 助记符语言 = 机器语言的文本表示 | | 汇编器 | 将 <code>mov ax, 1</code> 翻译为机器码 <code>B8 01 00</code> |</p>
+<h3>冯·诺依曼架构五大部件</h3>
+<p>| 部件 | 说明 | |------|------| | 控制器 | 指挥协调各部件工作 | | 运算器 (ALU) | 执行算术和逻辑运算 | | 存储器 | 存放数据和指令 | | 输入设备 | 向计算机输入信息 | | 输出设备 | 输出处理结果 |</p>
+<p>存储程序概念——代码和数据不分家：</p>
+<ul>
+<li>代码可以被当作数据读取（自修改代码）</li>
+<li>数据区可以被当作代码执行（shellcode 注入）</li>
+</ul>
+<pre><code>
+MOV AX, CS        ; 代码段地址
+MOV DS, AX        ; 数据段也指向代码段
+MOV SI, 0x100     ; 指向代码区某条指令
+MOV AL, [SI]      ; 把指令的机器码当作数据读出来
+</code></pre>
+<h3>CPU 架构演进</h3>
+<pre><code>
+8086（16位）→ 80x86/IA-32（32位）→ amd64/x86-64（64位）
+</code></pre>
+<ul>
+<li>16 位：寄存器 AX/BX/CX/DX，地址用段:偏移</li>
+<li>32 位：寄存器 EAX/EBX/ECX/EDX，地址用平坦模式</li>
+<li>64 位：寄存器 RAX/RBX/RCX/RDX，新增 R8-R15</li>
+</ul>
+<p>看到 <code>66H</code> 前缀（操作数大小切换前缀）说明 32 位代码在用 16 位寄存器。</p>
+<p>注意：不同位宽的代码不能混用。16 位的段:偏移寻址在 32/64 位下不兼容；32 位用平坦内存模型，段寄存器作用不同；64 位下大部分段寄存器废弃。</p>
+<h3>CPU 主要组成部分</h3>
+<ul>
+<li><strong>IP</strong>（指令指针寄存器，即体系结构中的 PC）— 指向下一条指令地址</li>
+<li><strong>ALU</strong>（算术逻辑单元）— 执行运算</li>
+<li><strong>寄存器</strong> — 高速暂存数据</li>
+<li><strong>总线接口</strong> — 与外部通信</li>
+</ul>
+<h3>流水线与指令级并行</h3>
+<p>8086 由 BIU（总线接口单元）和 EU（执行单元）组成：</p>
+<ul>
+<li>BIU：从内存取指令，放入 6 字节预取队列</li>
+<li>EU：从预取队列取出指令，译码并执行</li>
+</ul>
+<p>两者并行——BIU 取下一条指令的同时 EU 执行当前指令，形成 2 级流水线效果。</p>
+<p>指令级并行优化——改变指令顺序减少等待：</p>
+<pre><code>
+; 原始代码（有数据依赖，流水线等待）
+MOV AX, [1000]    ; 读内存，慢
+ADD AX, 1         ; 等待上一条完成
+ADD AX, 2         ; 等待上一条完成
+
+; 优化后（插入无关指令，利用流水线并行）
+MOV AX, [1000]    ; 读内存，慢
+XOR BX, BX        ; 无关指令，并行执行
+XOR CX, CX        ; 无关指令，并行执行
+ADD AX, 1         ; 此时 AX 已就绪
+ADD AX, 2
+XOR DX, DX
+</code></pre>
+<p>优化后的指令顺序与逻辑顺序不同。8086 上效果有限——2 级流水线的气泡远不如现代 CPU 深度流水线严重，且 8086 没有分支预测，JMP 就是硬断流。指令调度主要是现代 CPU 的优化思路。</p>
+<h3>三种 I/O 总线</h3>
+<p>![[Pasted image 20260616164024.png|600]]</p>
+<p><strong>CPU ↔ I/O 桥</strong>：数据总线、地址总线、控制总线捆绑而成；所有物理地址本质都是在系统总线上广播的地址信号。</p>
+<p><strong>I/O 桥 ↔ 内存</strong>：严格依赖时序同步通信。C 语言常规的指针解引用（<code>int x = *p</code>），CPU 先查缓存，直到 L1/L2/L3 全部 Miss，请求才落到内存总线上的电平信号。</p>
+<p><strong>I/O 桥 ↔ 外部设备</strong>：外设种类繁多且速度极慢，I/O 总线支持中断机制和直接内存访问（DMA）。</p>
+<p>I/O 桥是硬件协议转换器和速度缓冲器，负责：</p>
+<p>1. 拦截 CPU 发出的、指向外设的物理地址读写请求 2. 将其翻译成特定 I/O 总线的数据包发送给设备 3. 将设备的响应转换成 CPU 能理解的格式</p>
+<pre><code>
+MOV AX, [1000H]   ; 内存访问（系统总线 → 内存总线）
+IN AL, 0x60       ; I/O 访问（系统总线 → I/O 桥 → I/O 总线），读键盘控制器端口
+</code></pre>
+<h3>字对齐（Word Alignment）</h3>
+<p>访问一个 16 位数据（字，2 字节），起始地址必须是偶数。</p>
+<p>8086 数据总线 16 位宽，一次能搬 2 字节。内存在硬件层面分成奇地址体和偶地址体两个 bank：</p>
+<pre><code>
+地址：  0x0000  0x0001  0x0002  0x0003  0x0004 ...
+        偶体    奇体    偶体    奇体    偶体
+</code></pre>
+<p>CPU 一次读操作同时从偶地址体取一字节、从奇地址体取一字节，拼成 16 位。起始地址是偶数时刚好一边一个字节，一次取完。</p>
+<p>起始地址是奇数时（比如要读 <code>0xFFFD</code> 和 <code>0xFFFE</code> 这两个字节）：</p>
+<pre><code>
+第一次内存周期：读 0xFFFC~0xFFFD，只要 0xFFFD，扔掉 0xFFFC
+第二次内存周期：读 0xFFFE~0xFFFF，只要 0xFFFE，扔掉 0xFFFF
+然后内部拼接
+</code></pre>
+<p>本来一次能完成的事变成两次，时钟周期直接翻倍。</p>
+<h3>系统调用（Ring 0 - Ring 3）</h3>
+<p>注意：8086 不具备此特性。8086 实模式没有任何权限隔离——所有代码都可以访问所有内存和所有 I/O 端口。保护环（Ring 0-3）是 80286 引入保护模式后才有的特权级机制。</p>
+<pre><code>
+Ring 0（内核态）— 最高权限，可直接操作硬件
+Ring 3（用户态）— 普通程序运行在此
+</code></pre>
+<ul>
+<li>普通程序运行在 Ring 3，需要越权操作（如读写文件）时 trap 到 Ring 0</li>
+<li>内核执行完成后返回 Ring 3</li>
+</ul>
+<pre><code>
+; DOS 系统调用（实模式，无权限隔离）
+MOV AH, 4Ch       ; 功能号：程序退出
+INT 21H           ; 软件中断，跳转到 DOS 服务例程
+
+; 现代系统调用（32 位 Linux）
+MOV EAX, 1        ; sys_exit
+INT 80H
+</code></pre>
+<p>系统调用涉及 Ring 3 → Ring 0 的权限切换，开销远大于普通函数调用，频繁系统调用会显著影响性能。</p>
+<h3>Cache 访问场景：执行 <code>mov rax, [0x1000]</code></h3>
+<p>注意：此节为现代 x86-64 概念（8086 只有 16 位寄存器且没有 Cache），仅用于说明 Cache 工作原理。</p>
+<p>Cache Miss 的完整路径：</p>
+<pre><code>
+① rip 指向该指令，ALU 计算出目标地址 0x1000
+        ↓
+② 查 L1/L2/L3 Cache → 全部未命中（Cache Miss）
+        ↓
+③ 请求发往总线接口 → 将地址 0x1000 打包成系统总线协议信号
+        ↓
+④ 经系统总线传到 I/O 桥 → I/O 桥做协议转换 + 路由
+        ↓
+⑤ 经内存总线传到主存储器 → 主存返回 0x1000 起的 64 字节（一整个 Cache Line）
+        ↓
+⑥ 数据原路返回：主存 → 内存总线 → I/O 桥 → 系统总线 → 总线接口
+        ↓
+⑦ 数据填入 L3 → L2 → L1 Cache
+        ↓
+⑧ 从 L1 Cache 读出数据，写入寄存器文件的 rax
+</code></pre>
+<p>Cache Hit 时步骤 ③~⑦ 全部跳过，总线接口、I/O 桥、主存完全不参与：</p>
+<pre><code>
+① ALU 计算出地址 0x1000
+② 查 L1 Cache → 命中
+③ 直接写入 rax
+</code></pre>
+<p>Cache Miss 比 Cache Hit 慢几十倍。利用这个时间差可以做缓存计时攻击（Cache Timing Attack）——测量访问耗时，推断目标是否在缓存中，从而推测敏感数据：</p>
+<pre><code>
+RDTSC             ; 读取时间戳计数器到 EDX:EAX
+MOV AL, [0x1000]  ; 目标地址访问（可能触发 Cache Miss）
+RDTSC             ; 再次读取时间戳
+SUB EAX, EAX_OLD  ; 计算耗时差，推断是否 Cache Hit
+</code></pre>
+<h3>hello 程序的完整执行流程</h3>
+<p>程序 hello 的可执行文件原本在磁盘上，用户在 shell 执行 <code>./hello</code>：</p>
+<pre><code>
+磁盘 → 磁盘控制器 → I/O 总线 → I/O 桥 → 内存总线 → 主存
+</code></pre>
+<p>这一步数据量大，通常由 DMA 直接搬运，不经过 CPU 寄存器。</p>
+<p>IP 被设置为程序第一条指令的地址，CPU 进入"取指-执行"循环，贯穿程序整个生命周期：</p>
+<pre><code>
+2a. CPU 根据 IP 的值，从内存取出一条指令（取指，Fetch）
+2b. IP 自动加上当前指令长度（1~6字节），指向下一条指令地址
+2c. CPU 解码这条指令，如果需要操作数，再从内存/寄存器读取操作数
+2d. ALU 执行运算
+2e. 把结果写回寄存器或内存
+2f. 回到 2a，继续下一条指令
+</code></pre>
+<p>循环进行到 <code>scanf</code> 相关指令时触发系统调用：</p>
+<ul>
+<li>用户敲 "hello" 回车</li>
+<li>键盘信号：<code>USB 控制器 → I/O 总线 → I/O 桥 → 系统总线 → CPU</code>，暂存到寄存器</li>
+<li>CPU（代表内核）再把字符从寄存器写入主存：<code>系统总线 → I/O 桥 → 内存总线 → 主存</code></li>
+<li>系统调用结束，CPU 切回用户态，程序从 syscall 下一条指令继续</li>
+</ul>
+<p>（8086 实模式无 Ring 切换概念，DOS 下所有代码平等。）</p>
+<p>循环继续，CPU 从内存读字符到寄存器，用 ALU 处理（拼接字符串、格式化等）。</p>
+<p>循环进行到 <code>printf</code> 相关指令时再次触发系统调用：</p>
+<pre><code>
+主存 → 内存总线 → I/O 桥 → 系统总线 → CPU
+CPU（代表内核）→ 系统总线 → I/O 桥 → I/O 总线 → 图形适配器 → 显示器
+</code></pre>
+<p>循环继续，直到遇到 <code>exit</code> 相关的系统调用，程序结束，操作系统回收该进程占用的资源。</p>
+<h3>在 XP 中用 Debug.exe 写 hello.com</h3>
+<pre><code>
+C:\&gt;debug
+</code></pre>
+<p>先切换到 C 盘：<code>cd /d c:\</code>（<code>cd</code> = Change Directory，<code>/d</code> = 允许跨驱动器切换，<code>c:\</code> = C 盘根目录）。</p>
+<pre><code>
+-a            ; 开始写代码
+</code></pre>
+<p>先把数据存到寄存器，然后中断显示字符串。</p>
+<pre><code>
+-e            ; 写入字符串
+-n hello.com  ; 设置文件名
+-r cx         ; 设置写入文件长度
+-w            ; 写入磁盘
+</code></pre>
+<p>Debug 命令详见 04-工具与伪指令。</p>
+<h2>寄存器、分段与机器码格式</h2>
+<p>8086 CPU 内部有 14 个 16 位寄存器，分为通用寄存器、控制/状态寄存器和段寄存器三类。寄存器是 16 位但物理地址是 20 位，所以用段:偏移的分段机制访问完整的 1MB 空间。x86 指令采用变长编码（CISC），最长 6 字节。</p>
+<h3>寄存器分类</h3>
+<p>通用寄存器：</p>
+<pre><code>
+AX  CX  DX  BX
+SP  BP  SI  DI
+</code></pre>
+<p><strong>AX:DX 组合——乘除法的结果寄存器对</strong></p>
+<pre><code>
+MUL CX           ; DX:AX = AX × CX（16位乘法结果 32 位）
+DIV CX           ; AX = DX:AX ÷ CX（商），DX = 余数
+</code></pre>
+<p><strong>SI 和 DI——字符串操作的源和目的索引</strong></p>
+<pre><code>
+MOVSB            ; ES:[DI] ← DS:[SI]，SI++，DI++
+REP MOVSW        ; 重复执行 MOVSW，CX 次
+</code></pre>
+<p>控制/状态寄存器：</p>
+<pre><code>
+IP      指令指针（Instruction Pointer）
+FLAGS   标志寄存器
+</code></pre>
+<p>段寄存器：</p>
+<pre><code>
+CS   代码段寄存器（Code Segment）
+DS   数据段寄存器（Data Segment）
+SS   栈段寄存器（Stack Segment）
+ES   附加段寄存器（Extra Segment）
+</code></pre>
+<h3>控制转移指令：JMP</h3>
+<p>控制转移指令的本质就是修改 CS 和 IP。按 段内/段间 × 直接/间接 两个维度交叉分类：</p>
+<p><strong>1. 段内直接转移（Direct Near/Short Jump）</strong></p>
+<p>汇编器计算出目标地址与当前指令下一条指令之间的相对偏移量，编码进机器码：</p>
+<ul>
+<li>短转移（Short）：偏移量 1 字节（-128 ~ +127），机器码 <code>EB cb</code>，共 2 字节</li>
+<li>近转移（Near）：偏移量 2 字节（-32768 ~ +32767），机器码 <code>E9 cw</code>，共 3 字节</li>
+<li>计算公式：<code>新 IP = 当前 IP + 相对偏移量</code></li>
+</ul>
+<pre><code>
+JMP SHORT LABEL    ; EB cb
+JMP NEAR LABEL     ; E9 cw
+</code></pre>
+<p>相对偏移具备<strong>位置无关性（PIC）</strong>：机器码整体搬移到内存其他位置，内部 JMP 依然能正确跳转。现代 Windows PE 代码段内部跳转绝大多数采用此方式。</p>
+<p><strong>2. 段内间接转移（Indirect Near Jump）</strong></p>
+<p>目标地址从寄存器或内存中读取，机器码中不包含目标地址：</p>
+<ul>
+<li>机器码特征：操作码 <code>FF</code> 后跟 ModR/M 字节，<code>FF E0</code> = <code>JMP AX</code></li>
+</ul>
+<pre><code>
+JMP AX              ; 取 AX 的值赋予 IP
+JMP WORD PTR [BX]   ; 取 DS:BX 内存处的 16 位值赋予 IP
+</code></pre>
+<p>常见于函数指针调用或 switch-case 跳转表：编译器处理密集 switch 时在数据段生成跳转表，通过段内间接跳转实现 O(1) 分支选择。</p>
+<p><strong>3. 段间直接转移（Direct Far Jump）</strong></p>
+<p>机器码中硬编码目标代码段的 CS 和 IP：</p>
+<ul>
+<li>机器码 <code>EA</code> + 2 字节 IP + 2 字节 CS，共 5 字节</li>
+</ul>
+<pre><code>
+JMP FAR PTR 0x2000:0x1000   ; 强制设置 CS=0x2000, IP=0x1000
+</code></pre>
+<p>现代用户态程序极罕见，只有操作系统内核代码、Bootloader 做模式切换时才会使用。</p>
+<p><strong>4. 段间间接转移（Indirect Far Jump）</strong></p>
+<p>目标地址（IP + CS 共 4 字节）存放在内存中，CPU 从指定内存位置连续读取：</p>
+<pre><code>
+JMP DWORD PTR [BX]  ; 从 DS:BX 处读 4 字节，低 2 字节给 IP，高 2 字节给 CS
+</code></pre>
+<p>现代 Windows 导入表（IAT）机制的底层逻辑与之类似：通过间接内存地址跳转到系统 API。</p>
+<p>注意：JMP 会清空预取队列，导致流水线断流。JMP 约 15 个周期；条件跳转跳转成功 16 个周期、不跳转仅 4 个周期——能用条件跳转代替无条件跳转时尽量用。</p>
+<h3>花指令（Junk Code）</h3>
+<p>花指令是在代码中人为插入的、旨在破坏机器码到汇编代码正确映射关系的无用字节，主要诱骗反汇编引擎发生对齐错误，导致大段正常代码被错误解析。</p>
+<p>反汇编引擎的两种工作方式：</p>
+<p>1. <strong>线性扫描（Linear Sweep）</strong>：从入口点开始挨个字节强行解码，不理会控制流 2. <strong>递归下降（Recursive Descent）</strong>：顺着代码执行流（JMP/CALL/Jcc 的目标地址）解码，不跳过去的地址不盲目解码</p>
+<pre><code>
+; 原始汇编意图
+    JMP LABEL1      ; 正常跳转
+    DB 0B8H         ; 脏字节（花指令核心）
+LABEL1:
+    MOV AX, 1234H   ; 真正的业务逻辑
+    ADD AX, 1
+</code></pre>
+<p>线性扫描引擎的灾难现场：</p>
+<pre><code>
+机器码字节流：EB 01 B8 B8 34 12 83 C0 01
+
+反汇编器看到：
+    JMP LABEL1           ; EB 01
+    MOV AX, 1234H        ; B8 B8 34 12  ← 脏字节 B8 被当成 MOV 的操作码！
+                         ; 后续指令全部错位变成乱码
+</code></pre>
+<p>CPU 实际执行：JMP LABEL1 → IP 跳过脏字节 → 正确落在 MOV AX, 1234H 的开头。</p>
+<p>常见花指令构造：</p>
+<p><strong>1. 条件跳转永真/永假陷阱（Opaque Predicates）</strong></p>
+<pre><code>
+CLC             ; 清除进位标志 CF=0
+JNB LABEL_REAL  ; 因为 CF=0，必然跳转，CPU 绝不会往下走
+DB 0E8H         ; 脏字节（E8 是 CALL，吞噬后面 4 字节）
+LABEL_REAL:
+    ; 正常代码
+</code></pre>
+<p><strong>2. 堆栈平衡花指令（Call/Ret 篡改）</strong></p>
+<pre><code>
+CALL NEXT_LINE
+NEXT_LINE:
+    ADD WORD PTR [SP], 5    ; 8086 版本（16位）：将栈顶返回地址 +5
+    ; 现代逆向中更常见 ADD DWORD PTR [ESP], 5
+    RET                     ; 实际跳转到 NEXT_LINE + 5
+    ; --- 中间的 5 字节是花指令 ---
+    DB 0E9H, 11H, 22H, 33H, 44H
+    ; -----------------------------
+    ; 真正的业务代码
+</code></pre>
+<p>去花步骤：</p>
+<p>1. <strong>肉眼识别</strong>：找到永真跳转或跳过后代码变得荒谬的位置 2. <strong>打 NOP</strong>：在调试器中将脏字节全部用 <code>90h</code>（NOP）填充 3. <strong>重新分析</strong>：让反汇编器按新的字节流重新分析</p>
+<p>花指令利用 x86 变长指令集的特点，插入半截子机器码（如需要后续操作数的 <code>B8</code>），强迫静态分析工具把真正的有效代码"吸"进去作为参数，导致后续代码全部错位。</p>
+<p>花指令能起作用的根本原因：反汇编引擎无法区分代码段和数据段。花指令的定位是增加逆向的体力劳动成本——面对几千个花指令块，手动填 NOP 不现实，必须写自动化去花脚本（如 IDAPython）。</p>
+<h3>物理地址与逻辑地址</h3>
+<ul>
+<li><strong>物理地址</strong>：20 位，是内存中真实、唯一的地址</li>
+<li><strong>逻辑地址</strong>：<code>segment:offset</code>（段地址:偏移地址），形式如 <code>CS:IP</code></li>
+<li>一个物理地址可以对应多个逻辑地址（多对一映射）</li>
+</ul>
+<pre><code>
+物理地址 = 段地址 × 16（左移4位） + 偏移地址
+</code></pre>
+<pre><code>
+逻辑地址          物理地址
+0000:0100   =&gt;    00100
+0010:0000   =&gt;    00100
+</code></pre>
+<p>验证：</p>
+<ul>
+<li><code>0000:0100</code> → 0000 << 4 = 00000，00000 + 0100 = 00100</li>
+<li><code>0010:0000</code> → 0010 << 4 = 00100，00100 + 0000 = 00100</li>
+</ul>
+<p>两者结果相同，同一块物理内存可以用不同的段:偏移组合表示。</p>
+<p>地址换算示例：</p>
+<pre><code>
+; 已知逻辑地址 CS:IP = 0DAB:0100
+; 物理地址 = 0DAB × 10h + 0100 = 0DBB0h
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>段地址 × 16 在硬件上通过地址加法器左移 4 位实现，不是真乘法</li>
+<li><code>0DAB:0100</code> 不是 <code>0DAB0100h</code></li>
+</ul>
+<h3>段超越前缀（Segment Override Prefix）</h3>
+<p>默认情况下，访问内存时 CPU 按固定规则选择段寄存器，可以用段超越前缀显式指定使用哪个段：</p>
+<pre><code>
+mov ax, [bx]        ; 默认等价于 mov ax, ds:[bx]（bx 默认配对 ds）
+mov ax, ss:[bx]     ; 显式指定 ss 段
+mov ax, cs:[bx]     ; 显式指定 cs 段
+mov ax, ds:[bx]     ; 显式指定 ds 段（与默认相同）
+</code></pre>
+<p>前缀单独一行的等价写法：</p>
+<pre><code>
+ss:
+mov ax, [bx]         ; 通过段超越前缀，强制本条指令使用 ss 段
+</code></pre>
+<p>默认配对规则：BX/SI/DI 配 DS，BP/SP 配 SS，IP 配 CS。</p>
+<pre><code>
+MOV AX, CS:[BX]    ; 强制从代码段读取数据（自修改代码/查表）
+MOV AX, ES:[DI]    ; 强制使用 ES 段（字符串操作的目的段）
+</code></pre>
+<p>段超越前缀只影响当前指令，下一条恢复默认段规则。</p>
+<h3>机器码格式：变长编码（CISC）</h3>
+<p><strong>变长指令</strong>：一条指令的字节数不固定。优点是编码灵活、指令密度高；缺点是解码复杂。</p>
+<pre><code>
+xx xx xx xx xx xx     mov ax, 1234h    （字节数较多）
+</code></pre>
+<p><strong>定长指令（RISC）</strong>：每条指令固定长度。优点是解码简单、效率高；缺点是单条指令表达能力有限，复杂操作需要多条指令组合。</p>
+<p>工具链：</p>
+<pre><code>
+汇编语言  ──(汇编器 Assembler)──&gt;   机器码
+机器码    ──(反汇编器 Disassembler)──&gt;  汇编语言
+机器码    ──(虚拟机/模拟器 Emulator)──&gt;  模拟运行
+</code></pre>
+<p>这三者构成逆向分析的基本工具链。</p>
+<p>变长指令意味着反汇编器无法从一条指令的长度推断下一条指令的起始位置。如果从中间字节开始反汇编，后续所有指令都会解析错误（指令边界错位）：</p>
+<pre><code>
+; 正确反汇编：
+BB 34 12    → MOV BX, 1234H
+89 D8       → MOV AX, BX
+
+; 从第二个字节开始反汇编（错位）：
+34 12       → XOR AL, 12H    ; 完全不同的指令！
+89 D8       → MOV AX, BX
+</code></pre>
+<p>注意：不要假设指令边界。变长指令下不能通过"跳过 N 字节"来定位下一条指令，指令边界错位是 shellcode 分析和漏洞利用中常见的混淆手段。</p>
+<h3>x86 指令编码结构（变长指令最长 6 字节）</h3>
+<pre><code>
+| 前缀(0~1byte) | 操作码(1~2bytes) | ModR/M(0~1byte) | 位移量(0~2bytes) | 立即数(0~2bytes) |
+| prefix        | opcode           | Mod|Reg|R/M     | disp             | imm              |
+</code></pre>
+<p>8086 简化版：指令最长 6 字节，没有 SIB 字节（386+ 才引入）。</p>
+<p>常见 opcode 速查：</p>
+<pre><code>
+BB 34 12    → MOV BX, 1234H    ; BB = MOV r16, imm16
+89 D8       → MOV AX, BX       ; 89 = MOV r/m16, r16
+83 C3 7F    → ADD BX, +7FH     ; 83 = ADD r/m16, imm8（S=1）
+81 C3 80 00 → ADD BX, 0080H    ; 81 = ADD r/m16, imm16（S=0）
+</code></pre>
+<p>W 位：</p>
+<p>| W值 | 含义 | |-----|------| | W = 0 | 操作数大小为8位 | | W = 1 | 操作数大小为16位 |</p>
+<p>D 位：</p>
+<p>| D值 | 含义示例 | |-----|---------| | D = 0 | <code>mov ax, bx</code>（寄存器字段为源） | | D = 1 | <code>mov bx, ax</code>（寄存器字段为目的） |</p>
+<p>操作数缩写：</p>
+<p>| 缩写 | 含义 | |------|------| | reg | 寄存器 | | mem | 存储器 | | imm | 立即数 | | segreg | 段寄存器 | | reg8 / reg16 | 8位/16位寄存器 | | imm8 | 8位立即数 |</p>
+<h3>mod 字段含义</h3>
+<p>| mod值 | 含义 | |-------|------| | 00 | 内存寻址，无位移量 | | 01 | 内存寻址，8位位移量 | | 10 | 内存寻址，16位位移量 | | 11 | 寄存器寻址，无位移量 |</p>
+<p>mod=11 表示寄存器寻址（无内存访问，最快），mod=00/01/10 表示内存寻址（需要计算 EA）：</p>
+<pre><code>
+; mod=11 → 寄存器寻址，无内存访问
+; 机器码 89 D8 → mod=11, reg=011(BX), r/m=000(AX) → MOV AX, BX
+
+; mod=00 → 内存寻址，无位移量
+; 机器码 89 18 → mod=00, reg=011(BX), r/m=000(BX+SI) → MOV [BX+SI], BX
+</code></pre>
+<p>mod=01（8位位移）和 mod=10（16位位移）的区别可以帮助判断结构体字段的偏移量大小。</p>
+<p>注意：mod=00 是"内存寻址，无位移量"，仍然访问内存，不是寄存器寻址。只有 mod=11 才是寄存器寻址。</p>
+<h3>机器码手工解码实例</h3>
+<p><strong>例 1：<code>89 D8</code></strong></p>
+<p>对应指令格式 <code>mov reg16/mem16, reg16</code>：</p>
+<pre><code>
+mov AX, BX
+</code></pre>
+<p>机器码字节 <code>D8</code>（二进制 <code>11 011 000</code>）分解为：</p>
+<pre><code>
+mod   reg   r/m
+11    011   000
+</code></pre>
+<ul>
+<li><code>mod = 11</code> → 寄存器寻址（无位移量）</li>
+<li><code>reg = 011</code> → 对应 BX</li>
+<li><code>r/m = 000</code> → 对应 AX</li>
+</ul>
+<p><strong>例 2：<code>BB 34 12</code></strong></p>
+<pre><code>
+mov BX, 1234h
+</code></pre>
+<p>注意 x86 小端序：字节 <code>34 12</code> 表示数值 <code>1234h</code>。</p>
+<p><strong>例 3：<code>C7 80 34 12 78 56</code></strong></p>
+<p>分解 <code>80</code>（二进制 <code>10 000 000</code>）：</p>
+<pre><code>
+mod   reg   r/m
+10    000   000
+</code></pre>
+<ul>
+<li><code>mod = 10</code> → 内存寻址，16位位移量</li>
+<li><code>reg = 000</code> → 此处由 opcode C7 决定操作类型（立即数 MOV）</li>
+<li><code>r/m = 000</code> → 基址寄存器组合（如 BX+SI）</li>
+</ul>
+<pre><code>
+MOV [BX+SI+1234h], 5678h
+</code></pre>
+<p>其中 <code>34 12</code> 是位移量 1234h，<code>78 56</code> 是立即数 5678h。</p>
+<h2>立即数编码：符号扩展与 S 位</h2>
+<p>为什么同是"加一个数"，机器码差别那么大？</p>
+<h3>ADD 指令的 S 位</h3>
+<p><code>ADD reg, imm</code> 有两个 opcode 变体，区别在 opcode 字节的 bit1（S 位，sign-extend bit）：</p>
+<p>| opcode | S 位 | 立即数宽度 | 行为 | |--------|------|-----------|------| | <code>83</code> | 1 | 1 字节 | CPU 读完后自动符号扩展成 16 位 | | <code>81</code> | 0 | 2 字节 | 原样载入，无符号扩展 |</p>
+<pre><code>
+add bx, +7Fh   →   83 C3 7F        (3字节)  7F → 符号扩展 → 0x007F = +127
+add bx, -7Fh   →   83 C3 81        (3字节)  81 → 符号扩展 → 0xFF81 = -127
+add bx, 0080h  →   81 C3 80 00     (4字节)  必须用 2 字节，无符号扩展
+</code></pre>
+<p>S 位是编译器优化代码体积的手段：</p>
+<pre><code>
+ADD BX, 127      ; → 83 C3 7F    (3字节，S=1，省1字节)
+ADD BX, 128      ; → 81 C3 80 00 (4字节，S=0，多花1字节)
+</code></pre>
+<p><code>0x80</code> 作为有符号 1 字节 = -128，符号扩展后变成 <code>0xFF80</code>，完全错误。S=1 路径的有效正数范围上限是 <code>0x7F</code>（+127），超过就必须切换到 S=0：</p>
+<pre><code>
+有符号 1 字节范围：-128 (0x80) ~ +127 (0x7F)
++127 以内 → 83（S=1，省 1 字节）
+超过 +127 → 81（S=0，2 字节）
+</code></pre>
+<h3>MOV 指令：没有 S 位</h3>
+<p><code>MOV BX, imm16</code> 的 opcode 是 <code>BB</code>，立即数固定 2 字节，不存在符号扩展机制：</p>
+<pre><code>
+mov bx, 90     →   BB 5A 00    (小端) BX = 0x005A = 90
+mov bx, -90    →   BB A6 FF    (小端) BX = 0xFFA6 = -90（补码）
+</code></pre>
+<p>两条指令结构完全相同，差别只是那 2 字节的值。汇编器负责把 <code>-90</code> 转换成补码 <code>0xFFA6</code>，CPU 只看 bit 模式。</p>
+<pre><code>
+MOV BX, 1        ; → BB 01 00    (3字节，即使立即数很小也占2字节)
+MOV BX, 255      ; → BB FF 00    (3字节)
+MOV BX, 256      ; → BB 00 01    (3字节)
+</code></pre>
+<h3><code>mov ax, 0FFh</code> vs <code>mov ax, -1</code></h3>
+<p>这是汇编器层面的解释差异，机器码结果不同：</p>
+<pre><code>
+mov ax, 0FFh   →   B8 FF 00    AX = 0x00FF = 255（无符号 255）
+mov ax, -1     →   B8 FF FF    AX = 0xFFFF = 65535 / -1（有符号）
+</code></pre>
+<ul>
+<li><code>0FFh</code>：汇编器视为无符号字面量 255，补 0 到 16 位 → <code>00FF</code></li>
+<li><code>-1</code>：汇编器视为有符号负数，补码展开到 16 位 → <code>FFFF</code></li>
+</ul>
+<p>等价写法：<code>mov ax, -1</code> ≡ <code>mov ax, 0FFFFh</code>，两者机器码相同。<code>mov ax, 0FFh</code> 和 <code>mov ax, -1</code> 不等价。</p>
+<h3>总结</h3>
+<p>| 指令 | 编码机制 | 有无 S 位 | 立即数字节数 | |------|---------|----------|------------| | <code>ADD reg, imm</code> | <code>83</code>/<code>81</code> 两套 opcode | 有 | 1 或 2，由值域决定 | | <code>MOV reg, imm</code> | 单一 opcode | 无 | 固定 2 字节（16 位寄存器） |</p>
+<p>Intel 用 S 位让"小数"只占 1 字节，节省代码空间：-128 ~ +127 以内的立即数对 ADD/SUB 可以省掉 1 字节，超出则退回完整 2 字节。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

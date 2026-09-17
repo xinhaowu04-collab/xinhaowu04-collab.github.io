@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>调试事件循环与单步 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">调试事件循环与单步</h1>
+<div class="meta"><span class="cat">调试器</span></div>
+<article>
+<h1>调试事件循环与单步</h1>
+<h2>调试事件循环</h2>
+<p>用户态调试器的核心不是主动控制目标程序，而是反复接收调试事件：</p>
+<pre><code>
+WaitForDebugEvent
+        ↓
+根据 dwDebugEventCode 分发事件
+        ↓
+处理异常、线程、进程、DLL等事件
+        ↓
+ContinueDebugEvent
+        ↓
+等待下一个事件
+</code></pre>
+<p>异常事件主要通过 ExceptionCode 区分：</p>
+<p>| ExceptionCode | 来源 | |---------------|------| | EXCEPTION_BREAKPOINT | 软件断点 INT3 | | EXCEPTION_SINGLE_STEP | TF 单步或硬件断点 | | EXCEPTION_ACCESS_VIOLATION | PAGE_NOACCESS 内存断点 |</p>
+<p><code>DEBUG_EVENT.u</code> 是联合体，只有当前事件类型对应的成员有效（CREATE_THREAD_DEBUG_EVENT 时 u.CreateThread 有效，EXCEPTION_DEBUG_EVENT 时 u.Exception 有效）。因此线程创建事件中的 TEB 地址必须当场保存，不能等断点异常发生后再从 u.CreateThread 读取。</p>
+<h2>T 单步步入与 P 单步步过</h2>
+<h3>T：Trap Flag</h3>
+<p>设置 EFLAGS 的 TF（位 8）：</p>
+<pre><code>
+or [esi].regFlag, 100h
+</code></pre>
+<p>目标线程执行一条指令后，CPU 产生 EXCEPTION_SINGLE_STEP。T 的行为：普通指令执行一条后停止；call 指令进入被调用函数后停止。</p>
+<h3>P：遇到 call 时步过</h3>
+<p>单步步入（T 命令）会进入 call 内部，单步步过（P 命令）跨过 call，在 call 返回后停下。实现 DbgSetNext：先读取 EIP 处的机器码并反汇编当前指令：</p>
+<pre><code>
+DbgGetRegs → 获取当前 EIP
+DbgReadProcessMemory(EIP, 16字节) → 读取当前指令
+Decode2Asm → 反汇编，得到指令文本和长度
+
+如果当前是 call：
+    下一条地址 = EIP + 当前指令长度
+    在下一条地址设置一次性软件断点（Type=0）
+否则：
+    设置 TF，执行一条普通指令
+</code></pre>
+<p>例如：</p>
+<pre><code>
+0040100E call 0040101A
+00401013 push 00
+</code></pre>
+<p>在 0040100E 执行 P 时，临时断点设置在 00401013。被调用函数执行完毕后 ret 返回并命中该断点。一次性断点命中后不需要重新写入。</p>
+<h3>单步异常的状态分流</h3>
+<p>EXCEPTION_SINGLE_STEP 可能来自多种功能：用户执行 T/P、永久 BP 执行原指令后等待重新插入、BM 暂时恢复页面后等待重新保护、硬件断点 DR0～DR3、指令跟踪。因此 ExecStep 必须按状态变量和 DR6 判断异常来源，不能把所有单步异常都当作普通 T。</p>
+<p>ExecStep 里通过两个标志位区分单步来源：</p>
+<p>| 标志位 | 含义 | |--------|------| | <code>g_IsBreakStep = TRUE</code> | int3 永久断点恢复后单步，单步后重新写入 0xCC | | <code>g_IsMemStep = TRUE</code> | 内存断点恢复后单步，单步后重新设 PAGE_NOACCESS | | 两者都为 FALSE | 用户手动单步（T 命令），显示寄存器等命令 |</p>
+<h2>D 查看内存</h2>
+<p>命令格式：<code>d 401000 20</code>。当前参数转换函数按十六进制解析，因此 <code>20</code> 表示 20h，即 32 字节。</p>
+<p>读取流程：把地址字符串和长度字符串用空格切开 → 分别使用 htodw 转换为数值 → 限制读取长度不超过本地缓冲区 → 调用 DbgReadProcessMemory → 每 16 字节显示一行。</p>
+<p>本地缓冲区与取字节：</p>
+<pre><code>
+LOCAL Buffer[256]:BYTE
+...
+mov ecx, i
+movzx eax, byte ptr Buffer[ecx]
+</code></pre>
+<p>显示格式：</p>
+<pre><code>
+szFmtDumpAddr db &quot;%08X  &quot;,0
+szFmtDumpByte db &quot;%02X &quot;,0
+</code></pre>
+<p>验证输出：</p>
+<pre><code>
+00401000  6A 00 68 06 30 40 00 68 00 30 40 00 6A 00 E8 07
+00401010  00 00 00 6A 00 E8 06 00 00 00 FF 25 08 20 40 00
+</code></pre>
+<p>注意：MASM 不能直接比较两个内存变量，<code>.while i < Bytes</code> 要先把一方取到寄存器：</p>
+<pre><code>
+.while TRUE
+    mov eax, i
+    .if eax &gt;= Bytes
+        .break
+    .endif
+    ; ...
+.endw
+</code></pre>
+<p>wsprintf、StdOut 等调用可能破坏易失寄存器，跨函数调用的循环状态最好放在局部变量中。</p>
+<h2>LM 查看模块列表</h2>
+<p>通过 ToolHelp 快照枚举目标进程模块：CreateToolhelp32Snapshot → Module32FirstW → Module32NextW → CloseHandle。必须先设置：</p>
+<pre><code>
+mov Module.dwSize, SIZEOF MODULEENTRY32W
+</code></pre>
+<h3>旧版 MASM32 的兼容问题</h3>
+<p>当前环境是 ASCII build，旧版 kernel32.lib 中没有 ANSI 的 Module32First/Module32Next 导入符号，但存在 W 版本，因此改用 Module32FirstW/Module32NextW。</p>
+<p>旧 windows.inc 只有 ANSI 的 MODULEENTRY32，需要补宽字符结构，其中两个字符串字段必须是 WORD 数组：</p>
+<pre><code>
+szModule  WORD MAX_MODULE_NAME32+1 dup(?)
+szExePath WORD MAX_PATH dup(?)
+</code></pre>
+<p>格式字符串使用 <code>%ws</code>，结构体字符串字段传地址（<code>addr Module.szModule</code>、<code>addr Module.szExePath</code>）。</p>
+<p>已验证：LM 能显示主程序与已加载 DLL 的基址、映像大小、模块名和完整路径。</p>
+<h2>R 查看寄存器与 LastError</h2>
+<p>不能直接在调试器中调用 GetLastError，否则得到的是调试器线程自己的 LastError。32 位目标线程的 LastErrorValue 位于 TEB + 34h。</p>
+<p>保存线程与 TEB 的对应关系：</p>
+<p>| 事件 | 保存内容 | |------|----------| | CREATE_PROCESS_DEBUG_EVENT | 主线程 ID 与 CreateProcessInfo.lpThreadLocalBase | | CREATE_THREAD_DEBUG_EVENT | 新线程 ID 与 CreateThread.lpThreadLocalBase |</p>
+<p>执行 R 时：当前 g_DbgEvent.dwThreadId → 查找对应线程记录 → 得到 TEB → 读取 TEB + 34h 的 DWORD。</p>
+<p>已验证输出 <code>LastError=000036B7</code>，证明读取链路已经通畅。</p>
+<h2>指令跟踪与 WinDbg wt</h2>
+<h3>连续单步与真正 wt 的区别</h3>
+<p>基础连续跟踪：设置 TF → 执行一条 → 输出 EIP 和反汇编 → 再次设置 TF。</p>
+<p>真正接近 WinDbg <code>wt</code> 的功能还需要：确定跟踪结束位置、识别 call/ret、维护调用深度、生成缩进调用树、统计指令数和函数调用数。</p>
+<h3>call 指令与函数入口</h3>
+<pre><code>
+0040100E call 0040101A
+00401013 push 00
+0040101A jmp [00402008]
+</code></pre>
+<p>执行 call 时把 00401013 压入栈并跳转到 0040101A。在被调用函数入口：EIP = 0040101A，[ESP] = 00401013。</p>
+<p>从函数入口执行 wt 时，可以读取 [ESP] 作为当前函数的返回地址；从 call 指令处开始时，返回地址可由 EIP + 指令长度得到。</p>
+<h3>函数入口无法仅靠固定序言可靠识别</h3>
+<p><code>push ebp / mov ebp, esp / sub esp, xx</code> 只是常见特征：优化后的函数可能没有标准序言，call 目标也可能只是导入跳板。可靠的函数边界通常来自 PDB 符号或其他函数元数据。</p>
+<h3>分阶段实现</h3>
+<pre><code>
+第一阶段：连续 TF + 指令日志
+第二阶段：跟踪到起始函数返回地址
+第三阶段：call/ret 深度和调用树
+第四阶段：模块过滤、异常终止和统计
+</code></pre>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

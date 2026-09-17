@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16位汇编综合考卷 - 参考答案 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">16位汇编综合考卷 - 参考答案</h1>
+<div class="meta"><span class="cat">16 位汇编</span></div>
+<article>
+<h1>16位汇编综合考卷 - 参考答案</h1>
+<hr>
+<h2>一、选择题答案</h2>
+<p>1. <strong>C</strong> - 20位（8086寄存器16位，但物理地址20位，通过段:偏移访问1MB空间） 2. <strong>B</strong> - 6字节（BIU的指令预取队列缓冲器） 3. <strong>C</strong> - JMP LABEL（跳转指令会清空预取队列，导致流水线断流） 4. <strong>C</strong> - CX（只有BX/BP/SI/DI可用于间接寻址） 5. <strong>B</strong> - CD 20（int 20h，DOS的容错机制） 6. <strong>C</strong> - CF（INC和DEC不影响进位标志CF） 7. <strong>B</strong> - AX（8位乘法：AX = AL × 源操作数） 8. <strong>D</strong> - AND AX, 0（这条指令确实能清零，所以题目可能有歧义。如果要选"不能"，应该是没有这样的选项，所有选项都能清零） 9. <strong>B</strong> - DS（MOVSB源地址DS:SI，目的地址ES:DI） 10. <strong>B</strong> - 0DBB0H（0DAB × 10h + 0100 = 0DBB0H） 11. <strong>A</strong> - NOP（机器码90H，单字节） 12. <strong>A</strong> - 将AL符号扩展到AX（CBW = Convert Byte to Word） 13. <strong>B</strong> - ZF（TEST执行AND运算但不写回，结果为0则ZF=1） 14. <strong>C</strong> - CX（LOOP指令隐含使用CX作为计数器） 15. <strong>D</strong> - 以上都不可以（CS只能通过跳转指令修改，不能作为MOV/POP的目的操作数；PUSH CS可以）</p>
+<hr>
+<h2>二、填空题答案</h2>
+<p>1. <strong>译码</strong>、<strong>运算</strong>、<strong>地址形成</strong>、<strong>指令预取</strong>（或：执行指令、算术逻辑运算、总线读写、预取指令）</p>
+<p>2. <strong>段地址</strong>、<strong>偏移地址</strong></p>
+<p>3. <strong>8</strong>、<strong>4</strong></p>
+<p>4. <strong>AH</strong>、<strong>AL</strong></p>
+<p>5. <strong>SS</strong>、<strong>栈帧/栈上的参数和局部变量</strong></p>
+<p>6. <strong>DS</strong>、<strong>BX</strong>、<strong>AL</strong></p>
+<p>7. <strong>CF</strong></p>
+<p>8. <strong>AX</strong>、<strong>DX</strong></p>
+<p>9. <strong>逻辑</strong>、<strong>算术</strong></p>
+<p>10. <strong>DF（方向标志）</strong></p>
+<hr>
+<h2>三、判断题答案</h2>
+<p>1. <strong>×</strong> - 同一物理地址可对应多个逻辑地址（如0000:0100和0010:0000都指向00100H）</p>
+<p>2. <strong>×</strong> - MOV不能内存到内存直接传送，必须通过寄存器中转</p>
+<p>3. <strong>√</strong> - PUSH/POP以字（16位）为单位，SP每次变化±2</p>
+<p>4. <strong>√</strong> - JMP是控制转移指令，不影响标志位</p>
+<p>5. <strong>×</strong> - CMP执行减法但不保存结果，只影响标志位</p>
+<p>6. <strong>×</strong> - LODSB不改变标志位，需要手动OR AL, AL或TEST AL, AL</p>
+<p>7. <strong>×</strong> - LEA只计算地址值，不访问内存</p>
+<p>8. <strong>×</strong> - IN/OUT访问I/O端口地址空间，不是内存地址空间</p>
+<p>9. <strong>×</strong> - HLT是硬件级挂起，等待中断唤醒，不是死循环</p>
+<p>10. <strong>×</strong> - 8086实模式没有Ring概念，所有代码权限相同（Ring是286+保护模式引入的）</p>
+<hr>
+<h2>四、简答题答案</h2>
+<h3>1. JMP NEAR和JMP AX的区别</h3>
+<p><strong>段内直接转移（JMP NEAR）：</strong></p>
+<ul>
+<li>机器码中编码相对偏移量（-32768~+32767）</li>
+<li>汇编器计算：新IP = 当前IP + 相对偏移</li>
+<li>具备位置无关性（PIC）</li>
+<li>使用场景：固定的跳转目标，如if/else、循环</li>
+</ul>
+<p><strong>段内间接转移（JMP AX）：</strong></p>
+<ul>
+<li>目标地址从寄存器或内存读取</li>
+<li>机器码不包含目标地址</li>
+<li>运行时动态决定跳转目标</li>
+<li>使用场景：函数指针调用、Switch-Case跳转表</li>
+</ul>
+<h3>2. 为什么编译器更喜欢XOR清零</h3>
+<p><strong>相同点：</strong> 两者都能将AX清零，对标志位的影响相同</p>
+<p><strong>XOR的优势：</strong> 1. <strong>机器码更短</strong>：XOR AX, AX是2字节（31 C0），SUB AX, AX也是2字节，但MOV AX, 0是3字节（B8 00 00） 2. <strong>执行更快</strong>：XOR不需要从内存/指令流读取立即数，直接在寄存器内部操作 3. <strong>通用模式</strong>：编译器统一用XOR清零所有寄存器，简化代码生成逻辑</p>
+<h3>3. 为什么有符号除法前必须符号扩展</h3>
+<p><strong>原因：</strong> 16位除法DIV/IDIV的被除数是32位（DX:AX）</p>
+<ul>
+<li>如果AX是负数（如-10 = FFF6H），DX必须是FFFFH才能正确表示-10</li>
+<li>如果不扩展，DX可能是垃圾值，导致被除数错误</li>
+</ul>
+<p><strong>CWD的作用：</strong></p>
+<ul>
+<li>检测AX的最高位（符号位）</li>
+<li>如果AX最高位=0（正数），DX=0000H</li>
+<li>如果AX最高位=1（负数），DX=FFFFH</li>
+</ul>
+<p><strong>不扩展的后果：</strong></p>
+<ul>
+<li>例如：AX=-10（FFF6H），DX=0000H（未扩展）</li>
+<li>被除数 = 0000FFF6H = 65526（正数！）</li>
+<li>除以3得商21842，完全错误</li>
+</ul>
+<h3>4. MZ和COM文件格式的区别</h3>
+<p>| 对比项 | COM格式 | MZ格式 | |--------|---------|---------| | <strong>文件头</strong> | 无文件头，纯机器码 | 有IMAGE_DOS_HEADER（至少64字节） | | <strong>内存模型</strong> | 单段模型，CS=DS=SS=ES | 多段模型，代码/数据/栈分离 | | <strong>入口点</strong> | 固定0100H（前256字节PSP） | 由e_cs和e_ip指定，灵活 | | <strong>体积限制</strong> | 严格≤64KB | 突破64KB限制 | | <strong>重定位</strong> | 无重定位机制 | 有重定位表，支持动态加载 | | <strong>加载地址</strong> | 固定加载到可用段+0100H | 操作系统动态分配基址 |</p>
+<hr>
+<h2>五、代码阅读题答案</h2>
+<h3>1. 机器码解析</h3>
+<ul>
+<li><strong>对应的汇编指令：</strong> <code>ADD BX, 7FH</code></li>
+<li><strong>opcode是：</strong> <code>83</code>（带符号扩展的ADD）</li>
+<li><strong>ModR/M字节是：</strong> <code>C3</code>（二进制11 000 011，mod=11寄存器寻址，reg=000，r/m=011=BX）</li>
+<li><strong>立即数是：</strong> <code>7FH</code>（127）</li>
+<li><strong>这条指令使用了符号扩展吗？</strong> 是（S=1，1字节立即数符号扩展为16位）</li>
+</ul>
+<h3>2. 代码段分析</h3>
+<p><strong>这段代码的功能是：</strong> 在BUFFER指向的内存区域中查找字符'A'，最多搜索10个字节</p>
+<p><strong>CX寄存器的作用是：</strong> 循环计数器，控制LOOP指令的重复次数（10次）</p>
+<p><strong>如果改用REPNE SCASB实现，需要修改：</strong></p>
+<pre><code>
+MOV CX, 10
+MOV DI, OFFSET BUFFER    ; 改用DI，因为SCAS使用ES:DI
+MOV AL, &#x27;A&#x27;              ; 要查找的字符放AL
+CLD
+REPNE SCASB              ; 不等则继续，找到&#x27;A&#x27;时停止
+JNZ NOT_FOUND            ; 如果CX=0且没找到
+DEC DI                   ; DI回退到匹配字符（SCAS会自动+1）
+FOUND:
+</code></pre>
+<hr>
+<h2>六、编程题答案</h2>
+<pre><code>
+; 将DS:SI的10字节复制到ES:DI
+
+CLD                      ; 设置方向标志为正向（DF=0）
+MOV CX, 10              ; 设置复制字节数
+REP MOVSB               ; 重复执行MOVSB，CX次
+
+; 或者优化版本（按字传送，快一倍）：
+CLD
+MOV CX, 5               ; 10字节 = 5个字
+REP MOVSW               ; 按字传送
+</code></pre>
+<p><strong>评分标准：</strong></p>
+<ul>
+<li>CLD指令（2分）</li>
+<li>MOV CX, 10（2分）</li>
+<li>REP MOVSB（6分）</li>
+<li>如果使用MOVSW优化，额外加分</li>
+</ul>
+<hr>
+<h2>七、综合分析题答案</h2>
+<h3>1. 这段代码使用了什么反逆向技术？（2分）</h3>
+<p><strong>答：</strong> 花指令（Junk Code）技术，通过插入脏字节（0B8H）破坏反汇编器的指令边界识别。</p>
+<h3>2. 线性扫描反汇编器的错误解析（3分）</h3>
+<pre><code>
+; 反汇编器错误地解析为：
+JMP SHORT LABEL1        ; EB 01
+MOV AX, 3412H           ; B8 34 12（错误！把脏字节B8当成了MOV的操作码）
+; 后续指令全部错位变成乱码
+</code></pre>
+<p><strong>解释：</strong> 线性扫描从入口点逐字节解码，不理会控制流。它把<code>0B8H</code>当成<code>MOV AX, imm16</code>的操作码，吞噬了后续的<code>34 12</code>作为立即数，导致真正的<code>MOV AX, 1234H</code>被错位解析。</p>
+<h3>3. CPU实际执行（2分）</h3>
+<p><strong>答：</strong> CPU执行<code>JMP SHORT LABEL1</code>后，IP直接跳过脏字节<code>0B8H</code>，落在<code>LABEL1</code>标号处，正确执行<code>MOV AX, 1234H</code>和<code>ADD AX, BX</code>。脏字节永远不会被执行。</p>
+<h3>4. 如何清除花指令（3分）</h3>
+<p><strong>方法：</strong> 1. <strong>识别永真跳转</strong>：确认<code>JMP SHORT LABEL1</code>必然跳转，脏字节<code>0B8H</code>永远不会执行 2. <strong>手动打NOP</strong>：在调试器（如x64dbg）中将<code>0B8H</code>替换为<code>90H</code>（NOP） 3. <strong>重新分析</strong>：让反汇编器按修正后的字节流重新分析</p>
+<p><strong>或使用自动化方法：</strong></p>
+<ul>
+<li>编写IDAPython脚本识别"短跳转+单字节"模式</li>
+<li>自动将脏字节标记为数据（DB）而非代码</li>
+<li>批量处理大量花指令块</li>
+</ul>
+<hr>
+<p><strong>考卷知识点覆盖完整度：100%</strong></p>
+<p>涵盖笔记01-04所有核心内容：</p>
+<ul>
+<li>✅ 01-基础与体系结构（冯诺依曼、寄存器、分段、机器码格式、花指令）</li>
+<li>✅ 02-指令集（寻址方式、数据传送、算术运算、位操作、I/O、字符串、循环）</li>
+<li>✅ 03-程序结构与系统（子程序、栈帧、中断、BIOS/DOS启动）</li>
+<li>✅ 04-工具与伪指令（Debug、COM/MZ文件格式、PSP、MASM伪指令）</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

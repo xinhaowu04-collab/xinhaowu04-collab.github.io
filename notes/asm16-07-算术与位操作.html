@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8086 算术与位操作指令 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">8086 算术与位操作指令</h1>
+<div class="meta"><span class="cat">16 位汇编</span></div>
+<article>
+<h1>8086 算术与位操作指令</h1>
+<p>算术运算指令包括加减法（ADD/ADC/SUB/SBB/INC/DEC/NEG/CMP）、乘除法（MUL/IMUL/DIV/IDIV）以及符号扩展指令（CBW/CWD），操作寄存器或内存中的数据，并影响标志寄存器。位操作指令分为逻辑运算（AND/OR/XOR/NOT/TEST）和移位/循环移位（SHL/SHR/SAL/SAR/ROL/ROR/RCL/RCR）。十进制调整指令（DAA/DAS/AAA/AAS/AAM/AAD）用于修正二进制算术指令处理 BCD 码时产生的非法结果。</p>
+<h2>条件跳转指令</h2>
+<p>条件跳转指令配合 <code>CMP</code> 或 <code>TEST</code> 使用，根据标志位状态决定是否跳转。</p>
+<p>所有条件跳转指令由几个基础字母拼成：</p>
+<ul>
+<li>E = Equal（相等）</li>
+<li>Z = Zero（结果为零，在 CMP 后与 E 等价）</li>
+<li>N = Not（取反/不）</li>
+<li>L = Less（有符号数小于）</li>
+<li>G = Greater（有符号数大于）</li>
+<li>A = Above（无符号数大于/高于）</li>
+<li>B = Below（无符号数小于/低于）</li>
+</ul>
+<p>数字之间的关系只有三种：大于、等于、小于。用 N（Not）排除掉其中几种后，剩下的就是等价的指令。</p>
+<p><strong>示例 1：<code>JNLE</code> 推导</strong></p>
+<pre><code>
+J + N + L + E = 不小于 且 不等于
+排除&quot;小于&quot;和&quot;等于&quot; → 只剩下&quot;大于&quot;
+∴ JNLE ≡ JG
+</code></pre>
+<p><strong>示例 2：<code>JNA</code> 推导</strong></p>
+<pre><code>
+J + N + A = 不高于
+排除&quot;大于&quot; → 剩下&quot;小于&quot;和&quot;等于&quot;
+∴ JNA ≡ JBE
+</code></pre>
+<p>有符号数等价组：</p>
+<p>| 指令 | 等价指令 | 推导 | |------|---------|------| | <code>JG</code>（大于） | <code>JNLE</code> | 不小于且不等于 | | <code>JGE</code>（大于或等于） | <code>JNL</code> | 不小于 | | <code>JL</code>（小于） | <code>JNGE</code> | 不大于且不等于 | | <code>JLE</code>（小于或等于） | <code>JNG</code> | 不大于 |</p>
+<p>无符号数等价组：</p>
+<p>| 指令 | 等价指令 | 推导 | |------|---------|------| | <code>JA</code>（高于） | <code>JNBE</code> | 不低于且不等于 | | <code>JAE</code>（高于或等于） | <code>JNB</code> | 不低于 | | <code>JB</code>（低于） | <code>JNAE</code> | 不高于且不等于 | | <code>JBE</code>（低于或等于） | <code>JNA</code> | 不高于 |</p>
+<p>基础相等组：</p>
+<p>| 指令 | 等价指令 | |------|---------| | <code>JE</code>（相等） | <code>JZ</code>（为零） | | <code>JNE</code>（不相等） | <code>JNZ</code>（不为零） |</p>
+<p>单标志位跳转：</p>
+<p>| 指令 | 英文全称 | 测试条件 | 含义 | |------|---------|---------|------| | <code>JZ / JE</code> | Jump if Zero / Equal | ZF = 1 | 结果为零/相等则跳转 | | <code>JNZ / JNE</code> | Jump if Not Zero / Not Equal | ZF = 0 | 结果不为零/不相等则跳转 | | <code>JC / JB</code> | Jump if Carry / Below | CF = 1 | 有进位/小于则跳转 | | <code>JNC / JNB</code> | Jump if No Carry / Not Below | CF = 0 | 无进位/不小于则跳转 | | <code>JS</code> | Jump if Sign | SF = 1 | 结果为负则跳转 | | <code>JNS</code> | Jump if Not Sign | SF = 0 | 结果为正则跳转 | | <code>JO</code> | Jump if Overflow | OF = 1 | 溢出则跳转 | | <code>JNO</code> | Jump if No Overflow | OF = 0 | 未溢出则跳转 | | <code>JP / JPE</code> | Jump if Parity / Parity Even | PF = 1 | 奇偶校验位为 1 则跳转 | | <code>JNP / JPO</code> | Jump if No Parity / Parity Odd | PF = 0 | 奇偶校验位为 0 则跳转 |</p>
+<p>无符号数组合条件：</p>
+<p>| 指令 | 测试条件 | 含义 | |------|---------|------| | <code>JA / JNBE</code> | CF = 0 且 ZF = 0 | 高于/不小于或等于则跳转 | | <code>JAE / JNB</code> | CF = 0 | 高于或等于/不低于则跳转 | | <code>JB / JNAE</code> | CF = 1 | 低于/不高于或等于则跳转 | | <code>JBE / JNA</code> | CF = 1 或 ZF = 1 | 低于或等于/不高于则跳转 |</p>
+<p>有符号数组合条件：</p>
+<p>| 指令 | 测试条件 | 含义 | |------|---------|------| | <code>JG / JNLE</code> | SF ⊕ OF = 0 且 ZF = 0 | 大于/不小于或等于则跳转 | | <code>JGE / JNL</code> | SF ⊕ OF = 0 | 大于或等于/不小于则跳转 | | <code>JL / JNGE</code> | SF ⊕ OF = 1 | 小于/不大于或等于则跳转 | | <code>JLE / JNG</code> | SF ⊕ OF = 1 或 ZF = 1 | 小于或等于/不大于则跳转 |</p>
+<p>| 指令 | 英文全称 | 测试条件 | 含义 | |------|---------|---------|------| | <code>JCXZ</code> | Jump if CX is Zero | CX = 0 | 若 CX 为 0 则跳转（常用于循环前检查） |</p>
+<p>CMP + 条件跳转 = if/else 的汇编映射：</p>
+<pre><code>
+CMP AX, BX         ; if (AX == BX)
+JE  EQUAL          ;     goto EQUAL;
+; else 分支
+JMP DONE
+EQUAL:
+; then 分支
+DONE:
+</code></pre>
+<p>TEST + JZ 是检查寄存器是否为 0 的标准模式：</p>
+<pre><code>
+TEST AX, AX        ; AX &amp; AX，结果不写回，只影响标志位
+JZ   IS_ZERO       ; 如果 AX == 0，跳转
+</code></pre>
+<p>注意：条件跳转不存在段间跳转。条件跳转的机器码使用相对偏移，无法同时修改 CS 和 IP。需要跨段跳转必须用无条件跳转（JMP FAR PTR）。</p>
+<h2>ADD — 加法</h2>
+<p><code>目的操作数 = 源操作数 + 目的操作数</code></p>
+<p>| 操作数组合 | 时钟周期 | 总线传输次数 | 指令字节数 | 汇编示例 | |-----------|---------|------------|----------|---------| | register, register | 3 | — | 2 | <code>ADD AX, SI</code> | | register, memory | 9+EA | 1 | 2-4 | <code>ADD DX, BETA[SI]</code> | | memory, register | 16+EA | 2 | 2-4 | <code>ADD ALPHA[BX][SI], DI</code> | | register, immediate | 4 | — | 3-4 | <code>ADD BX, 256</code> | | memory, immediate | 17+EA | 2 | 3-6 | <code>ADD GAMMA, 30H</code> | | accumulator, immediate | 4 | — | 2-3 | <code>ADD AL, 5</code> |</p>
+<p><code>ADD AX, 1</code> 等价于 <code>INC AX</code>（自增）。但 INC 不影响 CF 而 ADD 会——如果后续代码依赖 CF，编译器会选择 ADD 而不是 INC。</p>
+<h2>ADC — 带进位加法</h2>
+<p><code>目的操作数 = 源操作数 + 目的操作数 + CF</code></p>
+<p>主要用于多字节/多字相加：</p>
+<pre><code>
+MOV AX, 0002H      ; AX = 被加数低16位
+MOV BX, 0001H      ; BX = 被加数高16位
+
+MOV CX, 0004H      ; CX = 加数低16位
+MOV DX, 0003H      ; DX = 加数高16位
+
+; 第一步：计算低16位
+ADD AX, CX         ; AX = 0002H + 0004H = 0006H。若产生进位，CF 置 1
+
+; 第二步：计算高16位
+ADC BX, DX         ; BX = BX + DX + CF，相当于 0001H + 0003H + CF
+</code></pre>
+<p>ADD 处理低位、ADC 处理高位并传递进位，这是多精度（32 位及以上）运算的标准写法。</p>
+<h2>INC — 自增</h2>
+<p><code>操作数 = 操作数 + 1</code>（<strong>不影响 CF 标志位</strong>）</p>
+<p>| 标志位 | O | D | I | T | S | Z | A | P | C | |--------|---|---|---|---|---|---|---|---|---| | 受影响 | ✕ | - | - | - | ✕ | ✕ | ✕ | ✕ | - |</p>
+<p>| 操作数类型 | 时钟周期 | 总线传输次数 | 指令字节数 | 示例 | |-----------|---------|------------|----------|------| | reg16 | 2 | — | 1 | <code>INC CX</code> | | reg8 | 3 | — | 2 | <code>INC BL</code> | | memory | 15+EA | 2 | 2-4 | <code>INC ALPHA[DI][BX]</code> |</p>
+<p>循环计数器的标配：</p>
+<pre><code>
+MOV CX, 10
+LOOP_START:
+    ; 循环体
+    DEC CX          ; CX--
+    JNZ LOOP_START  ; CX ≠ 0 则继续
+</code></pre>
+<h2>SUB — 减法</h2>
+<p><code>目的操作数 = 目的操作数 - 源操作数</code></p>
+<p>标志位影响与 ADD 对称：CF 表示借位（无符号减法不够减时 CF=1），OF 表示有符号溢出，SF/ZF 反映结果符号/是否为零。</p>
+<p><strong>清零</strong>：<code>SUB AX, AX</code> 比 <code>MOV AX, 0</code> 高效（2 字节 vs 3 字节）。<code>XOR AX, AX</code> 也是同样的效果。</p>
+<p><strong>配合条件跳转实现 if/else</strong>：</p>
+<pre><code>
+SUB AX, BX         ; AX - BX
+JZ  EQUAL          ; 如果 AX == BX 跳转
+; 不等分支
+</code></pre>
+<p>SUB 与 CMP 的区别：SUB 会写回结果，CMP 只影响标志位。后续代码需要原值时用 CMP；不需要原值时用 SUB 可以省一条指令。</p>
+<h2>SBB — 带借位减法</h2>
+<p><code>目的操作数 = 目的操作数 - 源操作数 - CF</code></p>
+<p>主要用于多字节相减：</p>
+<pre><code>
+; 32 位减法（两个 16 位寄存器拼成 32 位）
+SUB AX, CX         ; 低 16 位相减
+SBB DX, BX         ; 高 16 位相减 - 低位的借位
+</code></pre>
+<p>注意：SBB 减的 CF 含义是"借位"（Borrow）——低位减法不够减时 CF=1，SBB 会多减 1。ADC 加 CF，SBB 减 CF，不要搞混。</p>
+<h2>DEC — 自减</h2>
+<p><code>操作数 = 操作数 - 1</code>（<strong>不影响 CF 标志位</strong>）</p>
+<p>所有算术指令中，只有 INC 和 DEC 不影响 CF。如果需要根据借位做后续判断（如多精度运算），必须用 <code>SUB X, 1</code> 代替 <code>DEC X</code>。这也是为什么 INC/DEC 被设计成不影响 CF——多精度循环里经常用 INC 做循环计数，如果 INC 改变 CF 就会破坏正在传递的进位链。</p>
+<h2>NEG — 取相反数</h2>
+<p><code>操作数 = 0 - 操作数</code>（即按位取反再加 1）</p>
+<ul>
+<li>本质：求补码（取反加一），等于计算 <code>-x</code></li>
+<li>可应用于寄存器或内存单元（不能是段寄存器或立即数）</li>
+</ul>
+<pre><code>
+MOV AX, 0005H   ; AX = 5
+NEG AX          ; 执行 0 - 5，AX 变为 FFFBH（十进制 -5）
+
+MOV AL, 80H     ; AL = -128 (二进制 10000000B)
+NEG AL          ; 执行 0 - 80H，AL 结果仍为 80H（-128 没有对应的正数，溢出）
+</code></pre>
+<p>标志位影响：</p>
+<ul>
+<li><strong>CF</strong>：除了操作数为 0 外，任何非零操作数执行 NEG 后 CF 都置 1</li>
+<li><strong>OF</strong>：操作数为 -128（80H，字节）或 -32768（8000H，字）时置 1</li>
+<li><strong>SF</strong>：结果为负数置 1，否则置 0</li>
+<li><strong>ZF</strong>：结果为 0 置 1，否则置 0</li>
+</ul>
+<p>等价写法：</p>
+<pre><code>
+NEG AX           ; 等价于：
+XOR AX, -1       ; 按位取反
+INC AX           ; 加 1
+</code></pre>
+<h2>CMP — 比较</h2>
+<p>执行 <code>目的操作数 - 源操作数</code>，仅影响标志位（ZF、SF 等），<strong>不保存结果</strong>，常用于条件跳转。</p>
+<p>核心标志位：</p>
+<ul>
+<li><strong>ZF</strong>：结果为 0（两数相等）时 ZF=1</li>
+<li><strong>SF</strong>：结果为负数时 SF=1</li>
+<li><strong>CF</strong>：减法有借位（无符号数中操作数1小于操作数2）时 CF=1</li>
+</ul>
+<p>无符号数比较：</p>
+<p>| 条件 | 汇编指令 | 含义 | 标志位状态 | |------|---------|------|-----------| | 等于 | <code>JE</code> / <code>JZ</code> | 相等则跳转 | <code>ZF = 1</code> | | 不等于 | <code>JNE</code> / <code>JNZ</code> | 不相等则跳转 | <code>ZF = 0</code> | | 大于 | <code>JA</code> | 无符号大于跳转 | <code>CF = 0</code> 且 <code>ZF = 0</code> | | 小于 | <code>JB</code> | 无符号小于跳转 | <code>CF = 1</code> |</p>
+<p>有符号数比较：</p>
+<p>| 条件 | 汇编指令 | 含义 | 标志位状态 | |------|---------|------|-----------| | 等于 | <code>JE</code> / <code>JZ</code> | 相等则跳转 | <code>ZF = 1</code> | | 大于 | <code>JG</code> | 有符号大于跳转 | <code>SF == OF</code> 且 <code>ZF = 0</code> | | 小于 | <code>JL</code> | 有符号小于跳转 | <code>SF != OF</code> |</p>
+<p>寻找较大值的完整示例：</p>
+<pre><code>
+    CMP  AX, BX      ; 执行 AX - BX
+    JAE  AX_IS_BIG   ; 如果 AX &gt;= BX (无符号不借位)，跳转
+    MOV  CX, BX      ; 否则 (BX 更大)，将 BX 存入 CX
+    JMP  DONE
+AX_IS_BIG:
+    MOV  CX, AX      ; 将 AX 存入 CX
+DONE:
+</code></pre>
+<h2>乘法指令 MUL / IMUL</h2>
+<p>乘法指令只需要指定一个<strong>乘数</strong>（源操作数），另一个乘数（被乘数）<strong>固定存放在累加器中</strong>：</p>
+<p>| 操作数大小 | 被乘数（隐含） | 乘数（指令指定） | 乘积存放位置（隐含） | |-----------|--------------|----------------|-------------------| | 8位 | <code>AL</code> | 寄存器/内存（如 <code>BL</code>） | <code>AX</code>（AH 高8位，AL 低8位） | | 16位 | <code>AX</code> | 寄存器/内存（如 <code>CX</code>） | 高16位存 <code>DX</code>，低16位存 <code>AX</code> |</p>
+<p><strong>MUL 示例：</strong></p>
+<pre><code>
+MOV AL, 5   ; AL = 5
+MOV BL, 10  ; BL = 10
+MUL BL      ; AL * BL = 5 * 10 = 50，结果放入 AX
+            ; 结果：AX = 0032H (十进制 50)
+</code></pre>
+<p><strong>IMUL 示例：</strong></p>
+<pre><code>
+MOV AL, -5  ; AL = FBH
+MOV BL, 10  ; BL = 0AH
+IMUL BL     ; AL * BL = -5 * 10 = -50
+            ; 结果：AX = FFCEH (-50 的补码表示)
+</code></pre>
+<p><strong>为什么 MUL 和 IMUL 是两条指令？</strong></p>
+<p>加减法中有符号和无符号底层机器码共用（补码加减法的位运算结果一致），但乘法不行。计算 <code>0xFF × 0xFF</code>：</p>
+<ul>
+<li><strong>MUL（无符号）</strong>：255 × 255 = 65025（0xFE01）</li>
+<li><strong>IMUL（有符号补码）</strong>：0xFF 代表 -1，-1 × -1 = +1（0x0001）</li>
+</ul>
+<p>两种截然不同的结果，必须两条独立指令。</p>
+<p>优化提示：乘法消耗大，乘以 2 用 <code>ADD AL, AL</code> 或 <code>SHL AL, 1</code> 代替（MUL 是单操作数指令，<code>MUL AL, 2</code> 不合法）。</p>
+<p>标志位：乘法影响 CF 和 OF——高半部分（8位乘法的 AH，16位乘法的 DX）不为零时 CF=1 且 OF=1；高半部分全为 0（或符号扩展正确）时 CF=0 且 OF=0。MUL/IMUL 后 SF 和 ZF <strong>未定义</strong>，不能依赖它们做条件判断。</p>
+<h2>除法指令 DIV / IDIV</h2>
+<p>核心寄存器分配规则：</p>
+<p>| 除数位数 | 被除数所在寄存器 | 商存放寄存器 | 余数存放寄存器 | |---------|--------------|-----------|------------| | 8位（字节） | <code>AX</code> | <code>AL</code> | <code>AH</code> | | 16位（字） | <code>DX</code> + <code>AX</code>（高16位在DX，低16位在AX） | <code>AX</code> | <code>DX</code> |</p>
+<p><strong>DIV 示例（8位）：</strong></p>
+<pre><code>
+MOV AX, 0006H   ; 被除数：6（AH清零，AL=06H）
+MOV BL, 02H     ; 除数：2
+DIV BL          ; AL = AX / BL = 03H (商)，AH = AX % BL = 00H (余数)
+</code></pre>
+<p><strong>IDIV 示例（16位）：</strong></p>
+<pre><code>
+MOV AX, -10     ; 被除数：-10
+CWD             ; 将AX符号扩展到DX（DX=FFFFH, AX=FFF6H，组合为被除数 -10）
+MOV BX, 3       ; 除数：3
+IDIV BX         ; AX = (DX, AX) / BX = -3 (商)，DX = -1 (余数)
+</code></pre>
+<p><strong>除法异常</strong>：以下两种情况 CPU 会立即触发"中断 0 - 除法错误异常"：</p>
+<p>1. <strong>除零异常</strong>：除数为 0 2. <strong>除法溢出异常</strong>：商太大，无法放进指定的商寄存器</p>
+<p>很多早期的壳会故意构造一个必定触发除法溢出的代码块，并在自己接管的 SEH 中捕获这个崩溃——如果调试器拦截了异常却没有正确抛还给程序，反调试逻辑就能发现调试器的存在。</p>
+<p>区分有符号/无符号除法：</p>
+<ul>
+<li>有符号（IDIV）前有 <code>CWD</code>/<code>CBW</code> 做符号扩展</li>
+<li>无符号（DIV）前是 <code>XOR DX, DX</code> 或 <code>MOV DX, 0</code> 清零高位</li>
+</ul>
+<p>标志位：DIV/IDIV 后 SF、ZF、AF、PF <strong>未定义</strong>，不能依赖。只有 CF 和 OF 是确定的。</p>
+<h2>符号扩展指令 CBW / CWD</h2>
+<p>| 指令 | 助记符全称 | 操作对象 | 功能说明 | 扩展规则 | |------|-----------|---------|---------|---------| | <strong>CBW</strong> | Convert Byte to Word | <code>AL</code> 扩展到 <code>AX</code> | 8 位有符号数扩展为 16 位 | AL 最高位为 0 则 AH=00H；为 1 则 AH=FFH | | <strong>CWD</strong> | Convert Word to Doubleword | <code>AX</code> 扩展到 <code>DX:AX</code> | 16 位有符号数扩展为 32 位 | AX 最高位为 0 则 DX=0000H；为 1 则 DX=FFFFH |</p>
+<p>两条指令均不影响任何状态标志位，速度很快（2 个周期），本质是位操作。</p>
+<p>CBW/CWD 是 IDIV 的前置必备：</p>
+<pre><code>
+MOV AX, -10        ; AX = -10
+CWD                ; DX = FFFFH（符号扩展）
+MOV BX, 3
+IDIV BX            ; AX = -3（商），DX = -1（余数）
+</code></pre>
+<p>注意：确保 CBW/CWD 紧挨着 IDIV，中间不要插入可能修改 DX 的指令。</p>
+<h2>多字节运算步骤</h2>
+<p>多字节加法：</p>
+<p>1. 将被加数的低16位放入 AX，高16位放入 BX 2. 将加数的低16位放入 CX，高16位放入 DX 3. 用 <code>ADD AX, CX</code> 计算低16位 4. 用 <code>ADC BX, DX</code> 计算高16位（带进位）</p>
+<p>有符号除法：</p>
+<p>1. 将被除数放入 AX（8位除数）或 DX:AX（16位除数） 2. 执行 <code>CBW</code> 或 <code>CWD</code> 进行符号扩展 3. 将除数放入寄存器 4. 执行 <code>IDIV</code></p>
+<h2>附录：加法器原理与 MBA 代码混淆</h2>
+<p>8086 ALU 中的加法器由 <strong>1 个半加器 + 15 个全加器</strong>串联组成（全加器由 2 个半加器 + 1 个或门构成），实现 16 位二进制加法。利用 XOR/AND/SHL 三条逻辑指令，可以在软件层面模拟加法器的工作过程。这一原理衍生出 MBA（Mixed Boolean-Arithmetic）代码混淆技术。</p>
+<h3>半加器（Half Adder）</h3>
+<p>半加器处理两个单比特的加法，产生<strong>本位和（Sum）</strong>和<strong>进位（Carry）</strong>：</p>
+<p>| 输入 A | 输入 B | 本位和 (A XOR B) | 进位 (A AND B) | |--------|--------|-----------------|---------------| | 0 | 0 | 0 | 0 | | 0 | 1 | 1 | 0 | | 1 | 0 | 1 | 0 | | 1 | 1 | 0 | 1 |</p>
+<ul>
+<li><strong>本位和</strong>用 XOR：<code>1+1=0</code>（逢二进零），契合 XOR"相同为 0，不同为 1"</li>
+<li><strong>进位</strong>用 AND：只有 <code>1+1</code> 才进位，契合 AND"全 1 才为 1"</li>
+</ul>
+<p>半加器的致命弱点：无法处理低位传上来的进位。</p>
+<h3>全加器（Full Adder）</h3>
+<p>全加器有 3 个输入：<strong>加数 A、加数 B、低位进位 Cin</strong>。1 个全加器 = 2 个半加器 + 1 个或门（OR）。</p>
+<p>8086 的 16 位 ALU 中，物理电路由 <strong>1 个半加器（处理最低位）+ 15 个全加器（处理第 1~15 位）</strong>串联组成，前一级的进位输出（Cout）连到下一级的进位输入（Cin），形成<strong>行波进位加法器（Ripple-Carry Adder）</strong>。</p>
+<h3>软件模拟加法器（XOR + AND + SHL 循环）</h3>
+<p>在没有 ADD 指令的情况下，可以用 XOR、AND、SHL 三条指令在软件中模拟加法：</p>
+<pre><code>
+; 目标：用逻辑指令计算 AX + BX，不使用 ADD
+; 入口：AX = 加数1，BX = 加数2；出口：AX = 和
+
+Addition_Loop:
+    CMP BX, 0          ; 检查是否还有进位
+    JZ  Add_Done
+
+    MOV CX, AX
+    AND CX, BX         ; 找出哪些位同时为 1（产生进位）
+    SHL CX, 1          ; 进位左移 1 位，送给高位
+
+    XOR AX, BX         ; 算出不带进位的伪和
+
+    MOV BX, CX         ; 把移位后的进位放回 BX
+    JMP Addition_Loop  ; 继续，直到没有进位
+
+Add_Done:
+    ; AX 中就是和
+    RET
+</code></pre>
+<p>核心逻辑：</p>
+<p>1. <strong>本位加法</strong>靠 <code>XOR</code> 2. <strong>产生进位</strong>靠 <code>AND</code> 3. <strong>进位传递</strong>靠 <code>SHL 1</code>（进位要给高位用） 4. 重复直到没有进位为止</p>
+<h3>MBA 代码混淆</h3>
+<p>MBA（Mixed Boolean-Arithmetic）利用恒等式替换指令，隐藏真实计算意图：</p>
+<pre><code>
+A + B = (A XOR B) + ((A AND B) &lt;&lt; 1)
+</code></pre>
+<pre><code>
+; 原始代码
+ADD AX, BX         ; 一眼看出是加法
+
+; MBA 混淆后
+MOV SI, AX
+XOR AX, BX         ; 伪和
+AND SI, BX         ; 进位
+SHL SI, 1          ; 进位左移
+ADD AX, SI         ; 最终合并
+</code></pre>
+<p>看到 <code>XOR</code> + <code>AND</code> + <code>SHL</code> + <code>ADD</code> 的组合，可能不是加密算法，而是 MBA 混淆后的加法——恶意软件和加壳程序常用此技术隐藏算术运算，绕过特征码扫描。</p>
+<p>恒等式可以无限递归替换。令 <code>X = (a ^ b)</code>，<code>Y = 2(a & b)</code>，再次代入：</p>
+<pre><code>
+// 一阶混淆
+int n = (a ^ b) + (a &amp; b) * 2;
+
+// 二阶混淆（代码膨胀 4 倍）
+int n = ((a ^ b) ^ ((a &amp; b) * 2)) + ((a ^ b) &amp; ((a &amp; b) * 2)) * 2;
+</code></pre>
+<p>混淆器循环 10 次后，一句 <code>ADD</code> 会膨胀成成百上千行 XOR/AND/SHL。</p>
+<p>逆向恒等式：</p>
+<pre><code>
+a ^ b = a + b - 2 * (a &amp; b)
+</code></pre>
+<p>安全分析人员用此公式配合 SMT 求解器（如 Z3）反混淆，将垃圾代码压缩回原始加法。</p>
+<h2>逻辑运算指令</h2>
+<p>这些指令对操作数的每一个比特位进行按位（Bitwise）的布尔运算。</p>
+<h3>AND — 与</h3>
+<ul>
+<li>两个操作数对应位都为 1 时，结果位才为 1</li>
+<li>经典用途（掩码提取）：强行将某些位清零，保留特定位</li>
+<li>副作用：会清零 OF 和 CF</li>
+</ul>
+<pre><code>
+MOV AL, 0x35  ; 0x35 = 0011 0101 (奇数)
+AND AL, 0x01  ; 0x01 = 0000 0001 (掩码)
+              ; 执行后：AL = 0000 0001 = 0x01，高 7 位全被屏蔽
+</code></pre>
+<p>掩码是 <code>2^n - 1</code> 形式（0x0F、0x7F、0x3FF）时，AND 等价于<strong>取模 2^n</strong>：</p>
+<pre><code>
+AND AL, 0x0F       ; 取 AL 的低 4 位，等价于 AL % 16
+AND AX, 0x0007     ; 取 AX 的低 3 位，等价于 AX % 8
+</code></pre>
+<h3>OR — 或</h3>
+<ul>
+<li>对应位只要有一个为 1，结果位就为 1</li>
+<li>经典用途（置位）：强行将某些位置为 1，其他位保持不变</li>
+</ul>
+<pre><code>
+MOV AL, &#x27;A&#x27;   ; &#x27;A&#x27; 的 ASCII 是 0x41 (0100 0001)
+OR  AL, 0x20  ; 第 5 位设为 1 (0010 0000)
+              ; 执行后：AL = 0110 0001 = 0x61 (&#x27;a&#x27;)
+</code></pre>
+<p>与和或可以相互转换——德摩根定律。</p>
+<h3>XOR — 异或</h3>
+<ul>
+<li>对应位<strong>不同则为 1</strong>，相同则为 0</li>
+<li>任何数和自己 XOR，结果必定是 0</li>
+<li>用途：清零、按位取反、加密（不带进位的加法）</li>
+</ul>
+<pre><code>
+XOR AX, AX    ; AX = 0，比 MOV AX, 0 更高效
+</code></pre>
+<p><code>XOR AX, AX</code> 机器码 <code>31 C0</code>（2 字节），<code>MOV AX, 0</code> 机器码 <code>B8 00 00</code>（3 字节）且要去内存取立即数——反汇编中几乎看不到 <code>MOV AX, 0</code>，编译器必定优化为 XOR。</p>
+<p>XOR 加密的对称性：</p>
+<pre><code>
+XOR AL, 0x55       ; 用密钥 0x55 加密 AL
+XOR AL, 0x55       ; 再次 XOR 即可解密
+</code></pre>
+<p>明文 XOR 密钥 = 密文，密文 XOR 密钥 = 明文。大量 XOR 配合循环和密钥数组时，极可能是流密码或自定义加密算法。</p>
+<h3>NOT — 取反码</h3>
+<ul>
+<li>单操作数指令，将寄存器或内存中的每一位取反（0变1，1变0）</li>
+<li>求反码（One's Complement）</li>
+</ul>
+<p><strong>NOT 与 NEG 的区别</strong>：</p>
+<ul>
+<li><code>NOT</code> 是按位取反（求反码），不影响 CF 和 OF</li>
+<li><code>NEG</code> 是取反加一（求补码，即计算相反数 <code>-x</code>），会设置 CF 和 OF</li>
+</ul>
+<pre><code>
+MOV AL, 0x05
+NOT AL             ; AL = 0xFA（按位取反，= 250）
+; 对比：
+MOV AL, 0x05
+NEG AL             ; AL = 0xFB（取反加一，= -5）
+</code></pre>
+<p><code>NOT</code> + <code>INC</code> 组合起来就是 <code>NEG</code>。<code>NOT AX</code> 等价于 <code>XOR AX, 0xFFFF</code>。</p>
+<h3>TEST — 测试</h3>
+<ul>
+<li>纯粹为了影响标志位而存在的指令，CPU 内部执行与 AND 一模一样的位运算</li>
+<li>核心区别：<code>AND</code> 把结果写回目标寄存器，<strong><code>TEST</code> 算完直接丢弃结果，只更新标志位（ZF、SF 等）</strong></li>
+</ul>
+<pre><code>
+TEST AX, AX    ; 检查 AX 是否为 0
+JZ   ZERO_LABEL ; 如果 AX == 0，跳转
+</code></pre>
+<h2>移位指令</h2>
+<p>移位指令将寄存器中的数据整体向左或向右移动，移出的位送入 <strong>CF（进位标志位）</strong>。</p>
+<p>核心限制：8086 中移位的次数只能硬编码为 <code>1</code>，或者<strong>必须存放在 <code>CL</code> 寄存器中</strong>（不能是其他寄存器）：</p>
+<ul>
+<li>合法：<code>SHL AX, 1</code> 或 <code>SHL AX, CL</code></li>
+<li>非法：<code>SHL AX, 2</code> 或 <code>SHL AX, DL</code></li>
+</ul>
+<h3>SHL / SHR — 逻辑移位</h3>
+<p>| 指令 | 机制 | 数学意义 | |------|------|---------| | <strong>SHL</strong>（逻辑左移） | 整体左移，右边补 0，最高位进 CF | 等价于<strong>乘以 2</strong> 的 n 次方 | | <strong>SHR</strong>（逻辑右移） | 整体右移，左边补 0，最低位进 CF | 等价于<strong>无符号数除以 2</strong> 的 n 次方 |</p>
+<p>移位代替乘除 2 的幂次（编译器几乎永远这么干——移位只要 1 个周期，MUL/DIV 要几十个）：</p>
+<pre><code>
+SHL AX, 1        ; AX × 2
+MOV CL, 3
+SHL AX, CL       ; AX × 8
+MOV CL, 2
+SHR AX, CL       ; AX ÷ 4（无符号）
+</code></pre>
+<h3>SAL / SAR — 算术移位</h3>
+<p>| 指令 | 机制 | 数学意义 | |------|------|---------| | <strong>SAL</strong>（算术左移） | 与 SHL 机器码和硬件行为完全一样 | 有符号数乘以 2 的 n 次方 | | <strong>SAR</strong>（算术右移） | 整体右移，左边填入原符号位的值，最低位进 CF | 有符号数除以 2 的 n 次方（<strong>向负无穷取整</strong>） |</p>
+<p>SHR 与 SAR 的区别示例：</p>
+<pre><code>
+; 情况 A: 使用 SHR
+MOV AL, 0x80
+SHR AL, 1  ; AL = 0100 0000（最高位补 0，变成正数 +64，逻辑被破坏）
+
+; 情况 B: 使用 SAR
+MOV AL, 0x80
+SAR AL, 1  ; AL = 1100 0000（最高位复制原来的符号位 1，变成 -64，逻辑正确）
+</code></pre>
+<p>C 语言中 <code>x >> 2</code> 编译成 <code>SHR</code> 说明 x 是 <code>unsigned</code>；编译成 <code>SAR</code> 说明 x 是带符号 <code>int</code>。</p>
+<p>注意：SAR 的取整方向是向负无穷（向下取整），C 语言整数除法是向零取整。对负数两者结果不同（如 -3 ÷ 2，SAR 得 -2，C 语言得 -1），编译器会在 SAR 后加修正代码模拟向零取整。</p>
+<h2>循环移位指令</h2>
+<p>这些指令像一个转轮，被移出的位不会丢失，而是绕一圈回到数据的另一端。在密码学（AES 等加密算法）、哈希函数（SHA、MD5）中极度常见，普通业务代码几乎不用。</p>
+<p>| 指令 | 机制 | |------|------| | <strong>ROL</strong>（循环左移） | 最高位被移出后进入 CF，同时<strong>绕回到最低位</strong>填空 | | <strong>ROR</strong>（循环右移） | 最低位被移出后进入 CF，同时<strong>绕回到最高位</strong> |</p>
+<pre><code>
+ROL AX, 1        ; 循环左移 1 位
+ROR AX, CL       ; 循环右移 CL 位
+</code></pre>
+<p>大量 ROL/ROR 配合 XOR，基本可以断定是加密或哈希运算。</p>
+<h3>RCL / RCR — 带进位循环移位</h3>
+<p>CF 不再是被动接受挤出位的垃圾桶，而是作为<strong>数据总长度的一部分</strong>参与循环：</p>
+<p>| 指令 | 机制 | |------|------| | <strong>RCL</strong>（带进位循环左移） | 8 位的 AL 和 1 位的 CF 组成 9 位寄存器，AL 最高位进 CF，CF 旧值填入 AL 最低位 | | <strong>RCR</strong>（带进位循环右移） | 同上，方向相反 |</p>
+<p>经典用途——大数移位（超过寄存器宽度的数据整体移位）：</p>
+<pre><code>
+; 初始状态：DX = 0x1234, AX = 0x5678
+; 目标：32 位数整体右移 1 位
+SHR DX, 1  ; 步骤1：高半部分逻辑右移，DX 最低位被挤到 CF
+RCR AX, 1  ; 步骤2：低半部分带进位循环右移，CF 中的旧最低位接到 AX 最高位
+           ; 完成跨越寄存器的 32 位整体右移
+</code></pre>
+<p><code>SHR</code> + <code>RCR</code> 或 <code>SHL</code> + <code>RCL</code> 的组合说明代码在处理超过寄存器宽度的数据（大数运算，如 RSA），普通代码不会这样写。</p>
+<h2>十进制调整指令（BCD）</h2>
+<p>BCD 码是用 4 个二进制位（半个字节，Nibble）表示 1 个十进制数字（0-9）：</p>
+<ul>
+<li>纯二进制表示十进制 15：<code>0x0F</code>（4 个比特 <code>1111</code>）</li>
+<li>BCD 码表示十进制 15：<code>0x15</code>（<code>0001 0101</code>）</li>
+</ul>
+<p>两类：</p>
+<p>1. <strong>压缩 BCD 码</strong>：1 个字节放 2 个十进制数字（<code>0x15</code> 表示 15） 2. <strong>非压缩 BCD 码</strong>：1 个字节只放 1 个十进制数字，高 4 位全 0</p>
+<h3>压缩 BCD 调整：DAA / DAS</h3>
+<p>| 指令 | 使用场景 | 底层机制 | |------|---------|---------| | <strong>DAA</strong> | <code>ADD</code>/<code>ADC</code> 后调用 | 低4位 >9 或 AF=1 时加 <code>0x06</code>；高4位 >9 或 CF=1 时加 <code>0x60</code> | | <strong>DAS</strong> | <code>SUB</code>/<code>SBB</code> 后调用 | 与 DAA 相反，发生借位时减 <code>0x06</code> 或 <code>0x60</code> |</p>
+<pre><code>
+MOV AL, 0x28  ; BCD 码 28
+ADD AL, 0x35  ; 0x28 + 0x35 = 0x5D（纯二进制结果，不是 BCD）
+DAA           ; 发现低4位是 D(&gt;9)，AL 自动加上 0x06
+              ; 0x5D + 0x06 = 0x63（BCD 码 63 ✓）
+</code></pre>
+<h3>非压缩 BCD 调整：AAA / AAS / AAM / AAD</h3>
+<p>| 指令 | 使用场景 | 机制 | |------|---------|------| | <strong>AAA</strong> | 非压缩 BCD 加法后 | AL 低4位 >9 或 AF=1 时，AH 加 1，AL 加 6 后清空高4位 | | <strong>AAS</strong> | 非压缩 BCD 减法后 | 与 AAA 相反，需要借位时 AH 减 1 | | <strong>AAM</strong> | <code>MUL</code> 后调整 | 将 AL 除以 10，商→AH，余数→AL | | <strong>AAD</strong> | <code>DIV</code> 前调整（唯一在运算前执行的调整指令） | <code>AL = (AH × 10) + AL</code>，然后清零 AH |</p>
+<p><strong>AAM 示例：</strong></p>
+<pre><code>
+MOV AL, 0x07   ; 非压缩 BCD 7
+MOV BL, 0x09   ; 非压缩 BCD 9
+MUL BL         ; 7 × 9 = 63 (0x003F)
+AAM            ; AL(63) ÷ 10 = 商6→AH, 余数3→AL
+               ; 结果：AX = 0x0603（非压缩 BCD 码的 63）
+</code></pre>
+<p><strong>AAD 示例：</strong></p>
+<pre><code>
+MOV AX, 0x0603 ; 被除数：非压缩 BCD 码 63
+MOV BL, 0x09   ; 除数：非压缩 BCD 码 9
+AAD            ; AL = (6 × 10) + 3 = 63 (0x3F)
+DIV BL         ; 0x3F ÷ 0x09 = 商7(AL)，余0(AH)
+</code></pre>
+<p>注意：DAA/DAS/AAA/AAS/AAM/AAD 这六条指令在 x86-64 长模式下会触发"非法指令"异常（Intel/AMD 为精简硅片移除了硬件支持，现代编译器全程纯二进制计算），只在 16 位和 32 位遗留代码中存在。</p>
+<p>另注意：所有逻辑运算指令（AND/OR/XOR/TEST）执行后 CF 和 OF 被强制清零。如果后续代码依赖 CF（如 ADC/SBB），逻辑运算后 CF 会丢失。</p>
+<h2>常用位操作套路</h2>
+<p>判断奇偶（AND 掩码）：</p>
+<pre><code>
+MOV AL, 0x35
+AND AL, 0x01  ; 结果为 1 表示奇数，0 表示偶数
+</code></pre>
+<p>ASCII 大小写转换（OR 置位 / AND 清位）：</p>
+<pre><code>
+OR AL, 0x20   ; 大写转小写（第5位置1）
+AND AL, 0xDF  ; 小写转大写（第5位清零）
+</code></pre>
+<p>寄存器清零（XOR）：</p>
+<pre><code>
+XOR AX, AX    ; 比 MOV AX, 0 更高效
+</code></pre>
+<p>检查寄存器是否为 0（TEST）：</p>
+<pre><code>
+TEST AX, AX
+JZ   IS_ZERO  ; AX == 0 时跳转
+</code></pre>
+<p>32 位数整体右移：</p>
+<pre><code>
+SHR DX, 1     ; 高16位右移，最低位进 CF
+RCR AX, 1     ; 低16位带进位右移，CF 接到最高位
+</code></pre>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

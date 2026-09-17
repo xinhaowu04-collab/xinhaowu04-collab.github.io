@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>资源与 TLS · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">资源与 TLS</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>资源与 TLS</h1>
+<p>资源表（索引 2）的树形结构与解析，以及线程局部存储体系：TLS 目录（索引 9）、动态 TLS、静态 TLS 与 <code>thread_local</code>、TLS 回调。</p>
+<h2>资源表</h2>
+<p>资源表位于 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE]</code>（<code>DataDirectory[2]</code>），保存图标、光标、位图、菜单、对话框、字符串、版本信息、Manifest 和自定义二进制数据等。它不是简单数组，而是一棵树：</p>
+<pre><code>
+Type（类型）
+  ↓
+Name / ID（名称或编号）
+  ↓
+Language（语言）
+  ↓
+IMAGE_RESOURCE_DATA_ENTRY
+  ↓
+实际资源数据
+</code></pre>
+<p>每一级目录头，16 字节：</p>
+<pre><code>
+typedef struct _IMAGE_RESOURCE_DIRECTORY
+{
+    DWORD Characteristics;
+    DWORD TimeDateStamp;
+    WORD  MajorVersion;
+    WORD  MinorVersion;
+    WORD  NumberOfNamedEntries;
+    WORD  NumberOfIdEntries;
+} IMAGE_RESOURCE_DIRECTORY;
+</code></pre>
+<p>紧随其后的表项数为 <code>NumberOfNamedEntries + NumberOfIdEntries</code>。每个目录项 8 字节：</p>
+<pre><code>
+typedef struct _IMAGE_RESOURCE_DIRECTORY_ENTRY
+{
+    union
+    {
+        DWORD Name;
+        WORD  Id;
+    };
+    union
+    {
+        DWORD OffsetToData;
+        struct
+        {
+            DWORD OffsetToDirectory : 31;
+            DWORD DataIsDirectory   : 1;
+        };
+    };
+} IMAGE_RESOURCE_DIRECTORY_ENTRY;
+</code></pre>
+<p>名称字符串：</p>
+<pre><code>
+typedef struct _IMAGE_RESOURCE_DIR_STRING_U
+{
+    WORD  Length;
+    WCHAR NameString[1];
+} IMAGE_RESOURCE_DIR_STRING_U;
+</code></pre>
+<p>叶子数据描述符，也是 16 字节：</p>
+<pre><code>
+typedef struct _IMAGE_RESOURCE_DATA_ENTRY
+{
+    DWORD OffsetToData;  // 实际资源数据 RVA
+    DWORD Size;
+    DWORD CodePage;
+    DWORD Reserved;
+} IMAGE_RESOURCE_DATA_ENTRY;
+</code></pre>
+<p>目录项的两个 DWORD 都复用最高位作标志：</p>
+<pre><code>
+第一个 DWORD：
+最高位 0 → 低位是整数 ID
+最高位 1 → 低 31 位是相对资源根的名称字符串偏移
+
+第二个 DWORD：
+最高位 1 → 低 31 位指向下一层目录
+最高位 0 → 低 31 位指向 IMAGE_RESOURCE_DATA_ENTRY
+</code></pre>
+<p>最关键的两种地址语义：</p>
+<p>| 位置 | 地址含义 | |---|---| | 目录项中的名称、子目录、数据描述符偏移 | 相对整棵资源树根的偏移 | | <code>IMAGE_RESOURCE_DATA_ENTRY.OffsetToData</code> | 实际资源数据的 RVA |</p>
+<p>字符串名称使用 UTF-16，长度由前置 <code>WORD Length</code> 指定，不应依赖 <code>\0</code> 终止。</p>
+<p>常见资源类型：</p>
+<p>| ID | 类型 | |---:|---| | <code>1</code> | <code>RT_CURSOR</code> | | <code>2</code> | <code>RT_BITMAP</code> | | <code>3</code> | <code>RT_ICON</code> | | <code>4</code> | <code>RT_MENU</code> | | <code>5</code> | <code>RT_DIALOG</code> | | <code>6</code> | <code>RT_STRING</code> | | <code>9</code> | <code>RT_ACCELERATOR</code> | | <code>10</code> | <code>RT_RCDATA</code> | | <code>11</code> | <code>RT_MESSAGETABLE</code> | | <code>12</code> | <code>RT_GROUP_CURSOR</code> | | <code>14</code> | <code>RT_GROUP_ICON</code> | | <code>16</code> | <code>RT_VERSION</code> | | <code>24</code> | <code>RT_MANIFEST</code> |</p>
+<p><code>RT_GROUP_ICON</code> 描述一组图标并引用多个 <code>RT_ICON</code>；提取程序图标时不能只随便取一个 <code>RT_ICON</code>。</p>
+<p>解析步骤：</p>
+<pre><code>
+1. 检查 NumberOfRvaAndSizes &gt; 2。
+2. 记录资源根 RVA = DataDirectory[2].VirtualAddress。
+3. 资源根 RVA → FOA，读取 16 字节目录头。
+4. 遍历 NamedEntries + IdEntries 个 8 字节表项。
+5. 第一个 DWORD 最高位决定名称还是整数 ID。
+6. 第二个 DWORD 最高位决定递归到子目录还是读取数据描述符。
+7. 目录内部目标 RVA = 资源根 RVA + (值 &amp; 7FFFFFFFh)。
+8. 叶子 IMAGE_RESOURCE_DATA_ENTRY.OffsetToData 直接按 RVA 转 FOA。
+9. 按 Size 读取实际资源数据。
+10. 对目录深度、重复偏移、条目数量和所有范围进行限制。
+</code></pre>
+<p>软件运行时可按类型、名称和语言查找：</p>
+<pre><code>
+FindResource / FindResourceEx
+  ↓
+LoadResource
+  ↓
+LockResource
+  ↓
+得到资源数据指针
+
+SizeofResource → 取得资源大小
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>资源表是树，不是线性数组；只读一层会丢失名称、语言或数据叶子</li>
+<li>所有目录内部偏移都相对于资源根，不是相对当前目录</li>
+<li>名称偏移不是普通 RVA，先加资源根 RVA</li>
+<li>叶子 <code>IMAGE_RESOURCE_DATA_ENTRY.OffsetToData</code> 已经是 RVA，不能再加资源根</li>
+<li>名称字符串是长度前缀 UTF-16，不应盲找 <code>\0</code></li>
+<li><code>.rsrc</code> 只是常见节名，应以数据目录为准</li>
+<li><code>CodePage</code> 要结合资源类型解释；图标、位图等二进制资源不一定按文本代码页处理</li>
+<li><code>Reserved</code> 应为 0；非零要提示而不能随意解释</li>
+<li>递归解析必须限制深度并检测循环偏移，避免异常文件导致死循环</li>
+</ul>
+<p>计算示例：</p>
+<pre><code>
+资源根 RVA = 00005000
+资源目录 Size = 00001000
+资源根 FOA = 00002600
+</code></pre>
+<p>类型项：</p>
+<pre><code>
+Name         = 00000018
+OffsetToData = 80000040
+
+Name 最高位为 0：ID = 18h = 24 = RT_MANIFEST
+OffsetToData 最高位为 1：指向子目录
+
+子目录 RVA = 00005000 + 00000040 = 00005040
+</code></pre>
+<p>最终语言层表项 <code>OffsetToData = 000000A0</code>，最高位为 0，目标是数据描述符：</p>
+<pre><code>
+数据描述符 RVA = 00005000 + 000000A0 = 000050A0
+</code></pre>
+<p>描述符内容：</p>
+<pre><code>
+OffsetToData = 00005200  // 直接是实际资源 RVA
+Size         = 00000180
+CodePage     = 000004B0
+Reserved     = 00000000
+</code></pre>
+<p><code>00005200</code> RVA 转为 FOA <code>00002800</code>，实际资源位于文件 FOA <code>00002800</code>，长度 <code>180h</code> 字节。示例路径：</p>
+<pre><code>
+Type=24 (Manifest) → Name=1 → Language=0409h → 数据描述符 → 实际资源
+</code></pre>
+<h2>TLS 表</h2>
+<p>TLS 表位于 <code>DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS]</code>（<code>DataDirectory[9]</code>），描述静态线程局部存储：同一个声明在每个线程中都有独立的数据副本。它还可提供进程/线程生命周期中自动调用的 TLS 回调数组。</p>
+<p>目录入口 <code>VirtualAddress</code> 是 TLS 目录结构的 RVA。PE32 结构：</p>
+<pre><code>
+typedef struct _IMAGE_TLS_DIRECTORY32
+{
+    DWORD StartAddressOfRawData;
+    DWORD EndAddressOfRawData;
+    DWORD AddressOfIndex;
+    DWORD AddressOfCallBacks;
+    DWORD SizeOfZeroFill;
+    DWORD Characteristics;
+} IMAGE_TLS_DIRECTORY32;
+</code></pre>
+<p>PE32 大小 24 字节（<code>18h</code>）；PE32+ 的前四个地址字段为 8 字节，结构大小 40 字节（<code>28h</code>）。</p>
+<p>| 偏移 | 大小 | 字段 | |---:|---:|---| | <code>+00</code> | 4 | <code>StartAddressOfRawData</code> | | <code>+04</code> | 4 | <code>EndAddressOfRawData</code> | | <code>+08</code> | 4 | <code>AddressOfIndex</code> | | <code>+0C</code> | 4 | <code>AddressOfCallBacks</code> | | <code>+10</code> | 4 | <code>SizeOfZeroFill</code> | | <code>+14</code> | 4 | <code>Characteristics</code> |</p>
+<p>TLS 目录主要描述四件事：TLS 初始化模板在哪里、还要追加多少零、加载器把模块 TLS 索引写到哪里、进程/线程生命周期要调用哪些 TLS 回调。</p>
+<p>地址语义是本节最关键的规则：目录入口 <code>DataDirectory[9].VirtualAddress</code> 是 RVA，但结构内前四个字段 <code>StartAddressOfRawData</code>、<code>EndAddressOfRawData</code>、<code>AddressOfIndex</code>、<code>AddressOfCallBacks</code> 都是 VA。磁盘解析时先做 <code>字段 VA - ImageBase = RVA</code>，再 RVA→FOA。这些 VA 通常还需要相应重定位，因为 ASLR 或手工加载可能改变模块实际基址。</p>
+<h3>初始化模板与零填充</h3>
+<pre><code>
+已初始化模板大小 = EndAddressOfRawData - StartAddressOfRawData
+每线程 TLS 块大小 = 模板大小 + SizeOfZeroFill
+</code></pre>
+<p>每个线程创建时，加载器为该模块分配线程私有 TLS 块，复制模板，再补 <code>SizeOfZeroFill</code> 个零。</p>
+<h3>AddressOfIndex</h3>
+<p>它不是 TLS 索引值，而是保存索引的变量地址。加载器给模块分配索引后执行概念操作 <code>[AddressOfIndex] = TLS Index</code>。编译器生成的访问逻辑大致是：</p>
+<pre><code>
+找到当前线程 TLS 数组
+  ↓
+读取当前模块 TLS 索引
+  ↓
+索引到当前线程中的模块 TLS 块
+  ↓
+加变量在块内的偏移
+  ↓
+访问本线程自己的变量
+</code></pre>
+<p>x86 上可通过 <code>FS</code> 相关的线程环境机制找到线程数据；这是编译器和加载器协同完成的底层过程。</p>
+<p>解析步骤：</p>
+<pre><code>
+1. 检查 NumberOfRvaAndSizes &gt; 9。
+2. DataDirectory[9].VirtualAddress：按 RVA 转 FOA。
+3. 根据 PE32/PE32+ 选择结构。
+4. TLS 结构前四字段按 VA 处理：减 ImageBase 后再 RVA→FOA。
+5. 验证 Start &lt;= End，模板范围位于有效映像/文件范围。
+6. 计算模板大小和总 TLS 大小，检查加法溢出。
+7. AddressOfIndex 应指向合适的可写映像区域。
+8. AddressOfCallBacks 指向的数组应有边界并以 0 结束。
+9. 回调地址应位于有效映像范围，运行时还要考虑重定位后的实际 VA。
+</code></pre>
+<p>手工加载带静态 TLS 的 PE，不能只完成头/节复制、重定位、导入和跳 OEP；还要初始化 TLS 索引、为当前线程分配并复制模板、补零、写入索引、最后按顺序调用 TLS 回调。</p>
+<p>注意：</p>
+<ul>
+<li>TLS 目录入口是 RVA，但结构中的前四个字段是 VA</li>
+<li><code>EndAddressOfRawData - StartAddressOfRawData</code> 是模板范围长度；不要额外加 1</li>
+<li><code>AddressOfIndex</code> 是索引变量的地址，不是索引本身</li>
+<li><code>AddressOfCallBacks</code> 是回调数组的 VA；数组元素也保存回调 VA</li>
+<li>TLS 数据常在 <code>.tls</code>，回调数组可能在 <code>.rdata</code>，回调代码可能在 <code>.text</code>；都不能依赖节名</li>
+<li>静态 TLS 解决每线程数据，动态 <code>TlsAlloc</code> API 不依赖 PE TLS 目录</li>
+<li>只调用 TLS 回调而没有先建立正确的 TLS 数据，回调访问静态 TLS 变量时仍可能崩溃</li>
+</ul>
+<p>计算示例：</p>
+<pre><code>
+ImageBase = 00400000
+DataDirectory[9].VirtualAddress = 00005000  // TLS 目录 RVA
+
+StartAddressOfRawData = 00406000  // VA
+EndAddressOfRawData   = 00406008  // VA
+AddressOfIndex        = 00406100  // VA
+AddressOfCallBacks    = 00406200  // VA
+SizeOfZeroFill        = 00000004
+Characteristics       = 00000000
+</code></pre>
+<p>换算：</p>
+<pre><code>
+TLS 模板 RVA   = 00406000 - 00400000 = 00006000
+Index 变量 RVA = 00406100 - 00400000 = 00006100
+回调数组 RVA   = 00406200 - 00400000 = 00006200
+
+模板大小 = 00406008 - 00406000 = 8 字节
+总 TLS 块 = 8 + 4 = 12 字节
+</code></pre>
+<p>模板字节 <code>0A 00 00 00 14 00 00 00</code> 按小端可表示两个初值 <code>10</code> 和 <code>20</code>；每线程再追加 4 字节零。加载器分配 <code>TLS Index = 3</code> 时，<code>[00406100] = 00000003</code>。</p>
+<h2>动态 TLS（TlsAlloc）</h2>
+<p>动态 TLS 是在程序运行时申请一个进程内 TLS 索引，并让每个线程在同一索引下保存自己的值。它不依赖 <code>IMAGE_TLS_DIRECTORY</code>。</p>
+<p>四个主要 API：</p>
+<pre><code>
+DWORD  TlsAlloc();
+BOOL   TlsSetValue(DWORD index, LPVOID value);
+LPVOID TlsGetValue(DWORD index);
+BOOL   TlsFree(DWORD index);
+</code></pre>
+<p>| API | 责任 | |---|---| | <code>TlsAlloc</code> | 申请进程内索引；失败返回 <code>TLS_OUT_OF_INDEXES</code> | | <code>TlsSetValue</code> | 给调用它的当前线程写入一个槽位值 | | <code>TlsGetValue</code> | 从调用它的当前线程读取槽位值 | | <code>TlsFree</code> | 释放索引，不释放槽位值指向的堆内存 |</p>
+<p>索引由进程共享，但槽位属于每个线程：</p>
+<pre><code>
+g_tlsIndex = 5
+
+线程 A 的槽位 5 → A 的数据
+线程 B 的槽位 5 → B 的数据
+线程 C 的槽位 5 → C 的数据
+</code></pre>
+<p>核心是：<strong>索引相同，槽位值可以不同</strong>。槽位类型是 <code>LPVOID</code>，通常保存每线程上下文指针，例如错误状态、日志缓冲区、缓存或解析上下文。API 只负责保存/取出值，不负责对象分配、析构或释放。</p>
+<p>完整示例——每个线程保存自己的计数器：</p>
+<pre><code>
+#include &lt;windows.h&gt;
+#include &lt;stdio.h&gt;
+
+struct ThreadData
+{
+    int counter;
+};
+
+DWORD g_tlsIndex = TLS_OUT_OF_INDEXES;
+
+DWORD WINAPI WorkerThread(LPVOID)
+{
+    ThreadData* data =
+        static_cast&lt;ThreadData*&gt;(
+            HeapAlloc(GetProcessHeap(),
+                      HEAP_ZERO_MEMORY,
+                      sizeof(ThreadData)));
+
+    if (data == nullptr)
+    {
+        return 1;
+    }
+
+    data-&gt;counter = 0;
+
+    if (!TlsSetValue(g_tlsIndex, data))
+    {
+        HeapFree(GetProcessHeap(), 0, data);
+        return 1;
+    }
+
+    for (int i = 0; i &lt; 3; ++i)
+    {
+        ThreadData* current =
+            static_cast&lt;ThreadData*&gt;(
+                TlsGetValue(g_tlsIndex));
+
+        ++current-&gt;counter;
+
+        printf(&quot;线程 %lu 的计数器 = %d\n&quot;,
+               GetCurrentThreadId(),
+               current-&gt;counter);
+
+        Sleep(10);
+    }
+
+    ThreadData* current =
+        static_cast&lt;ThreadData*&gt;(
+            TlsGetValue(g_tlsIndex));
+
+    HeapFree(GetProcessHeap(), 0, current);
+    TlsSetValue(g_tlsIndex, nullptr);
+    return 0;
+}
+
+int main()
+{
+    g_tlsIndex = TlsAlloc();
+
+    if (g_tlsIndex == TLS_OUT_OF_INDEXES)
+    {
+        return 1;
+    }
+
+    HANDLE threads[2];
+
+    threads[0] = CreateThread(
+        nullptr, 0, WorkerThread, nullptr, 0, nullptr);
+
+    threads[1] = CreateThread(
+        nullptr, 0, WorkerThread, nullptr, 0, nullptr);
+
+    WaitForMultipleObjects(2, threads, TRUE, INFINITE);
+
+    CloseHandle(threads[0]);
+    CloseHandle(threads[1]);
+
+    TlsFree(g_tlsIndex);
+    return 0;
+}
+</code></pre>
+<p>生命周期顺序：</p>
+<pre><code>
+进程：TlsAlloc
+  ↓
+每线程：分配 ThreadData → TlsSetValue
+  ↓
+每线程：TlsGetValue → 使用自己的数据
+  ↓
+每线程退出前：释放自己的 ThreadData → 槽位置空
+  ↓
+所有线程结束：TlsFree 释放进程索引
+</code></pre>
+<p>动态 TLS 也可使用第一次访问时发现槽位为空、再为当前线程分配的惰性初始化方式；若在 DLL 中用 <code>DllMain</code> 管理线程创建/退出，还要遵守加载器上下文的限制，不能把 TLS API 当成自动析构机制。</p>
+<p>注意：</p>
+<ul>
+<li><code>TlsAlloc</code> 返回的是索引，不是线程编号，也不是数据地址</li>
+<li><code>TlsSetValue</code> 只修改当前线程的槽位</li>
+<li><code>TlsFree</code> 不会释放 <code>HeapAlloc/new</code> 得到的每线程对象</li>
+<li>动态 TLS 不会自动调用 <code>DLL_THREAD_ATTACH/DETACH</code>，也不会自动为每线程分配数据</li>
+<li>把同一个全局对象地址放进每个线程的槽位，数据仍然共享，仍可能需要同步</li>
+<li>TLS 让槽位线程独立，不等于它指向的一切都自动线程安全</li>
+<li>多线程输出顺序受调度影响，交错顺序不是固定结论</li>
+</ul>
+<p>地址模型示例：</p>
+<pre><code>
+g_tlsIndex = 5
+
+线程 A：TlsSetValue(5, 0012A000)
+线程 B：TlsSetValue(5, 0034B000)
+
+线程 A：TlsGetValue(5) → 0012A000
+线程 B：TlsGetValue(5) → 0034B000
+</code></pre>
+<p>可能输出：</p>
+<pre><code>
+线程1000 的计数器 = 1
+线程1001 的计数器 = 1
+线程1000 的计数器 = 2
+线程1001 的计数器 = 2
+线程1000 的计数器 = 3
+线程1001 的计数器 = 3
+</code></pre>
+<h2>静态 TLS 与 thread_local</h2>
+<p>静态 TLS 是编译、链接阶段已经声明好的线程局部数据：工具链把初始化模板和 TLS 目录写入 PE，Windows 加载器为每个线程复制一份。两种写法：</p>
+<pre><code>
+__declspec(thread) int g_counter = 10; // MSVC 扩展
+thread_local int g_counter = 10;       // C++11 标准写法
+</code></pre>
+<p><code>thread_local</code> 描述变量具有线程存储期：每个线程独立一份、分别初始化、分别修改，并在线程结束时销毁。它不是线程对象，也不会创建或启动线程。</p>
+<p>源代码与 PE 的关系：</p>
+<pre><code>
+thread_local / __declspec(thread)
+  ↓ 编译、链接
+.tls 相关模板 + IMAGE_TLS_DIRECTORY
+  ↓ Windows 加载器
+每个线程得到独立 TLS 块
+</code></pre>
+<p>编译器把对静态 TLS 变量的普通访问转换为“当前线程 TLS 数组 + 模块 TLS 索引 + 变量块内偏移”的访问逻辑，程序员通常不需要显式调用 <code>TlsAlloc/TlsGetValue/TlsSetValue</code>。</p>
+<p>普通局部变量、静态变量、线程局部变量：</p>
+<pre><code>
+int Test()
+{
+    int a = 0;
+    static int b = 0;
+    thread_local int c = 0;
+}
+</code></pre>
+<p>| 变量 | 有多少份 | 生命周期 | |---|---|---| | <code>a</code> | 每次函数调用一份 | 函数返回后结束 | | <code>b</code> | 整个进程一份 | 程序结束时结束 | | <code>c</code> | 每个线程一份 | 对应线程结束时结束 |</p>
+<p>函数内示例：</p>
+<pre><code>
+int NextNumber()
+{
+    thread_local int number = 0;
+    return ++number;
+}
+</code></pre>
+<p>线程 A 连续调用可得到 <code>1、2、3</code>；线程 B 第一次调用仍从 <code>1</code> 开始。函数作用域 <code>thread_local</code> 通常在该线程第一次执行到声明处时初始化一次；若初始化抛出异常，后续进入可再次尝试。</p>
+<p>类对象也可使用线程存储期，每个线程有独立对象，并分别执行构造和析构：</p>
+<pre><code>
+class ThreadContext
+{
+public:
+    ThreadContext()
+    {
+        // 当前线程的对象初始化
+    }
+
+    ~ThreadContext()
+    {
+        // 当前线程结束时清理
+    }
+};
+
+thread_local ThreadContext context;
+</code></pre>
+<p>完整示例：</p>
+<pre><code>
+#include &lt;windows.h&gt;
+#include &lt;stdio.h&gt;
+
+__declspec(thread) int g_counter = 10;
+
+DWORD WINAPI Worker(LPVOID)
+{
+    ++g_counter;
+
+    printf(&quot;线程 %lu: g_counter = %d\n&quot;,
+           GetCurrentThreadId(),
+           g_counter);
+
+    ++g_counter;
+
+    printf(&quot;线程 %lu: g_counter = %d\n&quot;,
+           GetCurrentThreadId(),
+           g_counter);
+
+    return 0;
+}
+
+int main()
+{
+    HANDLE threads[2];
+
+    threads[0] = CreateThread(
+        nullptr, 0, Worker, nullptr, 0, nullptr);
+
+    threads[1] = CreateThread(
+        nullptr, 0, Worker, nullptr, 0, nullptr);
+
+    WaitForMultipleObjects(2, threads, TRUE, INFINITE);
+
+    CloseHandle(threads[0]);
+    CloseHandle(threads[1]);
+    return 0;
+}
+</code></pre>
+<p>可能输出：</p>
+<pre><code>
+线程1000: g_counter = 11
+线程1000: g_counter = 12
+线程1001: g_counter = 11
+线程1001: g_counter = 12
+</code></pre>
+<p><code>thread_local</code> 可用于全局、命名空间、函数内部和类静态成员：</p>
+<pre><code>
+thread_local int g_counter = 0;
+
+namespace App
+{
+    thread_local int errorCode = 0;
+}
+
+void Work()
+{
+    thread_local int callCount = 0;
+    ++callCount;
+}
+
+class Worker
+{
+public:
+    static thread_local int taskCount;
+};
+
+thread_local int Worker::taskCount = 0;
+</code></pre>
+<p>常见用途包括每线程错误状态、日志缓冲区、随机数生成器、缓存、解析上下文和递归深度：</p>
+<pre><code>
+void Parse()
+{
+    thread_local int depth = 0;
+    ++depth;
+    // 当前线程的解析工作
+    --depth;
+}
+</code></pre>
+<p>注意：</p>
+<ul>
+<li><code>thread_local</code> 是一个完整关键字，中间不能有空格（<code>thread _local</code> 是错误写法）</li>
+<li><code>__declspec(thread)</code> 不能当成普通自动局部变量的临时属性，MSVC 要求静态存储期语境；函数内部优先使用标准写法 <code>thread_local int x = 0;</code></li>
+<li><code>thread_local</code> 不会创建、启动或切换线程；创建线程仍要使用 <code>CreateThread</code>、<code>std::thread</code> 等</li>
+<li><code>thread_local int* pointer = &sharedValue;</code> 只保证指针变量每线程一份；若都指向同一个 <code>sharedValue</code>，目标数据仍共享</li>
+<li>线程池中任务结束不等于线程结束；上一任务的 <code>thread_local</code> 状态可能留给下一任务，应显式重置敏感上下文</li>
+<li>不同线程取得 <code>&g_counter</code> 通常是不同地址；线程结束后不能继续使用其 TLS 实例地址</li>
+<li>线程 B 的初值来自模板或自己的初始化，不会复制线程 A 修改后的值</li>
+<li>C++ 类对象的构造/析构可能借助运行库和 TLS 回调等机制，不能简单理解为只有一块 <code>.tls</code> 原始字节</li>
+<li>早期 Windows 对运行后通过 <code>LoadLibrary</code> 加载、且含静态 TLS 的 DLL 支持曾有限；现代系统已改善。插件需要运行时灵活性时仍常选择动态 TLS</li>
+</ul>
+<p>模板字节示例：<code>thread_local int g_counter = 10;</code> 在 PE 模板中可出现小端字节 <code>0A 00 00 00</code>。概念状态：</p>
+<pre><code>
+线程 A：10 → 11 → 12
+线程 B：10 → 11 → 12
+
+线程 A：NextNumber() → 1 → 2 → 3
+线程 B：NextNumber() → 1
+线程 C：尚未调用，尚未产生该调用序列
+</code></pre>
+<h2>TLS 回调</h2>
+<p>TLS 回调是由 Windows 加载器按进程/线程生命周期自动调用的一组函数。它和静态 TLS 数据同属 TLS 体系，但职责不同：静态 TLS / <code>thread_local</code> 解决每线程数据放在哪里，TLS 回调解决什么时候执行初始化或清理代码。</p>
+<p>回调数组由 <code>IMAGE_TLS_DIRECTORY32.AddressOfCallBacks</code> 指向：<code>AddressOfCallBacks</code> 是 VA，数组每个元素也是回调函数 VA，数组以空指针 0 结束，多个回调按数组顺序调用。PE32 每个回调表项 4 字节，PE32+ 每项 8 字节。</p>
+<p>函数原型：</p>
+<pre><code>
+typedef VOID (NTAPI *PIMAGE_TLS_CALLBACK)(
+    PVOID DllHandle,
+    DWORD Reason,
+    PVOID Reserved
+);
+</code></pre>
+<p>| 参数 | 含义 | |---|---| | <code>DllHandle</code> | 当前模块实际加载基址/句柄 | | <code>Reason</code> | 本次回调原因 | | <code>Reserved</code> | 保留参数，通常不用 |</p>
+<p>Reason：</p>
+<p>| 值 | 宏 | 时机 | |---:|---|---| | <code>0</code> | <code>DLL_PROCESS_DETACH</code> | 进程正常退出或模块卸载 | | <code>1</code> | <code>DLL_PROCESS_ATTACH</code> | 模块随进程加载 | | <code>2</code> | <code>DLL_THREAD_ATTACH</code> | 后续新线程创建 | | <code>3</code> | <code>DLL_THREAD_DETACH</code> | 线程正常退出 |</p>
+<p>示例函数形式：</p>
+<pre><code>
+void NTAPI TlsCallback(
+    PVOID moduleBase,
+    DWORD reason,
+    PVOID reserved)
+{
+    switch (reason)
+    {
+    case DLL_PROCESS_ATTACH:
+        // 进程初始化
+        break;
+    case DLL_THREAD_ATTACH:
+        // 新线程初始化
+        break;
+    case DLL_THREAD_DETACH:
+        // 线程清理
+        break;
+    case DLL_PROCESS_DETACH:
+        // 进程清理
+        break;
+    }
+}
+</code></pre>
+<p>模块启动流程可概念化为：</p>
+<pre><code>
+映射 PE 头和节
+  ↓
+处理重定位
+  ↓
+修复导入
+  ↓
+初始化静态 TLS
+  ├─ 分配模块 TLS 索引
+  ├─ 为初始线程创建 TLS 块
+  ├─ 复制模板并补零
+  └─ 写入 AddressOfIndex
+  ↓
+按顺序调用 TLS 回调：PROCESS_ATTACH
+  ↓
+进入模块正常入口（EXE OEP / DLL 入口流程）
+</code></pre>
+<p><strong>在 OEP 下断点并不能证明此前没有执行模块自己的代码</strong>。TLS 回调可在 OEP 之前进行全局初始化、对象构造、代码解密、调试环境检测、异常机制设置或其他准备工作。壳、保护程序和恶意软件有时利用该时机，但正常编译器和运行库也会使用 TLS 回调；存在回调不等于恶意。</p>
+<p>后续线程创建：</p>
+<pre><code>
+创建线程
+  ↓
+为新线程分配 TLS 数组和模块 TLS 块
+  ↓
+复制模板并补零
+  ↓
+TLS 回调：THREAD_ATTACH
+  ↓
+进入线程入口函数
+</code></pre>
+<p>初始线程随进程加载时对应 <code>PROCESS_ATTACH</code>，不是再额外把同一过程简单算作 <code>THREAD_ATTACH</code>。正常线程结束时调用 <code>THREAD_DETACH</code>，再释放线程 TLS 数据；强制 <code>TerminateThread</code> 时不能依赖正常清理路径。TLS 回调返回 <code>VOID</code>，不能像 <code>DllMain</code> 那样通过返回 <code>FALSE</code> 表示拒绝加载。</p>
+<p>磁盘解析回调数组：</p>
+<pre><code>
+DataDirectory[9].VirtualAddress
+  ↓ RVA→FOA
+读取 IMAGE_TLS_DIRECTORY32/64
+  ↓
+AddressOfCallBacks（VA）- ImageBase
+  ↓
+得到回调数组 RVA
+  ↓ RVA→FOA
+按 4/8 字节读取回调 VA
+  ↓
+遇到 0 停止，同时受目录/映像边界和最大数量限制
+</code></pre>
+<p>定位某回调函数在磁盘中的代码：</p>
+<pre><code>
+回调 RVA = 回调 VA - ImageBase
+回调 FOA = RvaToFoa(回调 RVA)
+</code></pre>
+<p>手工加载时，回调必须使用重定位后的实际地址；导入和静态 TLS 基础设施应先准备好，再传入正确 <code>Reason</code> 调用回调，最后进入 OEP。</p>
+<p>注意：</p>
+<ul>
+<li>TLS 回调不是 OEP，也不是普通程序主动注册后随意调用的回调</li>
+<li><code>AddressOfCallBacks</code> 与数组元素都是 VA，不是 RVA</li>
+<li>数组由 0 终止，但解析器仍需最大边界，不能在损坏文件上无限扫描</li>
+<li>初始线程收到模块的 <code>PROCESS_ATTACH</code> 初始化；后续线程才对应 <code>THREAD_ATTACH</code></li>
+<li>回调无返回值，不能返回 <code>FALSE</code> 取消加载</li>
+<li>TLS 回调可能早于 OEP，但有 TLS 回调不能作为恶意判据</li>
+<li>强制终止线程/进程时，不能保证正常的 detach 清理语义</li>
+<li>静态 TLS 对象的构造析构可由编译器/运行库机制配合完成，不应假设一个用户回调直接对应一个 <code>thread_local</code> 对象</li>
+</ul>
+<p>计算示例：</p>
+<pre><code>
+ImageBase          = 00400000
+AddressOfCallBacks = 00406200  // VA
+
+回调数组 RVA = 00406200 - 00400000 = 00006200
+
+[00406200] = 00401230
+[00406204] = 00401300
+[00406208] = 00000000
+
+调用顺序：00401230 → 00401300 → 遇到 0 结束 → OEP
+</code></pre>
+<h2>附录：各数据目录横向对照</h2>
+<p>| 索引 | 目录 | 入口 <code>VirtualAddress</code> 的特殊含义 | 主要结构/形态 | |---:|---|---|---| | <code>2</code> | 资源 | RVA | 目录树 + 数据叶子 | | <code>3</code> | 异常 | RVA | 依赖 CPU 架构 | | <code>4</code> | 安全/证书 | <strong>FOA</strong> | <code>WIN_CERTIFICATE</code> 变长记录 | | <code>6</code> | 调试 | RVA | 28 字节目录项数组 | | <code>7</code> | 架构 | 保留，应为 0 | 无当前通用结构 | | <code>8</code> | 全局指针 | GP 的 RVA；<code>Size=0</code> | 不是数组 | | <code>9</code> | TLS | TLS 目录 RVA | PE32 24 字节 / PE32+ 40 字节 | | <code>10</code> | 加载配置 | RVA | <code>Size</code> 控制的可变结构 | | <code>11</code> | 绑定导入 | RVA | 8 字节主描述符 + 转发引用 | | <code>13</code> | 延迟导入 | RVA | 32 字节描述符数组 |</p>
+<p>同样都装在 <code>IMAGE_DATA_DIRECTORY</code> 中，不代表 <code>VirtualAddress</code> 与 <code>Size</code> 永远具有完全相同的解释。目录项只是入口，真正的结构、地址基准、结束条件和运行时用途由具体目录规范决定。</p>
+<p>统一解析策略：</p>
+<pre><code>
+先检查 NumberOfRvaAndSizes 是否覆盖目标索引
+  ↓
+根据目录类型选择地址语义（RVA / FOA / 特殊 RVA 值）
+  ↓
+根据 Machine、PE32/PE32+、结构 Size 或目录 Size 选择布局
+  ↓
+对所有偏移、计数、步进、加法和乘法做边界检查
+  ↓
+区分“目录入口”“子表指针”“表中元素”各自的地址语义
+</code></pre>
+<p>三种地址概念：</p>
+<p>| 概念 | 公式/含义 | |---|---| | FOA | 字节在磁盘文件中的偏移 | | RVA | 相对模块加载基址的偏移 | | VA | 运行时虚拟地址，通常为 <code>实际加载基址 + RVA</code> |</p>
+<ul>
+<li>对磁盘映像，普通 RVA 要先转 FOA；已有 FOA 不再转换；结构内部 VA 通常先减基址得到 RVA</li>
+<li>证书表是最明显的例外：数据目录地址字段直接是 FOA</li>
+<li>资源目录内部偏移、绑定表名称偏移不是普通 RVA，而是相对各自根的偏移</li>
+<li>全局指针项的 RVA 本身就是要形成 GP 的值，不一定是要去文件中解引用的位置</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

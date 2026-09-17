@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8086 控制指令与 FPU · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">8086 控制指令与 FPU</h1>
+<div class="meta"><span class="cat">16 位汇编</span></div>
+<article>
+<h1>8086 控制指令与 FPU</h1>
+<h2>循环指令</h2>
+<p>8086 有三条循环指令，全部隐式操作 <code>CX</code> 寄存器。优点是少写代码，但不灵活——定死了用 CX 做计数器，嵌套循环只能用 <code>PUSH CX</code> / <code>POP CX</code>，反而更慢。</p>
+<h3>LOOP label</h3>
+<p>每次执行：<code>CX = CX - 1</code>，若 <code>CX ≠ 0</code> 则跳转到 label。</p>
+<pre><code>
+    mov cx, 5
+again:
+    ; 循环体
+    loop again      ; CX: 5→4→3→2→1→0，跳转4次，共执行5次
+</code></pre>
+<p>注意<strong>先减再判断</strong>：CX=0 时不跳，直接向下执行。</p>
+<h3>LOOPE / LOOPZ label</h3>
+<p>两个助记符等价。条件：<code>CX ≠ 0</code> <strong>且</strong> <code>ZF = 1</code> 才跳转。</p>
+<p>语义：循环，直到 CX 耗尽或某次比较结果不相等。</p>
+<pre><code>
+    mov cx, 10
+scan:
+    cmp [si], al    ; 比较当前元素
+    inc si
+    loope scan      ; CX≠0 且 ZF=1（即还相等）时继续
+</code></pre>
+<p>典型用途：在数组中扫描，找到第一个<strong>不等于</strong> AL 的元素时停下。</p>
+<h3>LOOPNE / LOOPNZ label</h3>
+<p>条件：<code>CX ≠ 0</code> <strong>且</strong> <code>ZF = 0</code> 才跳转。</p>
+<p>语义：循环，直到 CX 耗尽或某次比较结果相等。</p>
+<pre><code>
+    mov cx, 10
+find:
+    cmp [si], al    ; 比较
+    inc si
+    loopne find     ; CX≠0 且 ZF=0（即还不等）时继续
+</code></pre>
+<p>典型用途：在数组中搜索，找到第一个<strong>等于</strong> AL 的元素时停下。</p>
+<h3>关键细节</h3>
+<p><strong>跳转范围是短跳转</strong>。label 必须在当前 IP -128 ~ +127 字节以内（从下一条指令的 IP 算起），编码为 8 位有符号偏移。循环体过大时编译器报错，只能手动改用 <code>DEC CX</code> + <code>JNZ</code>。</p>
+<p><strong>LOOP 不影响任何标志位</strong>。CX 的递减不像 <code>DEC CX</code> 那样会改变 ZF/SF/OF。这是个陷阱——不能在 <code>LOOP</code> 之后用 <code>JZ</code> 判断 CX 是否减到零，因为 ZF 还是上一条指令留下的状态：</p>
+<pre><code>
+sub ax, 1        ; 修改了 ZF
+loop label       ; CX--，但不改 ZF
+jz somewhere     ; 这里的 ZF 是 sub 留下的，不是 CX 是否为 0
+</code></pre>
+<p><strong>LOOPE/LOOPNE 只读 ZF，不写 ZF</strong>。ZF 由循环体内的 <code>CMP</code>/<code>SUB</code> 等指令设置，LOOPE 本身只消费它。</p>
+<p><strong>CX=0 进入时的行为</strong>：如果进入 <code>LOOP</code> 时 CX 已经是 0，减一变成 0xFFFF（65535），循环会跑 65536 次。经典陷阱，进循环前必须确保 CX > 0。</p>
+<h3>与 DEC CX + JNZ 的对比</h3>
+<pre><code>
+; LOOP 写法
+    loop label
+
+; 等价的显式写法
+    dec cx
+    jnz label
+</code></pre>
+<p>唯一区别：<code>DEC CX</code> 会修改 ZF/SF/OF，<code>LOOP</code> 不会。在循环体内依赖标志位时，这个差异很重要。另外"大于等于"这类条件无法用循环指令表达，不够灵活。</p>
+<h2>标志位操作指令</h2>
+<p>8086 有三条专门操作 CF 的指令（CLC/STC/CMC），直接读写进位标志，不涉及任何通用寄存器。LAHF/SAHF/PUSHF/POPF 见 02a-寻址与数据传送。</p>
+<h3>CLC / STC / CMC</h3>
+<pre><code>
+CLC     ; CF = 0，无条件清除进位标志
+STC     ; CF = 1，无条件置位进位标志
+CMC     ; CF = ~CF，取反
+</code></pre>
+<p>三条指令都是单字节编码，不影响其他标志位（OF、ZF、SF、PF 全部不变），也不读写任何寄存器。</p>
+<h3>多精度加减法</h3>
+<p>8086 寄存器只有 16 位，做 32 位甚至更宽的整数运算时，需要手动把低字的进位传给高字。<code>ADC</code> 和 <code>SBB</code> 都依赖 CF，所以在链式运算开始前用 <code>CLC</code> 清零是标准做法：</p>
+<pre><code>
+; 32位加法：DX:AX + BX:CX → DX:AX
+CLC
+ADD AX, CX      ; 低16位相加，结果的进位存入 CF
+ADC DX, BX      ; 高16位相加，CF 作为进位加进来
+</code></pre>
+<p>如果不 <code>CLC</code>，CF 可能是上一条无关指令留下的脏值，高字结果就错了。</p>
+<h3>移位配合串行传输</h3>
+<p><code>RCL</code> 和 <code>RCR</code> 把 CF 纳入移位链，CF 相当于一个额外的第 17 位：</p>
+<pre><code>
+; 把 AX 的最高位&quot;传&quot;给 BX 的最低位
+STC             ; 或 CLC，先设定初始 CF
+RCL AX, 1      ; AX 左移，最高位出来进 CF
+RCR BX, 1      ; BX 右移，CF 进入 BX 最高位
+</code></pre>
+<p>这是实现大于 16 位的移位操作的基础手段。</p>
+<h3>用 CF 当函数返回值</h3>
+<p>DOS 功能调用本身就用这个约定——CF=0 表示成功，CF=1 表示失败。自己写子程序时可以沿用：</p>
+<pre><code>
+; 被调用者
+my_proc PROC
+    ; ... 处理 ...
+    ; 成功路径
+    CLC
+    RETN
+    ; 失败路径
+error:
+    STC
+    RETN
+my_proc ENDP
+
+; 调用者
+CALL my_proc
+JC   handle_error   ; CF=1 跳到错误处理
+; 正常继续...
+</code></pre>
+<p>比用 AX 存错误码再比较节省一条 <code>CMP</code>，跳转也更直接。</p>
+<h3>CMC 的用途</h3>
+<p>相对少见，主要出现在需要"反转成功失败状态"的场合：</p>
+<pre><code>
+CALL some_proc      ; 约定 CF=1 成功，CF=0 失败（非标准）
+CMC                 ; 翻转，变成标准的 CF=0 成功
+JC   error
+</code></pre>
+<p>或者在位操作中，需要对 CF 取反再送入下一次 <code>RCL</code>/<code>RCR</code> 时。</p>
+<h2>其他控制指令</h2>
+<h3>HLT — 停机</h3>
+<pre><code>
+HLT     ; 处理器停机，等待中断唤醒
+</code></pre>
+<p>单字节指令，执行后 CPU 停止取指执行，进入停机状态。不是死循环，是真正的硬件级挂起。</p>
+<p><strong>执行后发生什么</strong>：CPU 停在 HLT 的下一条指令地址上（IP 已指向 HLT 之后），等待三种信号之一唤醒：</p>
+<pre><code>
+NMI（不可屏蔽中断）  → 无条件唤醒
+INTR（可屏蔽中断）   → IF=1 时唤醒，IF=0 时继续睡
+RESET 信号           → 复位，重新启动
+</code></pre>
+<p>唤醒后处理完中断，从 HLT 的<strong>下一条指令</strong>继续执行，不是重新执行 HLT。</p>
+<p><strong>权限问题</strong>：8086 没有保护模式，HLT 谁都能用。x86 保护模式（286 以后）HLT 变成特权指令，用户态执行直接触发 <code>#GP</code> 异常，现代 Windows/Linux 下用户程序执行 HLT 会被操作系统杀掉。</p>
+<p><strong>实际用途</strong>：</p>
+<p>OS 的 idle 循环——没有任务可调度时不能让 CPU 空转（白白耗电发热）：</p>
+<pre><code>
+idle:
+    STI     ; 确保中断开着，否则永远醒不来
+    HLT     ; 睡，等中断
+    JMP idle ; 中断处理完回来，再睡
+</code></pre>
+<p>时钟中断（IRQ0，18.2Hz）定期唤醒，调度器检查有没有新任务，有就切换，没有再 HLT。现代 CPU 在 HLT 状态下会降低主频、切断部分电路，这是 CPU 省电的硬件基础。</p>
+<p>DOS 程序等待事件：</p>
+<pre><code>
+wait_loop:
+    STI
+    HLT             ; 等键盘中断
+    MOV AH, 01h
+    INT 16h
+    JZ  wait_loop   ; 没有按键，继续等
+</code></pre>
+<p>异常处理的终点——内核遇到无法恢复的错误时，停机是最安全的选择：</p>
+<pre><code>
+panic:
+    CLI     ; 关中断，不再响应任何事件
+    HLT     ; 停机
+    JMP panic ; 理论上走不到这里，保险起见
+</code></pre>
+<p>Windows 蓝屏、Linux kernel panic 最终都走到类似这段代码。</p>
+<p><strong>HLT 和死循环的区别</strong>：</p>
+<pre><code>
+; 死循环——CPU 满载
+loop:
+    JMP loop
+
+; HLT——CPU 挂起，几乎零功耗
+    HLT
+</code></pre>
+<p>在固件、bootloader、内核代码里看到 HLT，说明那里是一个预期的停机点，不是 bug。看到死循环才要怀疑是不是出了问题。</p>
+<h3>NOP — 空操作</h3>
+<pre><code>
+NOP     ; 空操作，单字节 90h
+</code></pre>
+<p>CPU 取指、译码，然后什么都不做，继续执行下一条。在 8086 上实际占用 3 个时钟周期，不改变任何寄存器或内存状态。</p>
+<p>实际用途：</p>
+<ul>
+<li><strong>代码对齐</strong>：在跳转目标前插入 NOP，让目标地址对齐到 4/8/16 字节边界，提高指令预取效率</li>
+<li><strong>占位</strong>：调试时预留空间，后续用其他指令覆盖</li>
+<li><strong>反逆向</strong>：在代码中插入 NOP 干扰反汇编器的线性扫描</li>
+</ul>
+<h3>LOCK 前缀</h3>
+<pre><code>
+LOCK INC [mem]   ; 原子性地对内存操作数执行 INC
+</code></pre>
+<p><strong>做了什么</strong>：执行期间 CPU 拉低 <code>LOCK#</code> 引脚，通知总线上的其他主设备（另一个 CPU、DMA 控制器）：我正在独占内存总线，你们等着。操作完成后释放。目的是保证"读—改—写"三步作为一个不可分割的原子操作完成，中间不被其他设备插入。</p>
+<p><strong>8086 的情况</strong>：8086 是单核，LOCK 主要针对 DMA 控制器（8237）。DMA 传数据时也在用内存总线，LOCK 能阻止 DMA 在 CPU 读改写的中间插进来抢总线破坏数据。到了多核时代，LOCK 的主要作用变成协调多个 CPU 核心对共享内存的访问——现代 x86 的 <code>LOCK CMPXCHG</code> 是实现所有用户态锁（mutex、spinlock、无锁队列）的底层指令。</p>
+<p>注意：LOCK 封锁的是<strong>内存总线</strong>，不是 I/O 总线。I/O 端口访问的是外设寄存器，不存在多 CPU 同时写同一个端口的竞争场景。LOCK 前缀也不能加在 <code>IN</code>/<code>OUT</code> 前面，加了直接触发无效操作码异常（<code>#UD</code>）。</p>
+<h3>ESC 指令 — 协处理器通信</h3>
+<pre><code>
+ESC opcode, src
+; opcode：6位立即数（0~63），传给协处理器的操作码
+; src：寄存器或内存操作数
+</code></pre>
+<p>ESC 是 8086 和外部协处理器（主要是 8087 浮点协处理器）之间的通信机制。CPU 自己不执行这条指令的实际运算，只负责把操作数地址和操作码"递出去"。</p>
+<p><strong>为什么需要 ESC</strong>：8086 本身只有整数运算单元，没有浮点硬件。做浮点运算有两条路：</p>
+<ul>
+<li>软件模拟——用整数指令模拟浮点，慢几十倍</li>
+<li>硬件协处理器 8087——插在主板上，和 8086 并行工作，速度快百倍以上</li>
+</ul>
+<p>8087 不是独立运行的，它监听 8086 的指令总线，等着 8086 发出 ESC 指令，看到了就接管执行，8086 则继续取下一条指令。</p>
+<p><strong>执行时发生什么</strong>：</p>
+<pre><code>
+8086 取到 ESC 指令
+    ↓
+计算 src 的有效地址（如果是内存操作数，做一次假读，触发总线周期）
+    ↓
+8087 监听到 ESC 操作码，从总线上抓走操作数地址
+    ↓
+8086 继续执行下一条指令
+8087 并行执行浮点运算
+</code></pre>
+<p>如果下一条指令需要 8087 的结果，8086 会检查 8087 的 BUSY 引脚，忙就等——这个等待由 <code>WAIT</code> 指令显式插入。</p>
+<p><strong>和 8087 指令的关系</strong>：实际写代码时不会手写 ESC，汇编器把 8087 的浮点助记符自动编译成对应的 ESC 编码：</p>
+<pre><code>
+; 你写的
+FADD ST, ST(1)      ; 8087 浮点加法
+
+; 汇编器生成的机器码本质
+ESC 0, ...          ; 对应的 ESC 操作码
+</code></pre>
+<p><strong>没有 8087 时</strong>：ESC 指令对 8086 来说就是空操作——CPU 照常取指、可能做一次假内存读，然后继续往下走。程序不会崩溃，但浮点结果不会出现，数据是垃圾。这就是为什么早期软件启动时会检测 8087 是否存在（通过 INT 11h 的位1），有就走硬件浮点路径，没有就走软件模拟库。</p>
+<p><strong>现代的命运</strong>：ESC 机制在 486 之后彻底消失。486 把浮点单元直接集成进 CPU 芯片，不再需要外部协处理器和 ESC 这套总线通信协议。浮点指令（x87 FPU 指令集）变成 CPU 内部指令直接执行，ESC 这个助记符成为历史。逆向现代二进制完全见不到 ESC，只有分析古老的 DOS 程序或研究 8086/8088 硬件设计时才会遇到。</p>
+<h3>WAIT 指令 — 等待协处理器</h3>
+<pre><code>
+WAIT    ; 也可写作 FWAIT，单字节指令 9Bh
+</code></pre>
+<p>CPU 检测 8087 的 TEST 引脚（连接 8087 的 BUSY 引脚），如果 8087 还在忙，8086 就在原地反复采样等待，直到 8087 完成才继续执行下一条指令。</p>
+<p><strong>为什么需要 WAIT</strong>：8086 发出 ESC 指令后不等 8087，直接继续取下一条指令，两者并行跑。这带来一个问题——如果下一条指令需要用 8087 的计算结果，结果还没算完怎么办？</p>
+<pre><code>
+FLD  DWORD PTR [bx]   ; ESC：让 8087 加载浮点数（8087 支持 32/64/80 位浮点）
+FMUL ST, ST(1)        ; ESC：让 8087 做乘法（8087 开始算）
+; 此时 8087 还在算乘法...
+WAIT                   ; 8086 在这里等，直到 8087 算完
+FSTP DWORD PTR [result] ; ESC：8087 把结果存回内存
+</code></pre>
+<p>没有 WAIT，8086 可能在 8087 还没把结果写回内存时就去读那块内存，拿到旧数据。</p>
+<p><strong>汇编器自动插入</strong>：实际写 8087 浮点代码不需要手动写 WAIT，汇编器（MASM）会在需要同步的地方自动插入：</p>
+<pre><code>
+; 你写的
+FLD  [bx]
+FMUL ST, ST(1)
+FSTP [result]
+
+; 汇编器实际生成的机器码序列
+9B D9 07        ; WAIT + FLD
+9B DC C9        ; WAIT + FMUL
+9B D9 1F        ; WAIT + FSTP
+</code></pre>
+<p>每条浮点指令前都自动加了 9Bh（WAIT），确保上一条 8087 操作完成再发下一条。</p>
+<p><strong>WAIT 和中断的关系</strong>：WAIT 等待期间 8086 仍然响应中断。中断来了会暂停等待，处理完再回来继续采样 TEST 引脚。这意味着中断服务程序里如果也用了浮点指令，必须小心保存和恢复 8087 的状态，否则会破坏被打断的浮点运算现场。</p>
+<p><strong>现代的情况</strong>：486 把浮点单元集成进芯片后，WAIT/FWAIT 语义保留了下来，但作用变了——不再是等外部协处理器，而是等 FPU 内部流水线把之前的浮点指令提交完，确保异常能被正确捕获。现代 x86 里 <code>FWAIT</code> 还能在 IDA 里看到，出现在浮点异常处理相关的代码周围，但已经和 8087 没有任何关系。</p>
+<h2>FPU 浮点指令</h2>
+<p>8087 浮点协处理器（FPU）是 8086 的配套芯片，专门执行浮点运算。8086 本身只有整数运算单元，浮点运算通过 ESC 指令机制交给 8087 处理。在 MASM 中，浮点指令用 F 开头的助记符（如 <code>FLD</code>、<code>FADD</code>、<code>FSTP</code>），汇编器自动编译为对应的 ESC 编码。</p>
+<h3>数据定义</h3>
+<p>MASM 用 <code>real4</code> 伪指令定义 32 位单精度浮点数（IEEE 754）：</p>
+<pre><code>
+f1 real4 1.0    ; 32位浮点数，值=1.0
+f2 real4 2.0    ; 32位浮点数，值=2.0
+</code></pre>
+<p><code>real4</code> 等价于 <code>dd</code>，但告知汇编器这是浮点而非整数。还有 <code>real8</code>（64 位双精度，等价 <code>dq</code>）和 <code>real10</code>（80 位临时精度，等价 <code>dt</code>）。</p>
+<h3>浮点栈</h3>
+<p>8087 使用独立的浮点寄存器栈（ST(0)~ST(7)），不是 8086 的通用寄存器。浮点运算在栈顶进行：</p>
+<pre><code>
+fld f1           ; 将 f1 加载到 ST(0)（压栈）
+fadd f2          ; ST(0) = ST(0) + f2
+fstp f1          ; 将 ST(0) 存回 f1，并弹出栈顶
+</code></pre>
+<p>完整示例：</p>
+<pre><code>
+; 数据段
+f1 real4 1.0
+f2 real4 2.0
+
+; 代码段
+fld f1           ; ST(0) = 1.0
+fadd f2          ; ST(0) = 1.0 + 2.0 = 3.0
+fstp f1          ; f1 = 3.0，栈弹出
+</code></pre>
+<p>浮点栈最多 8 层（ST(0)~ST(7)），连续 FLD 超过 8 次不弹出会触发栈溢出异常。</p>
+<h3>常用 FPU 指令速查</h3>
+<p>数据传送：</p>
+<p>| 指令 | 功能 | 示例 | |------|------|------| | <code>FLD</code> | 加载浮点数到栈顶（压栈） | <code>FLD ST(2)</code> / <code>FLD mem</code> | | <code>FST</code> | 将栈顶存入目标（不弹出） | <code>FST ST(1)</code> / <code>FST mem</code> | | <code>FSTP</code> | 将栈顶存入目标并弹出 | <code>FSTP mem</code> | | <code>FXCH</code> | 交换 ST(0) 和 ST(i) | <code>FXCH ST(2)</code> |</p>
+<p>算术运算：</p>
+<p>| 指令 | 功能 | 示例 | |------|------|------| | <code>FADD</code> | 加法 | <code>FADD ST, ST(1)</code> / <code>FADD mem</code> | | <code>FSUB</code> | 减法 | <code>FSUB ST, ST(1)</code>（ST=ST-ST(1)） | | <code>FSUBR</code> | 反向减法 | <code>FSUBR ST, ST(1)</code>（ST=ST(1)-ST） | | <code>FMUL</code> | 乘法 | <code>FMUL ST, ST(1)</code> / <code>FMUL mem</code> | | <code>FDIV</code> | 除法 | <code>FDIV ST, ST(1)</code>（ST=ST/ST(1)） | | <code>FDIVR</code> | 反向除法 | <code>FDIVR ST, ST(1)</code>（ST=ST(1)/ST） | | <code>FCHS</code> | 改变符号（取反） | <code>FCHS</code> | | <code>FABS</code> | 取绝对值 | <code>FABS</code> | | <code>FSQRT</code> | 开平方 | <code>FSQRT</code> | | <code>FRNDINT</code> | 取整（按当前舍入模式） | <code>FRNDINT</code> |</p>
+<p>比较指令：</p>
+<p>| 指令 | 功能 | 说明 | |------|------|------| | <code>FCOM</code> | 比较 ST(0) 和 ST(i)/mem | 结果反映在 FPU 状态字（C0/C2/C3） | | <code>FCOMP</code> | 比较并弹出 | 比 FCOM 多一次弹出 | | <code>FCOMPP</code> | 比较并弹出两次 | 弹出两个操作数 | | <code>FTST</code> | ST(0) 与 0 比较 | 等价于 FCOM 与 0 | | <code>FXAM</code> | 检查 ST(0) 的类型 | 判断是 NaN、无穷大、零、非规格化等 |</p>
+<p>比较结果的读取——FCOM 不直接设置 CPU 的 FLAGS，而是设置 FPU 状态字中的 C0/C2/C3。需要用 <code>FSTSW</code> 把状态字存到内存，再用 <code>SAHF</code> 转到 FLAGS，才能用条件跳转判断（<code>FCOMIP</code> 是 386+ 的直接设置 EFLAGS 方案）：</p>
+<pre><code>
+; 比较 ST(0) 和 ST(1) 的完整流程
+FCOM              ; 比较 ST(0) 和 ST(1)
+FSTSW  [mem]      ; 把 FPU 状态字存到内存
+MOV    AX, [mem]  ; 读到 AX
+SAHF              ; 转到 FLAGS（C0→CF, C2→PF, C3→ZF）
+JAE    DONE       ; 现在可以用条件跳转了
+</code></pre>
+<p>常数加载：</p>
+<p>| 指令 | 加载的值 | |------|---------| | <code>FLDZ</code> | 0.0 | | <code>FLD1</code> | 1.0 | | <code>FLDPI</code> | π（圆周率） | | <code>FLDL2T</code> | log₂10 | | <code>FLDL2E</code> | log₂e | | <code>FLDLG2</code> | log₁₀2 | | <code>FLDLN2</code> | ln 2 |</p>
+<p>控制指令：</p>
+<p>| 指令 | 功能 | |------|------| | <code>FINIT</code> | 初始化 FPU（复位所有寄存器、清除异常） | | <code>FCLEX</code> | 清除异常标志 | | <code>FSTSW</code> | 将 FPU 状态字存到内存 | | <code>FLDCW</code> | 加载 FPU 控制字（设置精度、舍入模式等） | | <code>FWAIT</code> | 等待 FPU 完成（等价于 WAIT） | | <code>FNOP</code> | FPU 空操作 |</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

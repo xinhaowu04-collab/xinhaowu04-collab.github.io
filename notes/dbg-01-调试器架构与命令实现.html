@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>调试器架构与命令实现 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">调试器架构与命令实现</h1>
+<div class="meta"><span class="cat">调试器</span></div>
+<article>
+<h1>调试器架构与命令实现</h1>
+<p>Windows 用户态调试器本质是一个<strong>异常处理框架</strong>：让被调试进程产生异常（断点、单步等），由系统捕获异常并通知调试器处理，从而控制程序执行流程。写一个调试器能把所有黑盒戳穿，深入理解异常机制、进程内存、线程上下文等底层概念。</p>
+<h2>调试器核心机制</h2>
+<h3>两种调试模式</h3>
+<p>| 模式 | API | 说明 | |------|-----|------| | 运行调试 | <code>CreateProcess</code> + <code>DEBUG_PROCESS</code> / <code>DEBUG_ONLY_THIS_PROCESS</code> | 调试器主动创建被调试进程，从启动开始调试 | | 附加调试 | <code>DebugActiveProcess</code> | 对已运行的进程附加调试器 |</p>
+<ul>
+<li><code>DEBUG_PROCESS</code>：调试当前进程<strong>及其所有子进程</strong></li>
+<li><code>DEBUG_ONLY_THIS_PROCESS</code>：只调试当前进程，不调试子进程</li>
+</ul>
+<h3>整体流程</h3>
+<pre><code>
+CreateProcess(DEBUG_PROCESS) → WaitForDebugEvent → 事件分发 → ContinueDebugEvent → 循环
+</code></pre>
+<ul>
+<li><code>WaitForDebugEvent</code> 阻塞等待调试事件，事件信息填入 DEBUG_EVENT 结构体</li>
+<li>根据 <code>dwDebugEventCode</code> 分发到对应处理函数</li>
+<li><code>ContinueDebugEvent</code> 放行被调试进程继续执行</li>
+<li>收到 <code>EXIT_PROCESS_DEBUG_EVENT</code> 后跳出循环</li>
+</ul>
+<h3>调试事件类型（9 种）</h3>
+<p>| 事件码 | 含义 | 返回值 | |--------|------|--------| | EXCEPTION_DEBUG_EVENT | 异常（断点/单步/访问违例等） | DBG_EXCEPTION_NOT_HANDLED（框架阶段） | | CREATE_PROCESS_DEBUG_EVENT | 创建进程 | DBG_CONTINUE | | CREATE_THREAD_DEBUG_EVENT | 创建线程 | DBG_CONTINUE | | EXIT_THREAD_DEBUG_EVENT | 退出线程 | DBG_CONTINUE | | EXIT_PROCESS_DEBUG_EVENT | 退出进程 | DBG_CONTINUE | | LOAD_DLL_DEBUG_EVENT | 加载 DLL | DBG_CONTINUE | | UNLOAD_DLL_DEBUG_EVENT | 卸载 DLL | DBG_CONTINUE | | OUTPUT_DEBUG_STRING_EVENT | 调试字符串输出 | DBG_CONTINUE | | RIP_EVENT | RIP 调试事件 | DBG_CONTINUE |</p>
+<h3>dwContinueStatus</h3>
+<ul>
+<li><strong>DBG_CONTINUE</strong>：异常已处理，别往上抛，正常继续；对非异常事件只是"通知收到了，继续"</li>
+<li><strong>DBG_EXCEPTION_NOT_HANDLED</strong>：异常没处理，交给程序自己的异常处理链（SEH）接手</li>
+</ul>
+<p>关键区分：非异常事件永远返回 DBG_CONTINUE（只是签收通知）；异常事件才需要判断，处理了返回 DBG_CONTINUE，没处理返回 DBG_EXCEPTION_NOT_HANDLED。</p>
+<h3>系统初始断点</h3>
+<p>被调试进程启动时，Windows 自动在 ntdll.dll 内部插入一个断点（INT 3，Code: 80000003）。这不是用户下的断点，是系统通知调试器"进程已加载完毕，准备执行用户代码"。所有被调试进程都会触发。</p>
+<h3>EXIT_PROCESS 后必须 break</h3>
+<p>被调试进程退出后不会再有事件，WaitForDebugEvent 会永远阻塞。收到 EXIT_PROCESS 事件后，ContinueDebugEvent 之后必须 break 出循环。</p>
+<h2>C 宏机制</h2>
+<p>宏 = 文本替换（填空）。预处理器在编译前完成替换，编译器看不到宏。两种宏：对象式宏（起别名）<code>#define PI 3.14</code>；函数式宏（带参数）<code>#define DOUBLE(x) ((x)*2)</code>。判断方法：宏名后面有没有紧跟括号，有括号 = 函数式，没括号 = 对象式。</p>
+<h3>变参宏</h3>
+<pre><code>
+#define LOGI(fmt, ...) fprintf(stdout, &quot;[%s]&quot;fmt, __FUNCTION__, __VA_ARGS__)
+</code></pre>
+<ul>
+<li><code>...</code> 表示"剩下的参数"，必须是参数列表最后一个，前面至少有一个具名参数</li>
+<li><code>__VA_ARGS__</code> 是变参占位符，展开时原样替换成剩余参数（带逗号）</li>
+<li><code>...</code> 是"口袋"，不管塞几个全装进去，展开时整体倒出来</li>
+</ul>
+<h3>关键标识符</h3>
+<ul>
+<li><code>__FUNCTION__</code>：编译器内置，展开成当前函数名字符串</li>
+<li><code>__VA_ARGS__</code>：配合 <code>...</code> 使用的变参占位符</li>
+<li>双下划线前缀 = 系统保留的内置标识符</li>
+</ul>
+<h3>字符串字面量拼接</h3>
+<p><code>"[%s]"fmt</code>：两个字符串字面量挨着写，编译器自动拼成一个。<code>fmt</code> 填进来的是带引号的字符串字面量，跟前面的 <code>"[%s]"</code> 拼成完整格式串。这是编译期完成的，不是运行时 strcat。</p>
+<h3>##__VA_ARGS__</h3>
+<p><code>##</code> 是预处理器粘贴运算符。<code>##__VA_ARGS__</code> 特殊用法：变参为空时，把前面那个逗号一起吃掉；变参有内容时 <code>##</code> 不起作用，正常展开。</p>
+<h3>fprintf 与 stdout/stderr</h3>
+<ul>
+<li><code>printf(...)</code> 固定往 stdout 打，是 <code>fprintf(stdout, ...)</code> 的简写</li>
+<li><code>fprintf(流, ...)</code> 指定输出流（stdout/stderr/文件）</li>
+<li>stdout 带缓冲（攒一批再输出），stderr 不缓冲（立即输出）</li>
+<li>可分别重定向：<code>> out.txt</code> 只重定向 stdout，<code>2> err.txt</code> 重定向 stderr</li>
+<li>错误信息放 stderr 保证崩溃前能打出来</li>
+</ul>
+<h3>LOGE 宏的缺陷</h3>
+<pre><code>
+#define LOGE(fmt, ...) fprintf(stderr, &quot;[%s] ErrCode:%d &quot;fmt, __FUNCTION__, GetLastError(), __VA_ARGS__)
+</code></pre>
+<ul>
+<li><code>GetLastError()</code> 写死在宏内部，调用者无法干预；fprintf 内部 IO 可能改 last error，时机不可控</li>
+<li>没加 <code>##</code>，空参时末尾多余逗号</li>
+</ul>
+<h2>调试器框架结构</h2>
+<h3>数据段</h3>
+<ul>
+<li><code>g_DbgEvent DEBUG_EVENT <></code> — 事件结构体</li>
+<li><code>g_si STARTUPINFO <></code> — 启动信息（CreateProcess 传入）</li>
+<li><code>g_pi PROCESS_INFORMATION <></code> — 进程信息（CreateProcess 传出）</li>
+<li><code>g_szBuf db 256 dup(0)</code> — 日志缓冲区</li>
+<li><code>g_szTarget db "路径",0</code> — 被调试程序路径（末尾只要 0，不要 13,10）</li>
+</ul>
+<h3>事件处理函数模式</h3>
+<p>每个事件函数：wsprintf 格式化信息到 g_szBuf → StdOut 输出 → 设 eax 为返回值（DBG_CONTINUE 或 DBG_EXCEPTION_NOT_HANDLED）→ ret。</p>
+<h3>事件循环结构</h3>
+<pre><code>
+.while TRUE
+    WaitForDebugEvent
+    .if/.elseif 分发事件（调用处理函数，设 dwContinueStatus）
+    ContinueDebugEvent
+    .if EXIT_PROCESS → .break
+.endw
+</code></pre>
+<h3>DbgReadProcessMemory</h3>
+<p>封装 OpenProcess + ReadProcessMemory + CloseHandle，用于读取被调试进程内存（EventLoadDll 读 DLL 路径、EventDebugString 读调试字符串）。</p>
+<h3>EventLoadDll 两层间接读取</h3>
+<p><code>lpImageName</code> 是指向指针的指针：第一次 ReadProcessMemory 从 lpImageName 读出 4 字节指针，第二次从指针读出字符串。<code>fUnicode</code> 判断字符串是 ANSI（%s）还是 Unicode（%ws）。</p>
+<p>注意：第一个 DLL（ntdll.dll）的 lpImageName 读失败是正常的——系统在 CREATE_PROCESS 之前就加载了，不提供名字。</p>
+<h2>命令行架构</h2>
+<pre><code>
+CreateProcess(DEBUG_PROCESS)
+    → WaitForDebugEvent 事件循环
+        → 9 种调试事件分发
+            → EXCEPTION_DEBUG_EVENT 里处理断点/单步
+                → 进命令循环 while(DbgGetCommand()==DBG_CMD)
+</code></pre>
+<p>返回值约定：</p>
+<p>| 返回值 | 含义 | |--------|------| | <code>DBG_ERR=0</code> | 错误 | | <code>DBG_OK=1</code> | 退出命令循环，程序继续运行 | | <code>DBG_CMD=2</code> | 继续留在命令循环等下一条命令 |</p>
+<p>D、R、U、LM、设置断点等查看/设置命令返回 <code>DBG_CMD</code>；G、T、P 等需要目标执行的命令返回非 <code>DBG_CMD</code>。</p>
+<h2>软件断点机制</h2>
+<h3>BREAKPOINT 结构体</h3>
+<pre><code>
+BREAKPOINT STRUCT
+    dwNum      DWORD ?  ; 序号
+    dwAddress  DWORD ?  ; 地址
+    bOriginal  DWORD ?  ; 原字节（按DWORD保存，恢复时只写1字节）
+    dwType     DWORD ?  ; 0=一次性 1=永久
+    dwState    DWORD ?  ; 0=删除 1=禁用 2=启用
+BREAKPOINT ends
+</code></pre>
+<p>全局数组 <code>g_bps BREAKPOINT 256 dup(<>)</code>，256 个槽位。</p>
+<h3>DbgSetBreakPoint</h3>
+<p>1. ReadProcessMemory 读原字节 2. WriteProcessMemory 写 0xCC（g_bCC db 0CCh） 3. 遍历数组找 dwState==0 的空槽，填入地址/原字节/类型/状态=2</p>
+<h3>DbgFindBreakPoint</h3>
+<p>遍历数组按 dwAddress 匹配，返回 esi 指针 / 0。</p>
+<h3>ExecBreakPoint</h3>
+<p>1. 遍历断点数组，按 ExceptionAddress 匹配 2. 恢复原字节（只写回 1 字节） 3. EIP 回退 1（<code>dec [ebx].regEip</code>）——0xCC 命中后 EIP 指向 0xCC 后面 4. 永久断点（dwType==1）记录待恢复，设 TF 单步执行原指令，在单步异常中重打 0xCC；一次性断点不重打 5. <code>.break</code> 跳出遍历，进命令循环</p>
+<h3>软件断点生命周期</h3>
+<pre><code>
+写0xCC → 命中时EIP回退1 → 恢复原字节 → 单步走过去 → 重打0xCC（永久断点）
+</code></pre>
+<h2>命令行框架</h2>
+<h3>命令表结构</h3>
+<pre><code>
+COMMAND STRUCT
+    cmd    DWORD ?  ; 命令字符串指针
+    pFunc  DWORD ?  ; 函数指针
+COMMAND ends
+
+g_Cmds COMMAND &lt;offset szCmdG,  offset CmdRun&gt;
+       COMMAND &lt;offset szCmdR,  offset CmdShowRegs&gt;
+       COMMAND &lt;offset szCmdDP, offset CmdBreakPoint&gt;
+       COMMAND &lt;offset szCmdT,  offset CmdStep&gt;
+       COMMAND &lt;offset szCmdU,  offset CmdDasm&gt;
+       COMMAND &lt;0, 0&gt;   ; 结束标记
+</code></pre>
+<p>每个 <code>COMMAND</code> 是连续但独立的数据声明，不用 <code>\</code> 拼接（原因见文末踩坑）。</p>
+<h3>DbgGetCommand 流程</h3>
+<p>1. 打印 "cmd:" 提示 2. ReadConsole 读输入 → 截断末尾 <code>\r\n</code>（<code>sub dwRead,2</code> 后写 0） 3. 遍历字符串找空格，找到则把空格写 0（拆出命令名），esi 指向参数 4. 遍历命令表，<code>lstrcmpi</code> 不区分大小写比较（返回 0 表示相等） 5. 匹配到 → <code>push esi</code>（参数）+ <code>call dword ptr [ebx].pFunc</code> 6. 没匹配 → 打印错误，返回 DBG_CMD</p>
+<p>注意：所有 Cmd 函数统一声明 <code>args:DWORD</code>，因为 DbgGetCommand 用 push esi 传了参数。</p>
+<h2>寄存器读写</h2>
+<h3>DbgGetRegs / DbgSetRegs</h3>
+<pre><code>
+OpenThread(THREAD_ALL_ACCESS, FALSE, dwThreadId)
+  → 设 ContextFlags = CONTEXT_ALL
+  → GetThreadContext / SetThreadContext
+  → CloseHandle
+</code></pre>
+<p>每次用 g_DbgEvent.dwThreadId，函数内部 OpenThread + CloseHandle。</p>
+<h3>DbgShowRegs</h3>
+<p>分 3 次 wsprintf 打印（invoke 参数太多会报 statement too complex）：第 1 行 eax/ebx/ecx/edx/esi/edi，第 2 行 eip/esp/ebp/efl，第 3 行 cs/ss/ds/es/fs/gs。</p>
+<p>CONTEXT 结构体字段：<code>[esi].regEax</code>、<code>[esi].regEip</code>、<code>[esi].regFlag</code>、<code>[esi].regCs</code> 等。</p>
+<h2>命令实现</h2>
+<h3>g（CmdRun）</h3>
+<pre><code>
+mov eax, DBG_OK   ; 退出命令循环，程序继续
+ret
+</code></pre>
+<h3>bp（CmdBreakPoint）</h3>
+<pre><code>
+invoke htodw, args              ; MASM32库，十六进制字符串转DWORD
+invoke DbgSetBreakPoint, eax, 1 ; 1=永久断点
+mov eax, DBG_CMD                ; 留在命令循环
+ret
+</code></pre>
+<h3>t（CmdStep）</h3>
+<pre><code>
+invoke DbgGetRegs, addr ctx
+or [esi].regFlag, 100h    ; 设 Trap Flag（EFlags OR 0x100）
+invoke DbgSetRegs, addr ctx
+mov eax, DBG_OK           ; 退出命令循环，单步执行
+</code></pre>
+<p>单步后触发 EXCEPTION_SINGLE_STEP → ExecStep：显示寄存器 → 进命令循环。</p>
+<h3>u（CmdDasm / DbgDasm）</h3>
+<p>CmdDasm（命令入口）：</p>
+<pre><code>
+invoke htodw, args        ; 不带地址时htodw返回0
+invoke DbgDasm, eax, 8    ; 反汇编8行
+mov eax, DBG_CMD
+ret
+</code></pre>
+<p>DbgDasm（反汇编核心）：</p>
+<p>1. nAddress==0 时用 g_nPreAddress（继续上次） 2. ReadProcessMemory 读 0x1000 字节到 Code 缓冲区 3. 循环 nLine 次：Decode2Asm(pCode, szAsm, nCodeSize, nAddress) 反汇编一条 → wsprintf 格式化 <code>"%08X %s"</code> 打印 → pCode 和 nAddress 各加 nCodeSize 4. 循环结束后更新 g_nPreAddress</p>
+<p>Decode2Asm 是 stdcall 4 参数：字节码指针、输出字符串、指令长度输出、指令地址。</p>
+<h2>dasm.lib 去 CRT 依赖</h2>
+<h3>问题</h3>
+<ul>
+<li>dasm.lib（老师发的成品，MSVC 编译）依赖 LIBCMT.lib / uuid.lib</li>
+<li>MASM32 自带 link 5.12（1998 年）找不到这些库，报 LNK1104</li>
+<li>RadASM 配置里的 VS2022 路径是僵尸路径，实际没装；只有 VS2019</li>
+</ul>
+<h3>解决方案</h3>
+<p>1. <strong>批量替换</strong>（sed <code>\b</code> 词边界，避免误伤已有的 lstrcpy/lstrcat）：<code>strcpy</code> → <code>lstrcpyA</code>，<code>strcat</code> → <code>lstrcatA</code>（kernel32，MASM32 已链接） 2. <strong>手动改 Decode2Asm.cpp 4 处</strong>（无现成 API）：<code>strstr(Opcode, ":")</code> → 纯指针遍历找冒号；<code>strncat(strAsmCode, &ch, 1)</code> → 纯指针找末尾追加字符 3. <strong>ShowDecoded 的 printf 注释掉</strong>（函数无人调用，lib 按函数粒度链接不拉入） 4. <strong>memset.asm 汇编实现</strong>（编译器自动插入的 <code>_memset</code>，MSVC intrinsic 不能用 C 定义）：</p>
+<pre><code>
+.386
+.model flat, c    ; 自动加下划线，写 memset → 符号 _memset
+.code
+memset proc
+    push edi
+    mov edi, [esp+8]     ; dst
+    mov eax, [esp+12]    ; val (rep stosb 用 AL)
+    mov ecx, [esp+16]    ; count
+    test ecx, ecx
+    jz short done
+    rep stosb
+done:
+    mov eax, [esp+8]     ; return dst
+    pop edi
+    ret
+memset endp
+end
+</code></pre>
+<p>5. <strong>编译命令</strong>：<code>cl /c /O2 /GS- /Zl /nologo</code>，打包 <code>lib /OUT:dasm_clean.lib Decode2Asm.obj Disasm.obj Dsasm_Functions.obj memset.obj</code></p>
+<ul>
+<li><code>/Zl</code>：obj 不写 DEFAULTLIB:LIBCMT.lib</li>
+<li><code>/GS-</code>：去掉栈溢出保护 <code>__security_cookie</code> 符号</li>
+</ul>
+<p>6. <strong>uuid.lib</strong> 拷到项目目录（DEFAULTLIB:uuid.lib 保险，实际无 GUID 引用不会拉入） 7. <strong>MyDebug.inc</strong>：<code>includelib dasm.lib</code> → <code>includelib dasm_clean.lib</code></p>
+<h3>关键认知</h3>
+<ul>
+<li><code>/Zl</code> 只去 LIBCMT 默认库，不去 uuid.lib（windows.h 的 <code>#pragma comment(lib)</code>）</li>
+<li>静态库按函数粒度链接：没被引用的函数不会被拉入</li>
+<li>MSVC intrinsic 函数（memset/memcpy）C 层面不能定义，必须用汇编写</li>
+<li>MASM <code>.model flat,c</code> 自动加下划线前缀：写 <code>memset</code> → 符号 <code>_memset</code></li>
+<li>用 dumpbin /SYMBOLS 验证 obj 引用了哪些外部符号；/DIRECTIVES 验证 obj 的 DEFAULTLIB 指令</li>
+</ul>
+<h2>x86 调用约定</h2>
+<p>stdcall 要点：参数从右向左压栈，返回值在 EAX，被调用函数清理固定参数。</p>
+<p>| 寄存器 | 类型 | 说明 | |--------|------|------| | eax | caller-saved | invoke 后值不确定 | | ecx | caller-saved | invoke 后值不确定 | | edx | caller-saved | invoke 后值不确定 | | ebx | callee-saved | invoke 后保证恢复 | | esi | callee-saved | invoke 后保证恢复 | | edi | callee-saved | invoke 后保证恢复 | | ebp | callee-saved | invoke 后保证恢复 |</p>
+<p>注意：<code>.while</code> 循环里用 ecx/edx 做计数器，循环体有 invoke → 计数器被破坏 → 死循环崩溃，必须用 ebx/esi/edi。项目中部分自定义过程会修改 ESI，调用前后曾需要手工保存 ESI，长期应统一遵守调用约定。</p>
+<h2>MASM 语法与踩坑</h2>
+<h3>结构体定义</h3>
+<pre><code>
+结构名 STRUCT
+    字段名 类型 ?
+结构名 ENDS
+</code></pre>
+<ul>
+<li>结构体变量声明用 <code><></code> 表示默认初始化（全零）：<code>g_DbgEvent DEBUG_EVENT <></code>；结构体用 <code><></code>，不能直接写 <code>0</code></li>
+<li>标量用值初始化：<code>g_Count DWORD 0</code></li>
+<li>UNION 用 <code>UNION ... ENDS</code>，各成员偏移从同一位置开始</li>
+<li>嵌套结构体从最底层开始定义，外层引用内层</li>
+<li><code>assume esi:PTR BREAKPOINT</code> 后用 <code>[esi].field</code> 访问结构体成员</li>
+<li><code>SIZEOF</code> 取结构体大小：<code>add esi, SIZEOF BREAKPOINT</code></li>
+</ul>
+<h3>MASM32 头文件字段名坑</h3>
+<p>MASM32 头文件里字段名跟 C 头文件不完全一样：</p>
+<p>| C 原名 | MASM32 名 | 说明 | |--------|-----------|------| | ExceptionRecord（EXCEPTION_DEBUG_INFO 里） | pExceptionRecord | 多了 p 前缀 | | nDebugStringLength | nDebugStringiLength | 多了一个 i（疑似头文件拼写错误） |</p>
+<p>查字段名方法：在 masm32/include/windows.inc 里 grep 结构体名。</p>
+<h3>控制流伪指令</h3>
+<ul>
+<li>有：<code>.if / .elseif / .else / .endif</code>、<code>.while / .endw</code>、<code>.repeat / .until</code>、<code>.break</code></li>
+<li><strong>没有</strong> <code>.switch</code>，用 <code>.if/.elseif</code> 链代替</li>
+</ul>
+<h3>条件判断与内存操作</h3>
+<ul>
+<li>逻辑或用 <code>||</code>，逻辑与用 <code>&&</code>（<code>or</code>/<code>and</code> 是按位指令）</li>
+<li><code>.if</code> 里不能直接比较两个内存变量（x86 不支持 cmp mem, mem），先 mov 到寄存器再比</li>
+<li>内存不能直接对内存运算：<code>add pCode, nCodeSize</code> 报错 → <code>mov eax, nCodeSize</code> + <code>add pCode, eax</code></li>
+<li><code>.if/.while</code> 中引用内存要加类型：<code>byte ptr [esi] != 0</code></li>
+</ul>
+<h3>invoke 与 addr</h3>
+<ul>
+<li><code>invoke</code> 自动压栈调用函数；<code>addr</code> 只在 <code>invoke</code> 里传参数时用，mov/lea 用 <code>lea esi, ctx</code></li>
+<li>全局变量传地址用 <code>offset</code>，局部变量传地址用 <code>addr</code></li>
+<li>函数参数声明指针一律用 <code>DWORD</code></li>
+<li>函数指针调用要加 <code>dword ptr</code>：<code>call dword ptr [ebx].pFunc</code></li>
+<li><code>lstrcmpi</code> 返回 0 表示相等（不是 1）</li>
+<li>invoke 参数太多报 statement too complex：wsprintf 拆成多次调用</li>
+<li><code>invoke SomeProc, eax, addr LocalVar</code> 可能报 register value overwritten by INVOKE——展开 <code>addr LocalVar</code> 时可能使用 EAX，先把 EAX 保存到局部变量再传入</li>
+</ul>
+<h3>命令处理函数的栈平衡</h3>
+<p>命令分发器统一压入一个 <code>args</code> 参数，每个命令过程都应声明一个 DWORD 参数，即使该命令不用参数。否则 stdcall 返回时不会清理对应参数，ESP 会错位。</p>
+<h3>续行符与逻辑行长度</h3>
+<ul>
+<li><code>\</code> 用于 invoke 多行参数续行：参数之间要有逗号，最后一个参数后面不要逗号，<code>\</code> 要在逗号之后</li>
+<li>MASM 6.14 行长度有限，命令表用大量 <code>\</code> 续行时会被拼成一条逻辑行，报 A2039: line too long——每个 <code>COMMAND</code> 作为连续但独立的数据声明，不再使用 <code>\</code> 拼接</li>
+</ul>
+<h3>日志方案</h3>
+<ul>
+<li><code>wsprintf</code> 是 user32 的，<code>StdOut</code> 是 MASM32 封装的，都不依赖 CRT</li>
+<li>需要 <code>include masm32.inc</code> + <code>includelib masm32.lib</code></li>
+<li>汇编搞不了 C 那种变参宏，每个事件函数里手动 wsprintf + StdOut</li>
+</ul>
+<h3>proc 与 ret</h3>
+<ul>
+<li>每个 proc endp 前必须有 ret，函数返回值在 eax</li>
+<li>用 <code>call</code> 调用无参函数，<code>invoke</code> 调用有参函数</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

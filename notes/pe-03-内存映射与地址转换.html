@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>内存映射与地址转换 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">内存映射与地址转换</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>内存映射与地址转换</h1>
+<p>PE 加载的核心是建立文件空间与内存空间的对应：节表把 FOA 空间中的原始数据安排到 RVA 空间中的节，加上模块基址后才得到 VA。</p>
+<h2>遍历节表映射到内存</h2>
+<p>老师给出的"简化 PE 加载器"模型：</p>
+<pre><code>
+读取 PE 头
+  ↓
+读取 NumberOfSections
+  ↓
+遍历节表，计算各节内存范围
+  ↓
+检查/准备 SizeOfImage
+  ↓
+申请一整块连续内存并先清零
+  ↓
+复制 SizeOfHeaders 指定的头部字节
+  ↓
+逐节从 PointerToRawData 复制到 ImageBase+VirtualAddress
+  ↓
+按 Characteristics 设置最终页权限
+</code></pre>
+<p>整块连续内存使每个节的 RVA 稳定映射为 <code>实际地址 = 映像基址 + 节 VirtualAddress + 节内偏移</code>；预先清零自然处理 <code>VirtualSize > SizeOfRawData</code> 的情况——文件没提供的内存尾部保留为零。</p>
+<p>"把节的内存大小加起来再和 <code>SizeOfImage</code> 比较"是教学上的范围检查，更严格的思路是找最高节末端：</p>
+<pre><code>
+最高节末端 = max(VirtualAddress + VirtualSize)
+需要的镜像范围 = AlignUp(最高节末端, SectionAlignment)
+</code></pre>
+<p><code>SizeOfImage</code> 应至少覆盖这个范围。</p>
+<h3>课堂算例</h3>
+<p>假设 <code>ImageBase=00400000h</code>、<code>FileAlignment=200h</code>、<code>SectionAlignment=1000h</code>、<code>SizeOfHeaders=200h</code>、<code>SizeOfImage=3000h</code>：</p>
+<pre><code>
+文件：0000h~01FFh PE 头 / 0200h~03FFh 代码节 / 0400h~05FFh 数据节
+内存：00400000h~00402FFFh 总范围 3000h
+      00400000h~00400FFFh 头部页
+      00401000h~00401FFFh 代码页
+      00402000h~00402FFFh 数据页
+</code></pre>
+<p>| 文件范围 | 真正复制的内容 | 内存目标 | 页级结果（示例） | |---|---|---|---| | <code>0000h~01FFh</code> | <code>200h</code> 字节 PE 头 | <code>00400000h~004001FFh</code> | 所在页 <code>00400000h~00400FFFh</code>，通常 R | | <code>0200h~03FFh</code> | <code>200h</code> 字节代码原始数据 | <code>00401000h~004011FFh</code> | 所在页通常 RX，剩余部分为 0 | | <code>0400h~05FFh</code> | <code>200h</code> 字节数据原始数据 | <code>00402000h~004021FFh</code> | R 或 RW，取决于节属性，剩余部分为 0 |</p>
+<p>笔记中常见的简写：</p>
+<pre><code>
+3000 RWE
+00400000~00403000
+00000000~00000200 =&gt; 00400000~00401000 R
+00000200~00000400 =&gt; 00401000~00402000 RE
+00000400~00000600 =&gt; 00402000~00403000 R
+</code></pre>
+<p>应读成"先准备一个 <code>3000h</code> 的连续范围，再按页设置属性"，而不是每个 <code>200h</code> 文件块真复制成 <code>1000h</code> 内容——实际有意义的复制范围仍各只有 <code>200h</code>。</p>
+<p>注意：</p>
+<ul>
+<li>"一口气申请、全部 RWE、复制完再改权限"是手动映射的教学模型；真实 Windows 加载器用映像节映射机制，不能等同为用户代码的 <code>VirtualAlloc + memcpy</code></li>
+<li><code>3000h</code> 不是三个 <code>200h</code> 原始数据相加，而是内存页和最高节末端对齐后的镜像范围</li>
+<li><code>SizeOfHeaders=200h</code> 时只复制 <code>200h</code> 个头部字节；头部所在页覆盖到 <code>1000h</code>，但页面余下不代表真实头字段</li>
+<li>页权限按页落地，<code>Characteristics</code> 是节级描述；两节共享同一页时权限分离变复杂</li>
+<li>真实加载还要处理导入、重定位、TLS 等，这里只解释"复制/映射"这一步</li>
+</ul>
+<h2>VA、RVA、FOA 地址转换</h2>
+<p>| 名称 | 全称 | 所在空间 | |---|---|---| | VA | Virtual Address | 进程运行时的实际虚拟地址 | | RVA | Relative Virtual Address | 相对模块基址的内存偏移 | | FOA | File Offset Address | 文件从开头数的偏移 |</p>
+<p>| 地址 | 计算 | |---|---| | FOA | <code>PointerToRawData + 节内偏移</code> | | RVA | <code>VA - ImageBase</code> | | VA | <code>ImageBase + RVA</code> |</p>
+<p>PE 头中的数据目录给的是 RVA 不是磁盘偏移；磁盘按 <code>FileAlignment</code> 排列，内存按 <code>SectionAlignment</code> 排列，节头负责建立两者对应。</p>
+<h3>转换公式</h3>
+<pre><code>
+FOA = RVA - 节 VirtualAddress + PointerToRawData
+</code></pre>
+<p>特例：<code>RVA < SizeOfHeaders</code> 时 <code>FOA = RVA</code>（头部布局的特殊情况，不应替代节表算法）。</p>
+<p>正向 <code>VA → FOA</code>：</p>
+<pre><code>
+1. RVA = VA - 实际模块基址
+2. 找到包含该 RVA 的节（VirtualAddress &lt;= RVA &lt; VirtualAddress + 映射范围）
+3. delta = RVA - 节 VirtualAddress
+4. 检查 delta 是否仍落在 SizeOfRawData 的文件内容范围内
+5. FOA = PointerToRawData + delta
+</code></pre>
+<p>反向 <code>FOA → VA</code>：</p>
+<pre><code>
+1. 找到满足 PointerToRawData &lt;= FOA &lt; PointerToRawData + SizeOfRawData 的节
+2. delta = FOA - PointerToRawData
+3. RVA = VirtualAddress + delta
+4. VA = 实际模块基址 + RVA
+</code></pre>
+<h3>课堂算例</h3>
+<p><code>VA=0040100Ch</code>、<code>ImageBase=00400000h</code>，代码节 <code>VirtualAddress=1000h</code>、<code>PointerToRawData=200h</code>：</p>
+<pre><code>
+RVA      = 0040100Ch - 00400000h = 100Ch
+节内偏移  = 100Ch - 1000h = 0Ch
+FOA      = 0200h + 0Ch = 020Ch
+</code></pre>
+<p>反算同一例子：<code>FOA=020Ch</code> → <code>delta=0Ch</code> → <code>RVA=100Ch</code> → <code>VA=0040100Ch</code>。</p>
+<p>注意：</p>
+<ul>
+<li>节头字段 <code>VirtualAddress</code> 是 RVA 起点，不是最终 VA；FOA 不能直接加 ImageBase，两个空间不同</li>
+<li>RVA 落在 <code>VirtualSize > SizeOfRawData</code> 的零填充尾部时，内存中有此 RVA 但文件中没有对应 FOA</li>
+<li>严格意义上的 Overlay 若没被任何节纳入，不能套用普通节转换公式</li>
+<li>ASLR 下要用运行时实际模块基址，用首选基址可能算出错误 VA</li>
+</ul>
+<h3>解析器实现要点</h3>
+<p>解析目录前先把 DataDirectory 的 <code>VirtualAddress</code> 转成 FOA，再用 <code>m_fileData.constData() + FOA</code> 读取结构。解析器基本流程：</p>
+<pre><code>
+ReadFile
+  -&gt; ParserHeader
+  -&gt; parserSections
+  -&gt; RVA/FOA 转换
+  -&gt; 解析数据目录
+  -&gt; PEParser 保存结果
+  -&gt; MainWindow 显示
+</code></pre>
+<ul>
+<li><code>RvaToFov</code>/<code>FovToRva</code> 最好返回成功/失败，否则转换失败会留下旧值，调用者继续用错误偏移</li>
+<li><code>GetPE</code> 的输出参数直接把成员赋给输出：<code>dosHeader = m_dosHander; ntHeader = m_ntHander; sections = m_sections;</code></li>
+<li><code>DataDirectory[5].Size</code> 是目录长度，不是重定位起始地址</li>
+<li>对齐计算函数只能算对齐值，不能让读取无条件超过实际文件大小</li>
+</ul>
+<h2>SizeOfHeaders 与 Overlay</h2>
+<p><code>SizeOfHeaders</code> 的规范含义：DOS Stub、PE 头和节表组合后按 <code>FileAlignment</code> 对齐的头部大小。</p>
+<p><strong>Overlay</strong> 是位于最后一个节的文件范围之外、没有被节表记录的尾部数据。正常布局下，纯 Overlay 不会因为在文件末尾就自动成为内存节。</p>
+<p>关于"改大 <code>SizeOfHeaders</code> 把 Overlay 带进内存"的<strong>条件化结论</strong>：只有当追加数据的文件偏移落在加载器/课堂映射逻辑实际纳入的 <code>SizeOfHeaders</code> 文件前缀范围内、且布局被接受时，扩大它才可能把这部分内容带进内存。课堂假设 <code>Overlay 文件偏移=0800h</code>、<code>SizeOfHeaders=1000h</code> 的紧凑布局下，文件前 <code>1000h</code> 字节可能被当作头部范围纳入内存，Overlay 内容可在 <code>模块基址 + 0800h</code> 观察到；但 <code>Overlay 文件偏移=3500h</code> 时单改 <code>SizeOfHeaders</code> 覆盖不到它。</p>
+<pre><code>
+文件（FileAlignment=200h）：
+0000h~01FFh：实际 PE 头
+0200h~03FFh：代码原始数据
+0400h~05FFh：数据原始数据
+0600h 以后 ：可能是 Overlay
+
+内存（SectionAlignment=1000h）：
+RVA 0000h~0FFFh：头部所在页
+RVA 1000h~1FFFh：代码节
+RVA 2000h~2FFFh：数据节
+</code></pre>
+<p>正常 <code>SizeOfHeaders=200h</code> 时头部实际复制文件 <code>0000h~01FFh</code>；课堂把它改成 <code>1000h</code> 应理解为扩大"被当作头部前缀处理的范围"，而不是真正的 PE 结构凭空变大。</p>
+<p>注意：</p>
+<ul>
+<li>改大 <code>SizeOfHeaders</code> 可能越过第一个节边界、覆盖布局或触发加载失败；"不超过 <code>1000h</code>"只是第一节从 <code>1000h</code> 开始的课堂示例边界，不是普遍上限</li>
+<li><strong>映射不等于执行</strong>：控制流必须跳到那里，且页面要有执行权限。头部页通常不是代码执行页，即使字节像指令，也必须同时满足"控制流到达"和"页面可执行"</li>
+<li>"程序还能跑"不代表修改无影响：原入口、代码节、导入仍正常，额外数据未被使用而已；不代表畸形字段普遍安全</li>
+<li>以上 Overlay 数值均为课堂/手动映射模型假设，待用具体样本验证</li>
+</ul>
+<h2>结构层级与术语对比</h2>
+<p>PE 各层结构职责不同：</p>
+<p>| 层级 | 主要内容 | 作用 | |---|---|---| | DOS Header / DOS Stub | MZ、<code>e_lfanew</code> 等 | 文件开头，帮助找到 NT 头 | | NT Signature | <code>PE\0\0</code> | 标记 PE 映像 | | <code>IMAGE_FILE_HEADER</code>（文件头） | <code>Machine</code>、<code>NumberOfSections</code>、<code>SizeOfOptionalHeader</code> 等 | 文件级信息，决定节表数量和位置计算 | | <code>IMAGE_OPTIONAL_HEADER</code>（可选头） | <code>ImageBase</code>、对齐、<code>SizeOfImage</code>、<code>SizeOfHeaders</code>、目录数量等 | 装载和运行参数 | | Section Header（节头） | 每节 40 字节，文件/内存位置、大小、权限 | 描述每个节如何从文件进入内存 | | Data Directory（数据目录） | 多个 <code>RVA + Size</code> 项 | 指向导入、导出、资源、重定位等特殊表，不是节头本身 |</p>
+<p>同一个 PE 在不同空间的描述：</p>
+<pre><code>
+文件头/可选头：告诉加载器整体规则
+节头：告诉加载器每一块数据的搬运规则
+数据目录：告诉加载器特殊表在哪里
+文件偏移：在磁盘文件中找字节
+RVA：在模块映像中找相对位置
+VA：程序运行时用的实际地址
+</code></pre>
+<p>| 术语 | 含义 | 备注 | |---|---|---| | Overlay | 所有节文件范围之外的尾部数据 | 默认不等于映射节 | | Padding / 对齐填充 | 为 FileAlignment/SectionAlignment 补出的空隙 | 只在对齐和零填语境出现 | | Code Cave | 已映射节内可利用的空闲字节 | 待确认，无独立样本 | | <code>AddressOfEntryPoint</code> | 可选头中开始执行的 RVA | 控制流必须到达注入代码才有意义 | | OEP / AEP | 逆向术语：原始入口/入口点 | 未正式展开 |</p>
+<p>遇到 PE 字段先问三个问题：属于哪一层（文件头/可选头/节头/数据目录）？描述文件空间、内存空间还是两者的索引？是单个值、对齐后的大小还是按位标志？</p>
+<p>注意：</p>
+<ul>
+<li>"节必须连续"指 PE 规范要求 VA 按升序、通常按 <code>SectionAlignment</code> 相邻排列；不是把文件原始字节和内存节地址当成同一条连续线</li>
+<li>"文件大小 0、内存大小 <code>1000h</code>"表示零填；"文件有大小、内存大小 0"依赖具体加载器对零 <code>VirtualSize</code> 的兼容处理，不是普遍定律</li>
+<li>把代码数据复制到头部页只是多一个内存副本，CPU 不会因字节出现就扫描执行</li>
+<li>"属性改了通常没事"必须附条件：代码节执行位、数据节写位、NX/DEP 和页边界都影响结果</li>
+<li><code>NumberOfSections</code> 在文件头，<code>SizeOfHeaders</code>/<code>SizeOfImage</code> 在可选头，不能因都参与装载就混为一层；DOS 头、NT 头、File Header、Optional Header、Section Header 和 Data Directory 处在不同层次</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

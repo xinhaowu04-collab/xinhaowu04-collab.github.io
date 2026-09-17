@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>指令集速查 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">指令集速查</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>指令集速查</h1>
+<p>x86 指令集是 Intel 兼容处理器使用的 <strong>CISC</strong>（复杂指令集计算机）指令体系。每条指令对应 CPU 执行的一个基本操作，包括数据搬运、算术运算、逻辑运算、控制流改变等。x86 指令长度不固定（1~15 字节），采用变长编码，历史上兼容到 8086，每条指令通过 opcode + ModRM + SIB + 偏移量 + 立即数的格式编码。</p>
+<h2>指令分类概览</h2>
+<p>| 类别 | 代表指令 | 功能 | |---|---|---| | 数据传送 | <code>mov</code>, <code>push</code>, <code>pop</code>, <code>lea</code> | 在寄存器、内存、立即数之间搬运数据 | | 算术运算 | <code>add</code>, <code>sub</code>, <code>mul</code>, <code>div</code> | 整数加减乘除 | | 位运算 | <code>and</code>, <code>or</code>, <code>xor</code>, <code>shl</code>, <code>shr</code> | 按位逻辑与移位 | | 比较与跳转 | <code>cmp</code>, <code>test</code>, <code>jcc</code> | 条件判断与分支 | | 函数调用 | <code>call</code>, <code>ret</code> | 子程序调用与返回 |</p>
+<h2>操作数类型</h2>
+<p>x86 指令的操作数分为三种：</p>
+<ul>
+<li><strong>立即数</strong>（Immediate）：常量值直接编码在指令字节中，如 <code>42</code>、<code>0FFFFh</code></li>
+<li><strong>寄存器</strong>（Register）：CPU 内部命名存储单元，如 <code>eax</code>、<code>ecx</code></li>
+<li><strong>内存</strong>（Memory）：通过地址引用 RAM，如 <code>[ebx]</code>、<code>wc</code></li>
+</ul>
+<p>注意：一条指令最多可有两个操作数，且<strong>最多只有一个操作数可以是内存</strong>（<code>mov mem, mem</code> 不合法）。这是 x86 指令编码格式（ModRM 字节）的硬约束。</p>
+<h2>内存寻址方式</h2>
+<pre><code>
+[立即地址]        ; 直接寻址:     mov eax, [00401234h]
+[寄存器]           ; 寄存器间接:   mov eax, [ebx]
+[基址 + 偏移]      ; 基址寻址:     mov eax, [ebx + 8]
+[基址 + 变址]      ; 基址变址:     mov eax, [ebx + esi]
+[基址 + 变址*n]    ; 比例变址:     mov eax, [ebx + esi*4]
+[基址 + 变址*n + 偏移]  ; 最完整形式
+</code></pre>
+<p>完整形式为 <code>[base + index*scale + disp]</code>，其中 scale 只能是 1、2、4、8。这个能力由 SIB（Scale-Index-Base）字节提供，是 x86 指令编码中特有的复杂寻址方式。</p>
+<h2>指令的执行过程</h2>
+<p>所有 x86 指令都遵循"取指—译码—执行—写回"这四步周期，每条指令在每个阶段的具体操作不同：</p>
+<p>1. <strong>取指</strong>：CPU 从 <code>eip</code> 指向的内存地址读取指令字节流 2. <strong>译码</strong>：CPU 解析 opcode 和 ModRM 字节，确定指令的操作码、操作数类型和位置 3. <strong>取操作数</strong>：从寄存器文件、内存或指令本身提取源数据 4. <strong>执行</strong>：ALU 执行运算或地址计算单元计算有效地址（EA） 5. <strong>写回</strong>：将结果写入目标寄存器或内存</p>
+<h2>mov 为什么是"拷贝"不是"移动"</h2>
+<p>x86 的寄存器文件是<strong>独立存储单元</strong>，没有"移动后源清零"的硬件语义。<code>mov eax, ebx</code> 在 CPU 内部等价于：</p>
+<pre><code>
+寄存器读取端口 → 读取 ebx 的值
+寄存器写入端口 → 将值写入 eax
+</code></pre>
+<p>ebx 的存储单元不会被修改。名为 <code>mov</code> 是历史惯例，实际语义始终是拷贝。</p>
+<h2>为什么 xor eax, eax 比 mov eax, 0 更快</h2>
+<p>这是逆向分析中常见的编译器优化现象，原因涉及多层微架构：</p>
+<p>1. <strong>opcode 更短</strong>：<code>xor eax, eax</code> 编码为 2 字节（<code>31 C0</code>），而 <code>mov eax, 0</code> 编码为 5 字节（<code>B8 00 00 00 00</code>），节省指令缓存（i-cache）空间 2. <strong>消除错误依赖</strong>：<code>xor eax, eax</code> 被 CPU 识别为<strong>等零惯用法</strong>（Zeroing Idiom），现代 CPU 会将 eax 标记为常量 0，不等待上一指令对 eax 的计算结果，打破数据流中的数据依赖链 3. <strong>微架构快速路径</strong>：Intel Sandy Bridge 之后的微架构对 <code>xor same,same</code> 有专门的等零执行端口，无需占用 ALU 算术单元</p>
+<h2>cmp / test 的标志位机制</h2>
+<p><code>cmp</code> 和 <code>test</code> 的本质是"<strong>只设标志，不存结果</strong>"：</p>
+<ul>
+<li><code>cmp a, b</code> 内部执行 <code>a - b</code>，ALU 计算出差值，但差值被丢弃，只更新 EFLAGS 的 ZF、SF、CF、OF</li>
+<li><code>test a, b</code> 内部执行 <code>a & b</code>，也同样丢弃结果只更新标志</li>
+</ul>
+<h2>lea 不访问内存的设计动机</h2>
+<p><code>lea</code>（Load Effective Address）最初是为高级语言指针运算设计的。它让编译器用一条指令完成数组下标计算：</p>
+<pre><code>
+lea eax, [ebx + ecx*4 + 8]
+</code></pre>
+<p>这条指令完全在地址生成单元（AGU）中完成，不触发内存总线事务，也不读取 TLB/缓存，因此比等效的 <code>mov</code> + <code>shl</code> + <code>add</code> 序列更快，且<strong>不改变任何 EFLAGS 标志位</strong>，这是它相比 <code>add</code>/<code>shl</code> 组合的额外优势。</p>
+<h2>栈操作的内存模型</h2>
+<p><code>push</code> 和 <code>pop</code> 基于栈的<strong>向下增长</strong>模型：</p>
+<pre><code>
+push eax 的完整操作：
+  sub esp, 4        ; esp 减 4，栈顶下移一个槽位
+  mov [esp], eax    ; 将 eax 写入新栈顶
+
+pop eax 的完整操作：
+  mov eax, [esp]    ; 从栈顶读出到 eax
+  add esp, 4        ; esp 加 4，栈顶上移释放槽位
+</code></pre>
+<h2>惯用模式</h2>
+<h3>模式一：xor eax, eax 清零（编译器首选写法）</h3>
+<p>字面语义是"异或"，但实际用途 99% 是清零。所有现代编译器生成清零代码都用 <code>xor reg, reg</code> 而非 <code>mov reg, 0</code>。</p>
+<pre><code>
+xor eax, eax    ; eax = 0，编码 2 字节（31 C0）
+; 而非
+mov eax, 0       ; eax = 0，编码 5 字节（B8 00 00 00 00）
+</code></pre>
+<p>注意：反汇编里看到 <code>xor eax, eax</code> / <code>xor ecx, ecx</code>，第一反应是"清零"而非"异或运算"。同理 <code>sub eax, eax</code> 也是清零惯用法。看到 <code>mov reg, 0</code> 反而可能是手写汇编或未优化代码。</p>
+<h3>模式二：test eax, eax 判零（cmp eax, 0 的高效替代）</h3>
+<p>字面语义是"与运算"，但实际用途是判断寄存器是否为零。编译器判零几乎总是用 <code>test</code> 而非 <code>cmp</code>。</p>
+<pre><code>
+test eax, eax    ; 自己 AND 自己，结果丢弃只设 ZF。2 字节
+jz   is_zero     ; ZF=1 则 eax==0
+; 而非
+cmp  eax, 0      ; 3-5 字节，功能等价但更慢
+</code></pre>
+<p>注意：<code>test reg, reg</code> 紧跟 <code>jz</code>/<code>jnz</code> 是"判零跳转"的标准信号，几乎从不表示真正的按位与运算。看到 <code>cmp reg, 0</code> 反而要警惕——可能是手写代码或特殊场景。</p>
+<h3>模式三：lea 做地址运算（编译器优化利器）</h3>
+<p>字面语义是"加载有效地址"，但实际高频用途是<strong>借寻址电路做三操作数加法 + 移位</strong>，一条指令替代多条，且不改变标志位。</p>
+<pre><code>
+; 编译器常用：一条 lea 完成 ebx + ecx*4 + 8
+lea eax, [ebx + ecx*4 + 8]
+; 等价但更差的多条写法：
+; mov eax, ecx / shl eax, 2 / add eax, ebx / add eax, 8
+</code></pre>
+<p>注意：看到 <code>lea</code> 带 <code>[base + index*scale + disp]</code> 复杂寻址，第一反应是"编译器在做指针/下标运算"，而非真的要读内存。区分：<code>lea eax, [ebx]</code> 取地址，<code>mov eax, [ebx]</code> 取值。</p>
+<h3>模式四：cmp + 条件跳转 jcc 配对（比较-分支标准模式）</h3>
+<p><code>cmp</code> 单独出现没有意义，必须紧跟一个条件跳转。这是"比较并分支"的固定搭配，编译器生成的几乎所有 if/while 都基于此。</p>
+<pre><code>
+cmp eax, 100
+je  equal        ; ==
+jg  greater      ; 有符号 &gt;
+ja  above        ; 无符号 &gt;（指针/句柄比较必用这个）
+</code></pre>
+<p>注意：<code>cmp + jcc</code> 是 if/switch/while 的信号。关键区分：<code>jg/jl/jge/jle</code>（g/l）是有符号比较，<code>ja/jb/jae/jbe</code>（a/b）是无符号比较。比较指针/句柄/内存大小时编译器必用 <code>ja/jb</code>，比较有符号整数用 <code>jg/jl</code>。</p>
+<h3>模式五：mov mem, mem 禁忌（必须寄存器中转）</h3>
+<p>x86 硬件不支持单条指令做内存到内存的搬运，这是 ModRM 编码的硬约束。</p>
+<pre><code>
+; ❌ 非法
+mov [dest], [src]
+; ✅ 寄存器中转
+mov eax, [src]
+mov [dest], eax
+; ✅ 或栈中转
+push [src]
+pop  [dest]
+</code></pre>
+<p>注意：反汇编里绝不会出现两个内存操作数的指令——如果逻辑上需要内存到内存搬运，编译器必然插入一条寄存器中转（常见 <code>eax</code>）。看到 <code>mov eax, [src]; mov [dest], eax</code> 这种成对模式，说明源码里有一次内存间赋值。</p>
+<h2>数据传送指令</h2>
+<p>| 指令 | 作用 | 例子 | |---|---|---| | <code>mov dest, src</code> | 拷贝（源不变） | <code>mov eax, 42</code> | | <code>push src</code> | 压栈 | <code>push 0</code> | | <code>pop dest</code> | 弹栈 | <code>pop eax</code> | | <code>lea dest, src</code> | 取地址（不读内存） | <code>lea eax, wc</code> | | <code>movzx dest, src</code> | 零扩展拷贝（高位填 0） | <code>movzx edx, ax</code> | | <code>movsx dest, src</code> | 符号扩展拷贝（高位填符号位） | <code>movsx ecx, al</code> | | <code>xchg a, b</code> | 交换两个值 | <code>xchg eax, ebx</code> |</p>
+<h3>mov 合法组合</h3>
+<pre><code>
+✅ mov 寄存器, 立即数
+✅ mov 寄存器, 寄存器
+✅ mov 寄存器, 内存
+✅ mov 内存,   立即数
+✅ mov 内存,   寄存器
+❌ mov 内存,   内存      --&gt; CPU 不支持，必须中转
+❌ mov 立即数, 任何东西
+</code></pre>
+<p><code>mov</code> 是<strong>拷贝不是移动</strong>，源操作数的值不变。名字叫 mov 是历史遗留，记住"它不破坏源"就行。</p>
+<h3>内存到内存的两种解决办法</h3>
+<pre><code>
+; 方法1：寄存器中转（推荐，不修改 esp）
+mov eax, hInst
+mov wc.hInstance, eax
+
+; 方法2：栈中转（省一行，但会改 esp）
+push hInst
+pop wc.hInstance
+</code></pre>
+<p>方法 2 虽然代码更短，但会临时修改 <code>esp</code>，在多线程或中断敏感的代码中需要谨慎。</p>
+<h3>movzx / movsx 使用规则</h3>
+<ul>
+<li><strong>无符号数</strong>用 <code>movzx</code>（零扩展，高位填 0）</li>
+<li><strong>有符号数</strong>用 <code>movsx</code>（符号扩展，高位填符号位）</li>
+</ul>
+<pre><code>
+; al = 0xFF
+movzx ecx, al    ; ecx = 0x000000FF（255，无符号解释）
+movsx edx, al    ; edx = 0xFFFFFFFF（-1，有符号解释）
+</code></pre>
+<p>选择依据取决于你对数据的解释方式：如果 <code>0xFF</code> 是 RGB 颜色分量（无符号），用 <code>movzx</code>；如果是温度传感器的 -1 度（有符号），用 <code>movsx</code>。</p>
+<h3>lea vs mov</h3>
+<pre><code>
+lea eax, wc          ; eax = wc 的地址（不读内存）
+mov eax, wc          ; eax = wc 里的值（读内存）
+</code></pre>
+<p><code>lea</code> 还能做地址运算，一条指令替代多条：</p>
+<pre><code>
+; 一条 lea（编译器常用此技巧优化）
+lea eax, [ebx + ecx*4 + 8]
+
+; 等价的多条指令（更长、更慢、修改标志位）
+mov eax, ecx
+shl eax, 2
+add eax, ebx
+add eax, 8
+</code></pre>
+<p><code>lea</code> 不访问内存也不改变标志位，这是它相比 <code>add</code>/<code>shl</code> 组合的额外优势。</p>
+<h2>算术运算指令</h2>
+<p>| 指令 | 作用 | |---|---| | <code>add dest, src</code> | <code>dest = dest + src</code> | | <code>sub dest, src</code> | <code>dest = dest - src</code> | | <code>inc dest</code> | <code>dest++</code> | | <code>dec dest</code> | <code>dest--</code> | | <code>imul eax, src</code> | 有符号乘，结果在 <code>eax</code> | | <code>mul ecx</code> | 无符号乘，64 位结果在 <code>edx:eax</code> | | <code>div ecx</code> | 无符号除，商在 <code>eax</code>，余数在 <code>edx</code>；<strong>调用前必须 <code>xor edx, edx</code></strong> |</p>
+<h3>乘法指令的细节</h3>
+<p><code>mul</code> 是<strong>无符号</strong>乘法，结果宽度自动扩展为操作数的两倍，存入固定的寄存器对：</p>
+<ul>
+<li><code>mul bl</code>：<code>ax = al * bl</code>（8 位乘）</li>
+<li><code>mul bx</code>：<code>dx:ax = ax * bx</code>（16 位乘）</li>
+<li><code>mul ecx</code>：<code>edx:eax = eax * ecx</code>（32 位乘）</li>
+</ul>
+<p><code>imul</code> 的有符号双操作数形式（<code>imul dest, src</code>）只保留结果的低半部分到 dest，不扩展，但三操作数形式（<code>imul dest, src1, src2</code>）在现代代码中更为常用。</p>
+<h3>除法指令的陷阱</h3>
+<p><code>div</code> 将 <code>edx:eax</code> 拼接为 64 位数作为被除数。如果忘记在调用前清零 <code>edx</code>，会得到一个随机的高 32 位值，导致商超出 32 位范围，触发 <code>#DE</code>（Divide Error）异常，程序崩溃：</p>
+<pre><code>
+; 正确的做法
+xor edx, edx    ; 清零高 32 位
+div ecx         ; eax = edx:eax / ecx, edx = edx:eax % ecx
+
+; 错误的做法
+div ecx         ; edx 是上一指令的残值 --&gt; 结果不可预测，可能崩溃
+</code></pre>
+<p>对于有符号除法 <code>idiv</code>，需要用 <code>cdq</code> 指令将 <code>eax</code> 的符号位扩展到 <code>edx</code>：</p>
+<pre><code>
+; 有符号除法
+cdq              ; edx = eax 的符号扩展
+idiv ecx         ; 有符号除
+</code></pre>
+<h2>位运算指令</h2>
+<p>| 指令 | C 等价 | 规则 | |---|---|---| | <code>and dest, src</code> | <code>a & b</code> | 都 1 才 1 | | <code>or dest, src</code> | <code>a \| b</code> | 有 1 就 1 | | <code>xor dest, src</code> | <code>a ^ b</code> | 不同才 1 | | <code>not dest</code> | <code>~a</code> | 0 变 1，1 变 0 | | <code>shl dest, n</code> | <code>a << n</code> | 左移，右边补 0，等价于 × 2ⁿ | | <code>shr dest, n</code> | <code>a >> n</code> | 逻辑右移，左边补 0，等价于 ÷ 2ⁿ（无符号） | | <code>sar dest, n</code> | -- | 算术右移，左边补符号位，等价于 ÷ 2ⁿ（有符号） |</p>
+<h3>常用技巧</h3>
+<pre><code>
+xor eax, eax          ; 清零，比 mov eax, 0 更短更快
+xor eax, 1            ; 翻转最低位（toggle bit 0）
+and eax, 0FFFFh       ; 取低 16 位，高位清零
+shr eax, 16           ; 取高 16 位（右移到低位）
+
+; xor 交换两个值（不用临时变量）
+xor eax, ebx
+xor ebx, eax
+xor eax, ebx
+</code></pre>
+<p>注意：虽然 <code>xor swap</code> 节省了栈空间，但在现代 CPU 上未必比 <code>push/pop</code> 或临时寄存器交换快。<code>xor</code> 的三条指令之间存在<strong>数据依赖链</strong>（每条的结果是下一条的输入），无法超标量并行执行。而 <code>xchg</code> 或 <code>push/pop</code> 在寄存器充足的现代架构上往往更快。</p>
+<h3>移位指令的转向控制</h3>
+<p>移位计数 <code>n</code> 可以是立即数（1~31）或 <code>cl</code> 寄存器：</p>
+<pre><code>
+shr eax, 1       ; 右移 1 位
+shr eax, cl      ; 右移 cl 指定的位数（动态移位）
+</code></pre>
+<p><code>shl</code> 和 <code>shr</code> 在移出最后一位时会更新 CF 标志，可以用 <code>jc</code> / <code>jnc</code> 检测被移出的位。</p>
+<h2>比较与跳转指令</h2>
+<p><code>cmp</code> 做减法但不存结果，只设标志位（等同于只看不摸的 <code>sub</code>）。<code>test</code> 做 AND 但不存结果，只设标志位（等同于只看不摸的 <code>and</code>）。</p>
+<pre><code>
+; 检查 eax 是否为 0（最常用写法）
+test eax, eax
+jz done
+
+; 比较大小
+cmp eax, 5
+je  equal
+jne not_equal
+jg  greater      ; 有符号大于
+jl  less         ; 有符号小于
+ja  above        ; 无符号大于
+jb  below        ; 无符号小于
+</code></pre>
+<h3>EFLAGS 标志位</h3>
+<p>| 标志 | 全称 | 置 1 条件 | |---|---|---| | <code>ZF</code> | Zero Flag | 结果为 0 | | <code>SF</code> | Sign Flag | 结果为负（最高位 = 1） | | <code>CF</code> | Carry Flag | 无符号运算溢出/借位 | | <code>OF</code> | Overflow Flag | 有符号运算溢出 |</p>
+<h3>跳转指令速查</h3>
+<p>| 指令 | 条件 | 适用 | |---|---|---| | <code>je</code> / <code>jz</code> | ZF=1 | == / 为零 | | <code>jne</code> / <code>jnz</code> | ZF=0 | != / 非零 | | <code>jg</code> | ZF=0 且 SF=OF | 有符号 > | | <code>jge</code> | SF=OF | 有符号 >= | | <code>jl</code> | SF != OF | 有符号 < | | <code>jle</code> | ZF=1 或 SF != OF | 有符号 <= | | <code>ja</code> | CF=0 且 ZF=0 | 无符号 > | | <code>jb</code> | CF=1 | 无符号 < | | <code>jae</code> | CF=0 | 无符号 >= | | <code>jbe</code> | CF=1 或 ZF=1 | 无符号 <= | | <code>jmp</code> | 无条件 | -- |</p>
+<p>注意：有符号比较用 g/l（Greater/Less），无符号比较用 a/b（Above/Below），混用是常见 bug。必须根据<strong>变量的语义</strong>选择正确的跳转指令：</p>
+<pre><code>
+; eax = -1 (0xFFFFFFFF)
+cmp eax, -1
+jg  is_greater   ; 不跳转（有符号: -1 不大于 -1）
+ja  is_above     ; 不跳转（无符号: 0xFFFFFFFF 不大于 0xFFFFFFFF）
+
+cmp eax, -2
+jg  is_greater   ; 跳转（有符号: -1 &gt; -2）
+ja  is_above     ; 跳转（无符号: 0xFFFFFFFF &gt; 0xFFFFFFFE）
+</code></pre>
+<h3>test 的隐式操作数</h3>
+<p><code>test eax, eax</code> 是将 eax 与自己做 AND，如果 eax 为 0 则 ZF=1，否则 ZF=0。这比 <code>cmp eax, 0</code> 更高效，因为 <code>test</code> 编码只需要 2 字节，而 <code>cmp eax, 0</code> 需要 3~5 字节（取决于 eax 的编码形式）。</p>
+<h2>函数调用与返回指令</h2>
+<p>| 指令 | 作用 | |---|---| | <code>call func</code> | 压返回地址 + 跳转（等价于 <code>push eip; jmp func</code>） | | <code>ret</code> | 弹返回地址跳回（<code>pop eip</code>） | | <code>ret N</code> | 弹返回地址 + 清理 N 字节参数（stdcall 使用） |</p>
+<p><code>call func</code> 的完整操作：</p>
+<pre><code>
+push eip       ; 将下一条指令的地址压栈
+jmp func       ; 跳转到 func 的起始地址
+</code></pre>
+<p><code>ret</code> 的完整操作：</p>
+<pre><code>
+pop eip        ; 从栈顶弹出返回地址到 eip
+</code></pre>
+<p><code>ret N</code> 额外清理栈参数：</p>
+<pre><code>
+pop eip        ; 弹出返回地址
+add esp, N     ; 跳过 N 字节参数
+</code></pre>
+<p>调用约定决定了是调用方（cdecl）还是被调用方（stdcall）负责清理参数，这决定了函数结尾是 <code>ret</code> 还是 <code>ret N</code>。</p>
+<h2>匿名标号</h2>
+<p>MASM/TASM 提供的语法糖，适用于局部短跳转，避免为每个循环起名：</p>
+<pre><code>
+@@:                ; 定义匿名标号
+    ...
+    jne @F         ; 跳到前方（Forward）最近的 @@
+    ...
+    jmp @B         ; 跳到后方（Backward）最近的 @@
+@@:
+    ; 这里是从前面 @F 跳来的目标
+</code></pre>
+<ul>
+<li><code>@F</code>（Forward）：跳转到下方最近的 <code>@@</code></li>
+<li><code>@B</code>（Backward）：跳转到上方最近的 <code>@@</code></li>
+<li>作用域局限于当前过程（<code>proc</code>/<code>endp</code> 之间），不会与其他过程冲突</li>
+</ul>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

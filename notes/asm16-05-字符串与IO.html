@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8086 字符串操作与 I/O 指令 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">8086 字符串操作与 I/O 指令</h1>
+<div class="meta"><span class="cat">16 位汇编</span></div>
+<article>
+<h1>8086 字符串操作与 I/O 指令</h1>
+<h2>I/O 端口与 IN/OUT 指令</h2>
+<p><code>IN</code> 和 <code>OUT</code> 是 8086 中专用于<strong>外设端口（I/O Ports）</strong>读写的指令。外设端口是 CPU 架构中专用于硬件设备通信的独立物理/逻辑地址空间，范围 <code>0x0000</code> ~ <code>0xFFFF</code>（65536 个），与内存地址空间完全隔离。</p>
+<h3>独立编址与端口隔离</h3>
+<p>CPU 通过 M/IO# 引脚区分内存访问和 I/O 访问，拥有两个独立的地址空间：</p>
+<p>1. <strong>内存地址空间（Memory Space）</strong>：存放代码和数据，寻址指令是常规的 <code>MOV</code> 2. <strong>I/O 端口地址空间（I/O Space）</strong>：专门用于外围设备，寻址指令是专属的 <code>IN</code> 和 <code>OUT</code></p>
+<h3>CPU 如何与外设通信</h3>
+<p>以从 PS/2 键盘读取一个按键为例：按下键盘时，键盘控制器将按键的扫描码放到它的数据寄存器中，这个寄存器在主板硬件布线上被硬编码分配了端口号 <code>0x60</code>。CPU 不能用 <code>MOV AL, [0x60]</code>（这会去内存的 0x60 处读垃圾数据），必须用专属的输入指令：</p>
+<pre><code>
+IN AL, 0x60   ; 硬件行为：M/IO# 置低 + RD# 置低，通知 0x60 端口的硬件把数据送上数据总线
+</code></pre>
+<p>向显卡发送控制命令（如端口 <code>0x3D4</code>/<code>0x3D5</code>）：</p>
+<pre><code>
+MOV DX, 0x3D4 ; 将 VGA 控制器的索引端口号放入 DX 寄存器
+MOV AL, 0x0A  ; 准备发送光标控制命令
+OUT DX, AL    ; 硬件行为：M/IO# 置低 + WR# 置低，把 AL 的数据射向显卡
+</code></pre>
+<p>常见硬件端口速查：</p>
+<pre><code>
+IN AL, 0x60        ; 读取键盘扫描码
+OUT 0x20, AL       ; 向中断控制器发送 EOI（End of Interrupt）
+MOV DX, 0x3F8      ; 串口 COM1
+IN AL, DX          ; 从串口读取数据
+</code></pre>
+<p>| 端口号 | 设备 | |--------|------| | 0x60 | 键盘控制器 | | 0x20 / 0xA0 | 中断控制器（主/从） | | 0x3F8 ~ 0x3FF | 串口 COM1 | | 0x3D4 / 0x3D5 | VGA 控制器 |</p>
+<p>注意：</p>
+<ul>
+<li><strong>不能用 MOV 访问 I/O 端口</strong>。<code>MOV AL, [0x60]</code> 访问的是内存地址 0x60，不是 I/O 端口 0x60，两者地址空间完全隔离</li>
+<li>8086 实模式下 IN/OUT 没有任何权限限制；Ring 0/IOPL 限制是 286+ 保护模式才引入的，现代用户态（Ring 3）程序强行执行会触发异常</li>
+</ul>
+<h3>外设端口 vs 网络端口</h3>
+<p>| 维度 | 外设端口（I/O Port） | 网络端口（Network Port） | |------|-------------------|----------------------| | 层级 | 硬件级别 | 软件协议级别 | | 本质 | CPU 用电信号与主板芯片直接说话的通道 | 操作系统 TCP/IP 协议栈区分网络应用的逻辑编号 | | 范围 | <code>0x0000</code> ~ <code>0xFFFF</code> | <code>0</code> ~ <code>65535</code> | | 操作指令 | <code>IN</code> / <code>OUT</code> | socket API |</p>
+<p>两者数值范围相同但是完全不同的概念：<code>IN</code>/<code>OUT</code> 指令操作的是外设端口（硬件级）；socket API / <code>INT 21h</code> 调用涉及的是网络端口（软件级）。</p>
+<h3>指令格式与机器码</h3>
+<p>| 指令 | 机器码 | 说明 | |------|--------|------| | <code>IN AL, imm8</code> | <code>E4 [imm8]</code> | 从 8 位立即数指定的端口读取 1 字节到 AL | | <code>IN AX, imm8</code> | <code>E5 [imm8]</code> | 从 8 位立即数指定的端口读取 1 字到 AX | | <code>OUT imm8, AL</code> | <code>E6 [imm8]</code> | 将 AL 写出到 8 位端口 | | <code>OUT imm8, AX</code> | <code>E7 [imm8]</code> | 将 AX 写出到 8 位端口 | | <code>IN AL, DX</code> | <code>EC</code> | 从 DX 指定的端口读取 1 字节到 AL（端口号 > 0xFF 时使用） | | <code>IN AX, DX</code> | <code>ED</code> | 从 DX 指定的端口读取 1 字到 AX | | <code>OUT DX, AL</code> | <code>EE</code> | 将 AL 写出到 DX 指定的端口 | | <code>OUT DX, AX</code> | <code>EF</code> | 将 AX 写出到 DX 指定的端口 |</p>
+<h3>端口号大于 0xFF 时用 DX</h3>
+<p>端口号超过 255 时不能直接用立即数寻址，必须先把端口号装入 DX：</p>
+<pre><code>
+; 端口号 ≤ 0xFF：可用立即数
+IN AL, 0x60        ; 合法，读取键盘端口
+
+; 端口号 &gt; 0xFF：必须用 DX
+MOV DX, 0x3F8      ; 串口 COM1
+IN AL, DX          ; 合法
+; IN AL, 0x3F8     ; 非法！立即数不能超过 0xFF
+</code></pre>
+<h3>C 语言中的端口操作</h3>
+<p>现代操作系统用户态（Ring 3）下 <code>IN</code>/<code>OUT</code> 被内核封锁，驱动程序开发中用封装好的函数：</p>
+<pre><code>
+// MSVC 下的 Windows 内核驱动
+#include &lt;ntddk.h&gt;
+
+void WriteToPort() {
+    // 向 COM1 串口 (端口 0x3F8) 发送字符 &#x27;A&#x27;
+    // 编译器底层翻译为：
+    //   MOV DX, 0x3F8
+    //   MOV AL, 0x41 (&#x27;A&#x27;)
+    //   OUT DX, AL
+    WRITE_PORT_UCHAR((PUCHAR)0x3F8, &#x27;A&#x27;);
+}
+</code></pre>
+<h2>字符串操作指令</h2>
+<p>8086 提供了一组专门用于操作内存中连续数据块的指令，能够自动递增或递减指针，配合<strong>重复前缀（REP）</strong>实现高效的批量数据移动、比较、扫描和存储。</p>
+<p>共 5 条核心指令：<strong>MOVS、CMPS、SCAS、LODS、STOS</strong>。</p>
+<h3>隐含操作数机制</h3>
+<p>字符串指令使用<strong>隐含的寄存器操作数</strong>，无需在指令中显式写出：</p>
+<p>| 寄存器 | 作用 | |--------|------| | <strong>DS:SI</strong> | 源地址指针（Source Index） | | <strong>ES:DI</strong> | 目的地址指针（Destination Index） | | <strong>CX</strong> | 计数器（重复次数） | | <strong>AL/AX</strong> | 累加器（用于 STOS/SCAS/LODS 的数据中转） | | <strong>DF</strong> | 方向标志（Direction Flag），决定 SI/DI 递增还是递减 |</p>
+<p>字符串指令是 C 语言内存函数的底层实现：</p>
+<pre><code>
+; memcpy
+CLD
+REP MOVSB         ; 从 DS:SI 复制到 ES:DI，CX 次
+
+; memset
+MOV AL, 0
+CLD
+REP STOSB         ; 将 ES:DI 指向的内存填充 AL，CX 次
+
+; memcmp
+CLD
+REPE CMPSB        ; 比较 DS:SI 和 ES:DI，CX 次，相等则继续
+</code></pre>
+<p>注意：MOVS、STOS、SCAS 的<strong>目的操作数固定使用 ES:DI</strong>，不能通过段超越前缀修改。使用前必须确保 ES 已设置为正确的段地址。源地址默认 DS，可以加段超越前缀。</p>
+<h3>方向标志 DF 的控制</h3>
+<p>| DF 值 | 缩写 | 效果 | 适用场景 | |-------|------|------|---------| | DF = 0 | UP | SI/DI <strong>递增</strong>（正向） | 字符串从低地址到高地址处理 | | DF = 1 | DN | SI/DI <strong>递减</strong>（反向） | 字符串从高地址到低地址处理 |</p>
+<pre><code>
+CLD   ; Clear Direction Flag，DF=0，正向
+STD   ; Set Direction Flag，DF=1，反向
+</code></pre>
+<pre><code>
+; 正向复制（从低地址到高地址）
+CLD
+REP MOVSB
+
+; 反向复制（从高地址到低地址，用于重叠内存）
+STD
+REP MOVSB
+</code></pre>
+<p>注意：调用字符串指令前务必用 <code>CLD</code> 或 <code>STD</code> 显式设置 DF，<strong>不要假设 DF 的初始状态</strong>，否则指针移动方向会错。如果看到字符串指令前没有 CLD/STD，说明代码假设 DF 已是期望状态——这是潜在风险。</p>
+<h3>重复前缀 REP</h3>
+<p><code>REP</code> 前缀使字符串指令自动重复执行，每次执行后 CX 减 1，直到 CX = 0：</p>
+<p>| 重复前缀 | 终止条件 | 适用指令 | |---------|---------|---------| | <code>REP</code> | CX = 0 | MOVS、STOS、LODS | | <code>REPE</code> / <code>REPZ</code> | CX = 0 <strong>或</strong> ZF = 0 | CMPS、SCAS（相等时继续） | | <code>REPNE</code> / <code>REPNZ</code> | CX = 0 <strong>或</strong> ZF = 1 | CMPS、SCAS（不等时继续） |</p>
+<pre><code>
+REP MOVSB         ; 无条件重复，直到 CX=0，批量复制
+REPE CMPSB        ; 相等时继续，直到 CX=0 或 ZF=0，找第一个不相等的位置
+REPNE SCASB       ; 不等时继续，直到 CX=0 或 ZF=1，找第一个匹配的字符
+</code></pre>
+<p>对应关系：<code>REP</code> + <code>MOVS</code> = memcpy，<code>REP</code> + <code>STOS</code> = memset，<code>REPE</code> + <code>CMPS</code> = memcmp，<code>REPNE</code> + <code>SCAS</code> = memchr/strchr。</p>
+<p>注意：如果 CX 初始为 0，<code>REP</code> 前缀的指令一次都不执行，直接跳过。这在循环设计中可能造成逻辑错误。</p>
+<h3>MOVS — 字符串传送</h3>
+<p>从 <code>DS:SI</code> 复制一个字节/字到 <code>ES:DI</code>，然后 SI/DI 自动 ±1（字节）或 ±2（字）：</p>
+<pre><code>
+MOVSB   ; ES:[DI] ← DS:[SI]，SI←SI±1，DI←DI±1
+MOVSW   ; ES:[DI] ← DS:[SI]，SI←SI±2，DI←DI±2
+
+; 批量传送
+LEA SI, SOURCE    ; DS:SI = 源地址
+LEA DI, DEST      ; ES:DI = 目的地址
+MOV CX, 100       ; 传送 100 个字节
+CLD               ; 正向
+REP MOVSB         ; 重复执行 100 次
+</code></pre>
+<p>按字传送比按字节快一倍（80386+ 还有 <code>REP MOVSD</code> 32 位优化）：</p>
+<pre><code>
+; 优化前：逐字节复制
+MOV CX, 100
+REP MOVSB         ; 100 次总线传输
+
+; 优化后：按字复制（长度是偶数时）
+MOV CX, 50
+REP MOVSW         ; 50 次总线传输，快一倍
+</code></pre>
+<h3>CMPS — 字符串比较</h3>
+<p>比较 <code>DS:SI</code> 和 <code>ES:DI</code> 指向的字节/字，结果影响标志位，SI/DI 自动 ±1 或 ±2：</p>
+<pre><code>
+CMPSB   ; 比较 DS:[SI] 与 ES:[DI]，SI←SI±1，DI←DI±1
+CMPSW   ; 比较 DS:[SI] 与 ES:[DI]，SI←SI±2，DI←DI±2
+
+; 比较两个字符串是否相等
+LEA SI, STR1
+LEA DI, STR2
+MOV CX, 10
+CLD
+REPE CMPSB   ; 相等则继续比较，直到 CX=0 或找到不相等的位置
+</code></pre>
+<p><code>REPE CMPSB</code> 是 memcmp/strcmp 的汇编实现：终止时要么 CX=0（全部相等），要么 ZF=0（找到不相等的位置），检查 ZF 可以判断比较结果。</p>
+<p>注意：CMPS 执行后 SI 和 DI 已自动移动。如果需要重新比较同一个位置，需手动调整 SI/DI。</p>
+<h3>SCAS — 字符串扫描</h3>
+<p>将 <code>AL/AX</code> 与 <code>ES:DI</code> 指向的字节/字比较，结果影响标志位，DI 自动 ±1 或 ±2：</p>
+<pre><code>
+SCASB   ; 比较 AL 与 ES:[DI]，DI←DI±1
+SCASW   ; 比较 AX 与 ES:[DI]，DI←DI±2
+
+; 在字符串中查找字符 &#x27;A&#x27;
+MOV AL, &#x27;A&#x27;
+LEA DI, BUFFER
+MOV CX, 100
+CLD
+REPNE SCASB   ; 没找到则继续，直到 CX=0 或找到 &#x27;A&#x27;
+</code></pre>
+<p><code>REPNE SCASB</code> 是 strchr/memchr 的实现：终止时要么 CX=0（没找到），要么 ZF=1（找到了）：</p>
+<pre><code>
+MOV AL, &#x27;A&#x27;
+LEA DI, BUFFER
+MOV CX, 100
+CLD
+REPNE SCASB      ; 没找到则继续
+JNE NOT_FOUND    ; 如果 CX=0 且没找到
+; 找到：DI 指向目标字符的下一个位置
+DEC DI           ; DI 回退到目标字符
+NOT_FOUND:
+</code></pre>
+<p>注意：找到匹配字符后，DI 已自动 ±1，指向匹配字符的<strong>下一个位置</strong>。需要获取匹配字符的地址时必须 DEC DI（正向时）或 INC DI（反向时）。</p>
+<h3>LODS — 加载字符串</h3>
+<p>将 <code>DS:SI</code> 指向的字节/字加载到 <code>AL/AX</code>，SI 自动 ±1 或 ±2：</p>
+<pre><code>
+LODSB   ; AL ← DS:[SI]，SI←SI±1
+LODSW   ; AX ← DS:[SI]，SI←SI±2
+
+; 遍历字符串并处理每个字符
+CLD
+NEXT:
+    LODSB         ; 加载一个字符到 AL
+    OR AL, AL     ; 检查是否为 0（字符串结束）
+    JZ DONE
+    ; 处理 AL 中的字符...
+    JMP NEXT
+DONE:
+</code></pre>
+<p>LODSB + STOSB 组合实现自定义字符串处理（大小写转换、编码转换、过滤）：</p>
+<pre><code>
+; 将字符串中的小写字母转为大写
+CLD
+NEXT:
+    LODSB          ; 从源加载一个字符
+    OR AL, AL      ; 检查字符串结束
+    JZ DONE
+    CMP AL, &#x27;a&#x27;
+    JB  STORE      ; 小于 &#x27;a&#x27; 的直接存储
+    CMP AL, &#x27;z&#x27;
+    JA  STORE      ; 大于 &#x27;z&#x27; 的直接存储
+    SUB AL, 0x20   ; 小写转大写
+STORE:
+    STOSB          ; 存储到目的
+    JMP NEXT
+DONE:
+</code></pre>
+<p>注意：LODS 不改变任何标志位。需要检查加载的值（如判断是否为 0）时，必须手动执行 <code>OR AL, AL</code> 或 <code>TEST AL, AL</code> 来设置标志位。</p>
+<h3>STOS — 存储字符串</h3>
+<p>将 <code>AL/AX</code> 存储到 <code>ES:DI</code>，DI 自动 ±1 或 ±2：</p>
+<pre><code>
+STOSB   ; ES:[DI] ← AL，DI←DI±1
+STOSW   ; ES:[DI] ← AX，DI←DI±2
+
+; 将 100 字节的缓冲区全部填充为 0
+MOV AL, 0
+LEA DI, BUFFER
+MOV CX, 100
+CLD
+REP STOSB   ; 重复填充 100 次
+</code></pre>
+<p><code>REP STOSB</code> 是 memset 的实现：AL 中的值就是要填充的字节。AL=0 是清零缓冲区；AL=0xFF 是将缓冲区全部置 -1（常用于初始化栈或内存池）。</p>
+<h2>综合示例：C 内存函数的汇编实现</h2>
+<p>strcpy（以 0 结尾的字符串复制）：</p>
+<pre><code>
+STRCPY:
+    LEA SI, SOURCE
+    LEA DI, DEST
+    CLD
+COPY_LOOP:
+    LODSB           ; 从源加载一个字节到 AL
+    STOSB           ; 将 AL 存储到目的
+    OR AL, AL       ; 检查是否为 0
+    JNZ COPY_LOOP   ; 不是 0 则继续
+    RET
+</code></pre>
+<p>memcpy（尽量按字传送，奇数长度补一个字节）：</p>
+<pre><code>
+; void memcpy(void* dst, void* src, unsigned int len)
+; 入口：DI = dst, SI = src, CX = len
+MEMCPY:
+    CLD
+    SHR CX, 1       ; 长度折半（转为字计数）
+    REP MOVSW       ; 按字传送，比 MOVSB 快一倍
+    JNC NO_BYTE     ; 如果原长度为奇数，CF=1
+    MOVSB           ; 补传最后一个字节
+NO_BYTE:
+    RET
+</code></pre>
+<p>memset：</p>
+<pre><code>
+; void memset(void* buf, unsigned char val, unsigned int len)
+; 入口：DI = buf, AL = val, CX = len
+MEMSET:
+    CLD
+    REP STOSB
+    RET
+</code></pre>
+<p>memcmp：</p>
+<pre><code>
+; int memcmp(void* a, void* b, unsigned int len)
+; 入口：SI = a, DI = b, CX = len
+; 出口：AX = 0（相等）或差值
+MEMCMP:
+    CLD
+    REPE CMPSB      ; 相等则继续比较
+    JZ  EQUAL
+    ; CMPSB 执行后 SI/DI 已越过比较的字节，需回退
+    DEC SI          ; SI 回退到不相等字节
+    DEC DI          ; DI 回退到不相等字节
+    MOV AL, [SI]    ; 取 buf1 的第一个不同字节
+    MOV BL, [DI]    ; 取 buf2 的第一个不同字节
+    XOR AH, AH      ; 清零 AH，确保 AX 高字节为 0
+    XOR BH, BH      ; 清零 BH，确保 BX 高字节为 0
+    SUB AX, BX      ; 计算差值
+    RET
+EQUAL:
+    XOR AX, AX      ; 返回 0
+    RET
+</code></pre>
+<p>memchr：</p>
+<pre><code>
+; void* memchr(void* buf, unsigned char ch, unsigned int len)
+; 入口：DI = buf, AL = ch, CX = len
+; 出口：DI = 找到的位置（或 NULL）
+MEMCHR:
+    CLD
+    REPNE SCASB     ; 没找到则继续
+    JNZ NOT_FOUND
+    DEC DI          ; DI 回退到匹配字符
+    RET
+NOT_FOUND:
+    XOR DI, DI      ; 返回 NULL
+    RET
+</code></pre>
+<p>memmove（处理重叠内存：dst < src 正向复制，否则反向）：</p>
+<pre><code>
+; void memmove(void* dst, void* src, unsigned int len)
+; 入口：DI = dst, SI = src, CX = len
+MEMMOVE:
+    CLD
+    CMP DI, SI
+    JB  FORWARD     ; dst &lt; src，正向安全
+    STD             ; 反向：从尾部开始复制
+    ADD SI, CX      ; SI 指向源尾部
+    DEC SI
+    ADD DI, CX      ; DI 指向目的尾部
+    DEC DI
+    JCXZ DONE       ; CX=0 时跳过复制，避免指针错误调整
+    REP MOVSB       ; 反向复制
+    CLD             ; 恢复方向标志
+    RET
+FORWARD:
+    REP MOVSB       ; 正向复制
+DONE:
+    CLD
+    RET
+</code></pre>
+<p>memcpy 和 memmove 的区分信号：<code>CMP DI, SI</code> + <code>STD</code> + 尾部指针调整 = memmove。普通 memcpy 不会检查地址重叠，也不会用 STD 反向复制。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

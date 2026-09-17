@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dump 与手动装载 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">Dump 与手动装载</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>Dump 与手动装载</h1>
+<p>壳或压缩程序在运行时把磁盘中的密文/压缩数据解密解压成内存中的明文机器码，再跳到真正的原始入口点 OEP，因此原文件和进程内存的内容可能不同。Dump 的目标是把程序运行后已出现在内存中的映像保存下来，所以要从内存读取；原文件主要提供 PE 结构、未变化的数据和原始布局参考。</p>
+<h2>Dump 为什么要读内存</h2>
+<pre><code>
+磁盘中的代码（可能是密文/压缩数据）
+        ↓ 运行时解密或解压
+内存中的明文机器码
+        ↓
+跳到真正的原始入口点 OEP
+</code></pre>
+<pre><code>
+磁盘 .text：7A 91 E3 28 ...  （密文或压缩数据）
+内存 .text：55 8B EC 83 ...  （已经可以反汇编的指令）
+</code></pre>
+<p>PE 在文件中使用文件偏移，在内存中使用 RVA：</p>
+<p>| 节 | 文件位置 | 内存位置 | |---|---:|---:| | .text | PointerToRawData=400h | VirtualAddress=1000h |</p>
+<p>ImageBase=00400000h 时，.text 的实际内存地址为 VA = ImageBase + RVA = 00400000h + 1000h = 00401000h。Dump 的核心复制关系：</p>
+<pre><code>
+源地址：内存基址 + 节.VirtualAddress
+目标地址：文件基址 + 节.PointerToRawData
+</code></pre>
+<p>直接把 ImageBase 开始的整块内存保存，得到的是内存布局，不是 Windows 文件加载器期望的文件布局。</p>
+<p>Dump/回写流程：</p>
+<pre><code>
+读取原文件的 DOS/PE 头和节表
+        ↓
+读取目标进程 ImageBase ... ImageBase+SizeOfImage
+        ↓
+对每个节：源 = 进程基址 + VirtualAddress
+         目标 = Dump文件 + PointerToRawData
+         大小 = SizeOfRawData
+        ↓
+必要时处理 VirtualSize 补零
+        ↓
+修复入口点、IAT、重定位等
+        ↓
+重新验证 PE
+</code></pre>
+<p>注意：</p>
+<ul>
+<li><strong>内存 Dump 不等于可运行 PE</strong>：内存中节已按 RVA 排列，文件中按 PointerToRawData 排列；还可能包含重定位后的地址、已填好的 IAT、解密代码、调试器写入的 CC 断点，以及原文件中不在映像内的 Overlay、证书等。</li>
+<li>Dump 不能运行的常见原因是文件布局未重建、PointerToRawData 未配套、OEP 仍指向壳、IAT 未重建或地址属于旧进程基址，不代表代码坏了。</li>
+<li>「从文件读」和「从内存读」不是二选一：已解密代码通常从内存读；PE 头、原始节表、未变化资源可以参考原文件；输出必须重新组织成文件布局。</li>
+<li>内存中的绝对地址不一定能在下一次运行继续使用，下一次进程可能加载到不同基址。</li>
+</ul>
+<p>实验映射例子：.text VirtualAddress=1000h、PointerToRawData=400h、SizeOfRawData=600h，ImageBase=00400000h 时文件 0400h～09FFh 对应内存 00401000h～004015FFh；若 VirtualSize=780h，内存中 SizeOfRawData 之后还要补 180h 字节的零。</p>
+<h2>遍历节时判断代码节与真正入口</h2>
+<p>代码节候选常见标志：</p>
+<pre><code>
+IMAGE_SCN_CNT_CODE    = 00000020h
+IMAGE_SCN_MEM_EXECUTE = 20000000h
+IMAGE_SCN_MEM_READ    = 40000000h
+IMAGE_SCN_MEM_WRITE   = 80000000h
+</code></pre>
+<p>判断入口 RVA 是否位于某节：</p>
+<pre><code>
+sectionStart = section.VirtualAddress
+sectionEnd   = sectionStart + max(section.VirtualSize,
+                                  section.SizeOfRawData)
+
+entryRva &gt;= sectionStart &amp;&amp; entryRva &lt; sectionEnd
+</code></pre>
+<p>各判断依据的效力：</p>
+<p>| 判断依据 | 能说明什么 | 不能说明什么 | |---|---|---| | 节名是 .text | 只是传统命名 | 不能证明里面一定是代码 | | MEM_EXECUTE/CNT_CODE | 代码节候选 | 不能证明被加密 | | AEP/OEP 落在该节 | 入口点位于该节 | 当前入口可能只是壳入口 | | 磁盘和内存大量不同 | 节运行期间被修改 | 也可能是重定位、IAT、自修改或断点 | | 内存可正常反汇编 | 内存内容像代码 | 不能单独证明磁盘曾是密文 |</p>
+<p>较有把握地判断「加密/压缩代码被还原」，要组合以下证据：执行属性 + 磁盘内容反汇编混乱或熵高 + 运行后磁盘/内存大量不同 + 内存内容可正常反汇编 + 控制流跳入该区域 + 位置接近真正 OEP。</p>
+<p>分析步骤：读取 AddressOfEntryPoint 计算当前入口 VA → 遍历 VirtualAddress 和节大小确定入口所在节 → 检查执行属性（不依赖节名）→ 比较原文件和内存同一节的字节 → 在授权调试环境中观察解密循环、页面权限变化、间接跳转和最终 OEP → Dump 时从已经还原的内存节读取。</p>
+<p>AEP、OEP 和入口 RVA 要分开：</p>
+<p>| 名称 | 含义 | |---|---| | AddressOfEntryPoint | PE 可选头中的入口 RVA | | AEP | 运行时通常先进入的地址；加壳时可能是壳入口 | | OEP | 原始程序入口，脱壳分析中希望找到的真正入口 | | 入口 VA | 实际模块基址 + 入口 RVA |</p>
+<h2>PE 装载需要的头、节与特殊表</h2>
+<p>PE 装载不是把文件全部读入内存后跳到第一条指令，而是由头部提供元数据，加载器按元数据建立内存映像：</p>
+<pre><code>
+DOS 头
+  └─ e_lfanew → PE 签名位置
+PE 签名 PE\0\0
+  └─ IMAGE_FILE_HEADER
+       └─ IMAGE_OPTIONAL_HEADER
+            └─ DataDirectory[ ]
+  └─ IMAGE_SECTION_HEADER[NumberOfSections]
+       └─ 各节原始数据
+</code></pre>
+<p>各装载阶段的关键字段：</p>
+<p>| 阶段 | 关键字段 | 作用 | |---|---|---| | 找 PE | MZ、e_lfanew、PE\0\0 | 找到 DOS/NT 头 | | 识别架构 | Machine、Optional Header Magic | PE32/PE32+ 和 CPU | | 找节表 | NumberOfSections、SizeOfOptionalHeader | 计算节表起点 | | 分配映像 | ImageBase、SizeOfImage、SectionAlignment | 准备内存范围 | | 复制节 | VirtualAddress、PointerToRawData、两个 Size | 文件到内存映射 | | 设置权限 | Characteristics | 读/写/执行页属性 | | 外部调用 | Import Directory、IAT | 加载 DLL、填函数地址 | | 改基址 | Base Relocation | 实际基址改变时修复地址 | | 开始执行 | AddressOfEntryPoint | 计算最终入口 VA |</p>
+<p>入口计算：ImageBase=00400000h、AddressOfEntryPoint=1230h，则入口 VA = 00400000h + 1230h = 00401230h。</p>
+<p>数据目录不是 16 张真实表都必须存在。NumberOfRvaAndSizes 表示声明了多少目录项；Import、Reloc、TLS 等是否需要取决于程序使用的功能。</p>
+<p>手动模拟装载的阶段：</p>
+<pre><code>
+1. 检查 MZ、e_lfanew、PE 签名
+2. 读取 FileHeader 和 OptionalHeader
+3. 按 SizeOfImage 申请映像空间
+4. 复制 SizeOfHeaders
+5. 遍历节：PointerToRawData → VirtualAddress
+6. 补零并设置节权限
+7. 处理重定位
+8. 处理 Import Table 和 IAT
+9. 按需处理 TLS、异常、Load Config
+10. 跳到 ImageBase + AddressOfEntryPoint
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>「可选头」对 PE 映像并不是可有可无；相对于 COFF 对象文件而言才叫 optional。</li>
+<li>数据目录槽位存在不等于真实表存在，读取前要检查 NumberOfRvaAndSizes。</li>
+<li>ImageBase 是首选基址，不一定是实际基址。</li>
+<li>入口点字段通常是 RVA，不是最终 VA。</li>
+<li>节表起点由 SizeOfOptionalHeader 算出，不应凭经验写死。</li>
+</ul>
+<h2>SizeOfOptionalHeader 与数据目录的边界</h2>
+<p>FileHeader 中的 SizeOfOptionalHeader 决定可选头占多少字节，可选头结束后立即是节表；NumberOfRvaAndSizes 决定可选头中声称有多少个数据目录项。PE32 的正常关系：</p>
+<pre><code>
+固定可选头字段                  60h 字节
+16个数据目录（16×8）             80h 字节
+完整可选头                       E0h 字节
+</code></pre>
+<p>若 PE 签名所在偏移为 80h，则可选头开始 = 80h + 4h + 14h = 98h。正常 SizeOfOptionalHeader=E0h 时边界恰好衔接：</p>
+<pre><code>
+第一张节表 = 98h + E0h = 178h
+数据目录开始 = 98h + 60h = F8h
+16项目录大小 = 80h
+数据目录结束 = F8h + 80h = 178h
+
+F8h～177h：数据目录
+178h开始：第一张节表
+</code></pre>
+<p>如果把可选头大小改成 C0h，却仍把 NumberOfRvaAndSizes 写成 16：</p>
+<pre><code>
+按 SizeOfOptionalHeader：第一张节表 = 98h + C0h = 158h
+按16项目录：数据目录仍声称到 178h
+</code></pre>
+<p>于是 158h～177h 共 20h 字节同时被解释为「第一张节表的一部分」和「后 4 个数据目录」。不是操作系统主动把剩下的节表字节转换为数据目录，而是两个字段给了互相冲突的边界，同一字节出现两种结构解释。</p>
+<p>读取某个目录时应同时用两个边界：</p>
+<pre><code>
+目录项不能超出 SizeOfOptionalHeader
+目录项数量不能超过 NumberOfRvaAndSizes
+第一张节表必须从 SizeOfOptionalHeader 结束处开始
+</code></pre>
+<p>粗略可容纳目录数 = (SizeOfOptionalHeader - 60h) ÷ 8。例如 SizeOfOptionalHeader=C0h 时为 12 项；若仍声称 16 项，文件就是边界矛盾的 PE，严谨解析器应检查并拒绝越界，而不是默认后面的字节自动转换。</p>
+<p>注意：SizeOfOptionalHeader 写大了，原本的节表字节可能被吞进可选头；写小了，目录项可能和节表重叠。课堂极限样例可以故意让字段复用，但普通 PE 不应制造这种边界冲突。</p>
+<h2>FileAlignment、SectionAlignment 与低对齐</h2>
+<pre><code>
+FileAlignment    文件中原始节数据的对齐
+SectionAlignment 节装入内存后的 RVA 对齐
+</code></pre>
+<p>普通 32 位 PE 常见 FileAlignment=200h、SectionAlignment=1000h（1000h = 4096 字节，即 x86 Windows 普通内存页）。</p>
+<p>SectionAlignment=4 小于页面大小时进入低对齐模式，需要整体布局自洽：</p>
+<pre><code>
+FileAlignment == SectionAlignment
+节的 PointerToRawData 与 VirtualAddress 按低对齐规则对应
+</code></pre>
+<p>课堂演示「把正常 PE 的内存对齐改成 4 后 Win7 不能运行」，问题通常不是 4 本身，而是只改了一个字段：</p>
+<pre><code>
+SectionAlignment = 4
+FileAlignment    = 200h
+.text RAW        = 400h
+.text RVA        = 1000h
+</code></pre>
+<p>这里同时有 4 ≠ 200h、400h ≠ 1000h。内存权限仍以页面为粒度，不会按 4 字节分配页面；多个节落在同一 4KB 页时，也不容易分别设置执行/写入权限。</p>
+<p>检查低对齐 PE：</p>
+<pre><code>
+SectionAlignment 是否小于页面大小
+FileAlignment 是否等于 SectionAlignment
+PointerToRawData、VirtualAddress 是否按同一布局安排
+SizeOfImage 是否按 SectionAlignment 对齐
+节表、SizeOfHeaders 是否仍然一致
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>SectionAlignment=4 不等于系统按 4 字节分页。</li>
+<li>不能只改一个字段，低对齐需要整体重排文件。</li>
+<li>「Win7 一律不接受 4」是过度概括；更准确地说，布局不符合低对齐规则时可能被拒绝，完整样本和目标系统都要验证。</li>
+<li>SizeOfImage 不是各节大小简单相加，而是覆盖最高虚拟节末尾后按 SectionAlignment 舍入。</li>
+</ul>
+<p>课堂样例使用 SectionAlignment=FileAlignment=4，使文件偏移与内存 RVA 尽量重合，从而压缩样例。</p>
+<h2>数据目录是否必须存在</h2>
+<pre><code>
+typedef struct _IMAGE_DATA_DIRECTORY {
+    DWORD VirtualAddress; // 目录表的 RVA
+    DWORD Size;           // 目录表范围
+} IMAGE_DATA_DIRECTORY;
+</code></pre>
+<p>常见目录包括 Export、Import、Resource、Exception、Security、Base Relocation、Debug、TLS、Load Config、IAT、Delay Import、CLR Header。</p>
+<p>数据目录项是「位置/大小的目录牌」，真实表是文件或内存中实际结构。把 Import.Size 改成 0，只是把声明改成「目录为空」，不会自动擦掉 DLL 名、Import Descriptor、函数名和 IAT。NumberOfRvaAndSizes=16 也不代表 16 张真实表全部存在，读取第 i 项前先确认目录数量和可选头范围。</p>
+<p>读取某个目录：</p>
+<pre><code>
+1. 检查 SizeOfOptionalHeader 是否包含目录项
+2. 检查 NumberOfRvaAndSizes &gt; 目录索引
+3. 读取 VirtualAddress 和 Size
+4. 将 RVA 定位到节
+5. 检查真实表在映像范围内
+6. 按目录自身的结构和结束条件解析
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>Import 目录还可能依靠全零描述符结束；只改 Size 不一定改变所有解析行为。</li>
+<li>Import 对普通程序通常影响启动；Export、Debug、Resource 是否影响启动取决于用途。</li>
+<li>Base Reloc 缺失时，正好装到首选基址可能暂时没问题，但换基址可能失败。</li>
+<li>Security 目录有特殊文件位置语义，不能把所有目录机械当普通 RVA。</li>
+</ul>
+<h2>PE 中如何把代码「藏起来」</h2>
+<p>「藏代码」主要是增加静态分析难度，不是让代码运行时永远不可见：</p>
+<p>| 方式 | 磁盘表现 | 运行时必须发生的事 | |---|---|---| | 改节名 | 不一定叫 .text | 仍需位于可执行内存 | | 加密/压缩 | 看不到正常指令 | 解密/解压到内存 | | 放数据节 | 看起来像数据 | 修改权限并跳转执行 | | Overlay | 在节表之外 | 程序自己读取和映射 | | TLS 回调 | 普通入口前先运行 | 回调中可能解密 | | 动态解析 API | Import 不直接显示名字 | 运行时查找函数地址 |</p>
+<p>Windows 加载器不靠节名认代码。代码真正运行前必须满足：机器码已经在内存中、所在页面允许执行、控制流能跳到它。所以静态隐藏和动态暴露是两面：磁盘静态分析较难，但运行后内存中必须有真实指令，调试/Dump 仍可观察和恢复。</p>
+<p>分析疑似隐藏代码时观察：</p>
+<pre><code>
+节是否有执行属性
+AddressOfEntryPoint 落在哪个节
+磁盘/内存字节是否大量不同
+是否出现解密循环
+是否调用 VirtualProtect/VirtualAlloc 改权限
+是否有 TLS 回调
+是否跳向非典型节或 Overlay 读取后的内存
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>改后缀、改节名不等于隐藏代码，也不改变 PE 内容。</li>
+<li>Overlay 不会被普通 PE 加载器自动映射；程序必须自己读入。</li>
+<li>磁盘/内存不同不一定是加密，也可能是重定位、IAT、断点或自修改。</li>
+</ul>
+<h2>后缀、PE 格式与手动模拟装载</h2>
+<p>文件后缀属于文件名；PE 格式由文件内容中的结构和字段决定。把 sample.exe 改名为 sample.dat，只改变名字，不改变 MZ、e_lfanew、PE 签名、头和节。</p>
+<p>正常方式和手动方式不同：</p>
+<pre><code>
+正常：文件名/系统接口 → Windows PE Loader → 标准 PE 检查
+手动：自己的 Loader → 自己解析字节 → 自己映射、修复、跳转
+</code></pre>
+<p>手动 Loader 可以用 CreateFile、ReadFile 或 CreateFileMapping/MapViewOfFile 读取 dat、bin 文件，也可以读取「自定义头 + 加密 PE」的容器。但 Windows CreateProcess 不会因为你的程序会解析它，就自动把它当标准 EXE。</p>
+<p>如果改变 EXE/DLL 身份，不能只改后缀；还要考虑 FileHeader Characteristics 中的 IMAGE_FILE_DLL、入口方式以及导出/导入结构。</p>
+<p>注意：「PE 格式可以随意改」必须加条件——自己的 Loader 能解析自定义格式；交给 Windows 标准加载器时仍须符合它的 PE 约束。</p>
+<h2>用汇编写手动 Loader 的难点</h2>
+<p>MASM 手动装载难点不主要在 ReadFile，而在于自己代替系统处理结构、地址、权限和运行时修复：</p>
+<p>| 难点 | 具体问题 | |---|---| | 结构解析 | DOS/NT/可选头/节头偏移，PE32/PE32+ 差异 | | 文件与内存 | PointerToRawData 与 VirtualAddress 换算 | | 内存管理 | VirtualAlloc、VirtualProtect、大小、权限 | | 重定位 | 遍历 Base Relocation、计算 Delta | | 导入 | DLL 名、函数名/序号、Thunk、IAT | | 汇编调用 | 压栈顺序、调用约定、栈平衡、寄存器 | | 系统状态 | TLS、异常、Load Config、PEB 等 | | 调试 | 逐步验证指针、大小、API 返回值 |</p>
+<p>分阶段实验：</p>
+<pre><code>
+第一步：只读取并打印 MZ、PE、节数、入口 RVA
+第二步：只做文件映射和节复制，不跳入口
+第三步：验证 ImageBase + AddressOfEntryPoint
+第四步：实现重定位
+第五步：实现 Import/IAT
+第六步：再考虑 TLS、异常和权限细节
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>能跳到入口点不等于完整模拟 Windows Loader。</li>
+<li>只复制节而不修复 Import/IAT，调用外部函数时会崩溃。</li>
+<li>只处理重定位而不处理 TLS、异常或模块环境，复杂程序仍可能失败。</li>
+<li>VirtualAlloc 得到的地址通常不是 PE 首选 ImageBase，必须考虑重定位。</li>
+</ul>
+<h2>目标缓冲区、CreateFileMapping 与两块内存</h2>
+<p>课堂代码中预留的目标映像缓冲区：</p>
+<pre><code>
+TargetImageBuffer db 2000h dup(?)
+</code></pre>
+<p>2000h = 8192 字节，它是目标 PE 的内存映像目的地，不是 CreateFileMapping 自动产生的地址。要分开两块内存：</p>
+<pre><code>
+① pRawFile / MapViewOfFile 返回地址
+   保存目标 PE 的原始文件布局
+
+② TargetImageBuffer
+   保存按 RVA 排列的目标 PE 内存布局
+</code></pre>
+<p>API 关系：</p>
+<pre><code>
+CreateFile        → 文件句柄
+CreateFileMapping → 文件映射对象句柄
+MapViewOfFile     → 映射视图指针
+UnmapViewOfFile   → 解除视图
+CloseHandle       → 关闭句柄
+</code></pre>
+<p>节复制：</p>
+<pre><code>
+源 = pRawFile + PointerToRawData
+目标 = TargetImageBuffer + VirtualAddress
+复制 = SizeOfRawData
+</code></pre>
+<p>2000h 严格说应参考目标 SizeOfImage，不能把各节 SizeOfRawData 简单相加，因为节间虚拟间隔和对齐也占空间。</p>
+<p>流程：</p>
+<pre><code>
+MapViewOfFile 得到 pRawFile
+        ↓
+复制 PE 头到 TargetImageBuffer
+        ↓
+遍历每个节：从 pRawFile + PointerToRawData
+          复制到 TargetImageBuffer + VirtualAddress
+        ↓
+VirtualSize 大于 RawSize 时补零
+        ↓
+修复权限、重定位、IAT
+</code></pre>
+<p>若目标缓冲区放在自己的 .code 段，复制前还要确认该区域可写；默认代码段常是可读可执行但未必可写，实际是否需要 VirtualProtect 要看节 Characteristics 和编译结果。</p>
+<p>注意：</p>
+<ul>
+<li>CreateFileMapping 本身不把数据复制到 db 数组，MapViewOfFile 才返回视图地址。</li>
+<li>文件映射视图仍是文件布局，不是目标 PE 的完成态内存映像。</li>
+<li>db 2000h dup(?) 不自动具有目标 PE 的 ImageBase；缓冲区实际地址和目标首选基址不同时，仍需考虑重定位。</li>
+</ul>
+<h2>/BASE、首选基址与重定位</h2>
+<p>链接选项 /BASE:address 把首选地址写入 PE 的 ImageBase，不是保证实际装载地址永远不变。</p>
+<p>两个独立进程的程序都装载到 00400000h 通常不冲突，因为进程虚拟地址空间独立。同一进程中的两个模块若重叠（如 EXE 00400000h～00450000h 与 DLL 00400000h～00430000h），有重定位表时可把 DLL 搬走：</p>
+<pre><code>
+Delta = 实际基址 - 首选基址
+首选：00400000h
+实际：00600000h
+Delta：00200000h
+</code></pre>
+<p>分析基址时记录：</p>
+<pre><code>
+PE.OptionalHeader.ImageBase
+进程实际模块基址
+Delta = 实际基址 - ImageBase
+是否存在 Base Relocation
+是否开启 DYNAMICBASE
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>两个程序一个基址只在同一进程的模块场景下可能冲突；两个独立进程可以有相同数字的地址。</li>
+<li>/BASE 只是首选位置，不等于避免所有重定位。</li>
+<li>/FIXED 禁止依靠重定位，首选地址不可用时可能加载失败。</li>
+<li>实际开发通常需要保留 ASLR/重定位。</li>
+</ul>
+<h3>重定位表解析</h3>
+<p>重定位目录是 DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]（索引 5）。块头为 8 字节：</p>
+<pre><code>
+struct IMAGE_BASE_RELOCATION
+{
+    DWORD VirtualAddress;
+    DWORD SizeOfBlock;
+};
+</code></pre>
+<p>块头后面是若干 WORD TypeOffset：高 4 位是 Type，低 12 位是 OffsetInPage。解析用结构体设计：</p>
+<pre><code>
+struct Relocationinfo
+{
+    DWORD entryFoa;
+    WORD Value;
+    WORD Type;
+    WORD OffsetinPage;
+    DWORD RelocRva;
+};
+
+struct Relocationsinfo
+{
+    DWORD blockFoa;
+    DWORD PageRva;
+    DWORD BlockSize;
+    DWORD EntryCount;
+    QVector&lt;Relocationinfo&gt; entries;
+};
+</code></pre>
+<p>每个条目：</p>
+<pre><code>
+EntryCount   = (BlockSize - 8) / 2
+Type         = Value &gt;&gt; 12
+OffsetInPage = Value &amp; 0x0FFF
+RelocRva     = PageRva + OffsetInPage
+</code></pre>
+<p>PE32 常见类型：</p>
+<p>| Type | 名称 | |---:|---| | 0 | ABSOLUTE，通常是填充 | | 3 | HIGHLOW，32 位地址重定位 | | 10 | DIR64，PE32+ 常见类型 |</p>
+<p>正确遍历边界是目录 Size：</p>
+<pre><code>
+currentFoa = relocationStartFoa
+parsedSize = 0
+
+while parsedSize &lt; directory.Size:
+    读取 currentFoa 的块头
+    校验 SizeOfBlock
+    count = (SizeOfBlock - 8) / 2
+    读取 currentFoa + 8 + index * 2 的 WORD
+    解析 Type、OffsetInPage、RelocRva
+    parsedSize += SizeOfBlock
+    currentFoa += SizeOfBlock
+</code></pre>
+<p>下一个块不能用 Relocationaddress++，那只跳过一个块头，必须按 SizeOfBlock 跳过完整块。</p>
+<p>注意：</p>
+<ul>
+<li>DataDirectory[5].Size 是目录大小，不是重定位起始地址。</li>
+<li>SizeOfBlock 为 0、过小、超过剩余目录或导致奇数 payload 时，应停止或报错。</li>
+<li>不能只依赖全零块作为结束条件，目录 Size 才是主边界。</li>
+<li>RelocRva 不是 Offset + Value，而是 PageRva + OffsetInPage。</li>
+<li>entryFoa 是原始 WORD 所在的 FOA，不是待修复目标的 FOA。</li>
+<li>PE32 的 Type 3 是 HIGHLOW；x64 不能继续把目标地址保存为 DWORD。</li>
+</ul>
+<p>实验数据：课堂工具解析出的重定位块：</p>
+<p>| 块 FOA | Page RVA | Block Size | 条目数（十六进制/十进制） | |---:|---:|---:|---| | 0x6A00 | 0x1000 | 0x11C | 0x8A / 138 | | 0x6B1C | 0x2000 | 0xD0 | 0x64 / 100 | | 0x6BEC | 0x3000 | 0x170 | 0xB4 / 180 | | 0x6D5C | 0x4000 | 0x40 | 0x1C / 28 | | 0x6D9C | 0x5000 | 0x14 | 0x6 / 6 | | 0x6DB0 | 0x6000 | 0x38 | 0x18 / 24 | | 0x6DE8 | 0x8000 | 0x10 | 0x4 / 4 |</p>
+<p>选中 0x6DB0 块：EntryCount = (0x38 - 8) / 2 = 24，第一项 FOA = 0x6DB8，Value = 0x300C，Type = 3，OffsetInPage = 0x00C，RelocRva = 0x600C，下一块 FOA = 0x6DE8。</p>
+<p>首块条目示例：</p>
+<p>| entryFoa | Value | Type | OffsetInPage | RelocRva | |---:|---:|---|---:|---:| | 0x6A08 | 0x300B | HIGHLOW | 0x00B | 0x100B | | 0x6A0A | 0x3025 | HIGHLOW | 0x025 | 0x1025 | | 0x6A0C | 0x302C | HIGHLOW | 0x02C | 0x102C | | 0x6A0E | 0x303F | HIGHLOW | 0x03F | 0x103F | | 0x6A10 | 0x3047 | HIGHLOW | 0x047 | 0x1047 | | 0x6A12 | 0x3052 | HIGHLOW | 0x052 | 0x1052 | | 0x6A14 | 0x3058 | HIGHLOW | 0x058 | 0x1058 | | 0x6A16 | 0x305E | HIGHLOW | 0x05E | 0x105E | | 0x6A18 | 0x3068 | HIGHLOW | 0x068 | 0x1068 | | 0x6A1A | 0x306E | HIGHLOW | 0x06E | 0x106E | | 0x6A1C | 0x3073 | HIGHLOW | 0x073 | 0x1073 |</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

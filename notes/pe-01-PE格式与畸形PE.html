@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PE 文件格式与畸形 PE · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">PE 文件格式与畸形 PE</h1>
+<div class="meta"><span class="cat">PE 结构</span></div>
+<article>
+<h1>PE 文件格式与畸形 PE</h1>
+<p>PE（Portable Executable）是 Windows 使用的可执行映像格式，常见于 EXE、DLL、SYS 等文件。本笔记覆盖 PE 各结构字段、地址换算、畸形 PE 构造、入口改写实验及相关 x86 基础。</p>
+<p>注意：代码改写、入口劫持相关内容仅用于自有程序、课堂样本和授权隔离环境中的学习与防御分析。</p>
+<h2>PE 总体结构</h2>
+<h3>「可移植」的含义</h3>
+<ul>
+<li>PE 使用统一的结构描述不同 Windows 目标架构的映像，文件头中的 Machine 指明机器架构（x86、x64、ARM）</li>
+<li>同一种 PE 结构可以被 Windows 工具链和加载器统一处理</li>
+<li><strong>不代表</strong>同一份 x86 机器码可以不经处理地在所有操作系统、所有 CPU 上运行；实际机器码仍受 Machine、Magic、CPU 和操作系统限制</li>
+</ul>
+<h3>PE 与 DOS 中断的区别</h3>
+<p>课堂说法「相比 MZ 文件，PE 没有中断」中的「中断」最可能指 DOS 软件中断：</p>
+<pre><code>
+int 21h    ; DOS 功能调用
+int 10h    ; BIOS 显示服务
+</code></pre>
+<p>Win32 PE 用户程序通常不再依赖 DOS 的 int 21h，而是调用 Kernel32、User32 等 DLL 导出的 Windows API。不能理解为「PE 程序永远不会出现任何中断或异常」——现代 Windows 仍使用异常、系统调用和硬件中断，只是普通 PE 用户代码的服务调用模型已经不同。</p>
+<p>注意：该课堂原句的准确上下文没有完整记录，「中断」的具体含义待向老师确认。</p>
+<h3>总体布局</h3>
+<pre><code>
+IMAGE_DOS_HEADER
+DOS Stub
+DOS 区域或填充
+        │
+        └── e_lfanew 指向 NT Headers
+IMAGE_NT_HEADERS
+        ├── DWORD Signature
+        ├── IMAGE_FILE_HEADER
+        └── IMAGE_OPTIONAL_HEADER
+                └── IMAGE_DATA_DIRECTORY[n]
+IMAGE_SECTION_HEADER[0]
+...
+IMAGE_SECTION_HEADER[n-1]
+SectionData[0]
+...
+SectionData[n-1]
+Extra Data / Overlay（可能存在）
+</code></pre>
+<p>PE 为兼容早期 DOS/MZ 环境保留了 DOS Header 和 DOS Stub；文件末尾可能存在不属于任何节的 Extra Data/Overlay。</p>
+<h3>IMAGE_DOS_HEADER</h3>
+<pre><code>
+typedef struct _IMAGE_DOS_HEADER {
+    WORD e_magic;
+    WORD e_cblp;
+    WORD e_cp;
+    WORD e_crlc;
+    WORD e_cparhdr;
+    WORD e_minalloc;
+    WORD e_maxalloc;
+    WORD e_ss;
+    WORD e_sp;
+    WORD e_csum;
+    WORD e_ip;
+    WORD e_cs;
+    WORD e_lfarlc;
+    WORD e_ovno;
+    WORD e_res[4];
+    WORD e_oemid;
+    WORD e_oeminfo;
+    WORD e_res2[10];
+    LONG e_lfanew;
+} IMAGE_DOS_HEADER;
+</code></pre>
+<p>| 成员 | 偏移 | 作用 | |---|---:|---| | e_magic | 0x00 | DOS 签名，正常值为 0x5A4D；文件字节显示为 4D 5A，即 ASCII 的 MZ | | e_cblp | 0x02 | DOS 文件最后一页的有效字节数 | | e_cp | 0x04 | DOS 文件包含的页数 | | e_crlc | 0x06 | DOS 重定位项数量 | | e_cparhdr | 0x08 | DOS 头大小，以 16 字节段落为单位 | | e_minalloc | 0x0A | DOS 运行时要求的最小附加段落数 | | e_maxalloc | 0x0C | DOS 运行时允许的最大附加段落数 | | e_ss | 0x0E | DOS 初始 SS，相对于装载模块 | | e_sp | 0x10 | DOS 初始 SP | | e_csum | 0x12 | DOS 校验和 | | e_ip | 0x14 | DOS 初始 IP | | e_cs | 0x16 | DOS 初始 CS，相对于装载模块 | | e_lfarlc | 0x18 | DOS 重定位表文件偏移 | | e_ovno | 0x1A | DOS Overlay 编号；与现代 PE 尾部 Overlay 不是同一概念 | | e_res[4] | 0x1C | DOS 保留字段 | | e_oemid | 0x24 | OEM 标识 | | e_oeminfo | 0x26 | 与 e_oemid 配套的 OEM 信息 | | e_res2[10] | 0x28 | 更多保留字段 | | e_lfanew | 0x3C | NT Headers 在文件中的偏移，Windows 加载 PE 时的关键字段 |</p>
+<p>课堂实验中保留 e_magic 和 e_lfanew，把 DOS 头其余成员以及 DOS Stub 大量改为 AA，程序仍能运行——Windows PE 加载器主要依赖 MZ 和 e_lfanew 找到 NT 头，多数 DOS 成员只对 DOS 装载逻辑有意义。但不代表所有签名校验器、壳、调试器、DOS 兼容环境都忽略这些字段。</p>
+<h3>DOS Stub</h3>
+<p>DOS Stub 是夹在 DOS Header 与 NT Headers 之间的一段 16 位代码，经典 Stub 会在 DOS 环境显示：</p>
+<pre><code>
+This program cannot be run in DOS mode.
+</code></pre>
+<p>现代 Windows 启动 PE 时通常不执行这段 DOS 代码，因此替换为 AA 后仍可运行。覆盖需满足两个条件：不得破坏 e_lfanew；不得覆盖 e_lfanew 所指向的 NT Headers。</p>
+<p>课堂尝试过把入口代码写入被 AA 覆盖的 DOS Header/DOS Stub 区域，结果崩溃；把代码放到最后一个节的可执行空间后成功。原因不只是「那里有没有空字节」，还涉及加载后的地址、页面执行权限、代码是否位于映射范围以及入口跳转是否正确。</p>
+<h3>IMAGE_NT_HEADERS</h3>
+<pre><code>
+typedef struct _IMAGE_NT_HEADERS32 {
+    DWORD                   Signature;
+    IMAGE_FILE_HEADER       FileHeader;
+    IMAGE_OPTIONAL_HEADER32 OptionalHeader;
+} IMAGE_NT_HEADERS32;
+</code></pre>
+<p>| 成员 | 作用 | |---|---| | Signature | NT 签名，值为 0x00004550，文件字节为 50 45 00 00，即 PE\0\0 | | FileHeader | COFF 文件头，描述架构、节数量、可选头大小和文件属性 | | OptionalHeader | 描述映像如何装载和运行，包括入口、基址、对齐、栈堆、数据目录等 |</p>
+<p>「Optional Header」虽直译为「可选头」，但对正常的 PE EXE/DLL 映像基本必需；「可选」更多来自 COFF 格式历史。</p>
+<h3>IMAGE_FILE_HEADER</h3>
+<pre><code>
+typedef struct _IMAGE_FILE_HEADER {
+    WORD  Machine;
+    WORD  NumberOfSections;
+    DWORD TimeDateStamp;
+    DWORD PointerToSymbolTable;
+    DWORD NumberOfSymbols;
+    WORD  SizeOfOptionalHeader;
+    WORD  Characteristics;
+} IMAGE_FILE_HEADER;
+</code></pre>
+<p>| 成员 | 大小 | 作用 | |---|---:|---| | Machine | 2 | 机器架构。x86 常见 IMAGE_FILE_MACHINE_I386 = 0x014C；x64 常见 0x8664 | | NumberOfSections | 2 | 节数量，决定紧随其后的 IMAGE_SECTION_HEADER 有多少项 | | TimeDateStamp | 4 | 时间戳。通常不决定能否装载，可被修改，但会影响工具识别、样本指纹和部分调试信息匹配 | | PointerToSymbolTable | 4 | COFF 符号表文件偏移；普通发布版 PE 常为 0，主要供对象文件、链接器和部分调试工具使用 | | NumberOfSymbols | 4 | COFF 符号表项数量，和 PointerToSymbolTable 配套 | | SizeOfOptionalHeader | 2 | Optional Header 的实际字节数；加载器和解析器用它定位节表。PE32 常见 0xE0，PE32+ 常见 0xF0，但不能硬编码 | | Characteristics | 2 | 文件属性位集合，例如可执行映像、32 位机器、DLL、系统文件、是否剥离重定位等 |</p>
+<p>PointerToSymbolTable、NumberOfSymbols 和 TimeDateStamp「随便改通常不影响运行」更准确的说法是：它们通常不是普通映像装载的核心字段，但任意修改仍可能影响签名、调试、符号或分析工具。</p>
+<p>注意：判断 32/64 位应结合 Machine 和 Optional Header 的 Magic，不能只看 Characteristics 中的 IMAGE_FILE_32BIT_MACHINE 标志。</p>
+<h3>Characteristics 常见标志</h3>
+<p>| 标志 | 数值 | 含义 | |---|---:|---| | IMAGE_FILE_RELOCS_STRIPPED | 0x0001 | 重定位信息被移除 | | IMAGE_FILE_EXECUTABLE_IMAGE | 0x0002 | 文件是可执行映像 | | IMAGE_FILE_LINE_NUMS_STRIPPED | 0x0004 | 行号信息被移除 | | IMAGE_FILE_LOCAL_SYMS_STRIPPED | 0x0008 | 本地符号被移除 | | IMAGE_FILE_LARGE_ADDRESS_AWARE | 0x0020 | 支持大地址 | | IMAGE_FILE_32BIT_MACHINE | 0x0100 | 目标为 32 位机器 | | IMAGE_FILE_SYSTEM | 0x1000 | 系统文件 | | IMAGE_FILE_DLL | 0x2000 | DLL 映像 |</p>
+<p>课堂样本的字段字节为 <code>0F 01</code>，按小端序解释为 0x010F，其中包含 0x0100。看到后一个字节是 01，是因为 0x0100 在文件中保存为 <code>00 01</code>；不能只把某一个字节直接当成完整 WORD。</p>
+<h3>IMAGE_OPTIONAL_HEADER32</h3>
+<pre><code>
+typedef struct _IMAGE_OPTIONAL_HEADER {
+    WORD  Magic;
+    BYTE  MajorLinkerVersion;
+    BYTE  MinorLinkerVersion;
+    DWORD SizeOfCode;
+    DWORD SizeOfInitializedData;
+    DWORD SizeOfUninitializedData;
+    DWORD AddressOfEntryPoint;
+    DWORD BaseOfCode;
+    DWORD BaseOfData;
+    DWORD ImageBase;
+    DWORD SectionAlignment;
+    DWORD FileAlignment;
+    WORD  MajorOperatingSystemVersion;
+    WORD  MinorOperatingSystemVersion;
+    WORD  MajorImageVersion;
+    WORD  MinorImageVersion;
+    WORD  MajorSubsystemVersion;
+    WORD  MinorSubsystemVersion;
+    DWORD Win32VersionValue;
+    DWORD SizeOfImage;
+    DWORD SizeOfHeaders;
+    DWORD CheckSum;
+    WORD  Subsystem;
+    WORD  DllCharacteristics;
+    DWORD SizeOfStackReserve;
+    DWORD SizeOfStackCommit;
+    DWORD SizeOfHeapReserve;
+    DWORD SizeOfHeapCommit;
+    DWORD LoaderFlags;
+    DWORD NumberOfRvaAndSizes;
+    IMAGE_DATA_DIRECTORY DataDirectory[IMAGE_NUMBEROF_DIRECTORY_ENTRIES];
+} IMAGE_OPTIONAL_HEADER32;
+</code></pre>
+<p>| 成员 | 作用 | |---|---| | Magic | 识别可选头格式：0x10B 为 PE32，0x20B 为 PE32+；应先读取它再按相应结构解析 | | MajorLinkerVersion | 链接器主版本；通常不是加载关键字段，但可用于工具分析和编译器指纹 | | MinorLinkerVersion | 链接器次版本，作用同上 | | SizeOfCode | 所有带代码属性节的原始数据总大小，通常按 FileAlignment 统计；不是「整个程序大小」，也不是调试器唯一反汇编边界 | | SizeOfInitializedData | 已初始化数据节的原始数据总大小 | | SizeOfUninitializedData | 未初始化数据总大小，常对应文件中不占等量空间、装载后补零的数据 | | AddressOfEntryPoint | 入口点 RVA；为 0 时含义需要结合 EXE/DLL、头部映射和系统行为分析 | | BaseOfCode | 代码区域起始 RVA，描述代码布局 | | BaseOfData | PE32 数据区域起始 RVA；PE32+ 中不再包含该成员 | | ImageBase | 首选装载基址。实际基址可能因冲突或 ASLR 改变 | | SectionAlignment | 节在内存中的对齐单位，常见 0x1000 | | FileAlignment | 节原始数据在文件中的对齐单位，常见 0x200 | | MajorOperatingSystemVersion | 要求的操作系统主版本 | | MinorOperatingSystemVersion | 要求的操作系统次版本 | | MajorImageVersion | 映像自身版本的主版本 | | MinorImageVersion | 映像自身版本的次版本 | | MajorSubsystemVersion | 要求的子系统主版本 | | MinorSubsystemVersion | 要求的子系统次版本 | | Win32VersionValue | 保留字段，通常为 0 | | SizeOfImage | 整个映像映射到内存后的大小，按 SectionAlignment 向上对齐 | | SizeOfHeaders | DOS 头、NT 头和节表等所有头部的文件占用大小，按 FileAlignment 对齐 | | CheckSum | 映像校验和；驱动、系统组件等场景可能更加重要，普通 EXE 常为 0 | | Subsystem | 程序目标子系统，例如 GUI、Console、Native | | DllCharacteristics | 与安全和装载能力有关的标志集合，例如 ASLR、DEP/NX、CFG 等 | | SizeOfStackReserve | 初始线程栈预留大小 | | SizeOfStackCommit | 初始线程栈首次提交大小 | | SizeOfHeapReserve | 默认进程堆预留大小 | | SizeOfHeapCommit | 默认进程堆首次提交大小 | | LoaderFlags | 保留字段，通常为 0 | | NumberOfRvaAndSizes | DataDirectory 中声明有效的目录项数量；常见为 16，但解析时应读取字段 | | DataDirectory | 数据目录数组，每项给出某类表的位置和大小 |</p>
+<p>课堂说 SizeOfCode 可以改得很大，让调试器反汇编很久。这属于针对某些工具实现的解析干扰思路，并非 PE 规范保证的效果——成熟反汇编器会结合节表、执行权限和控制流，完全可能忽略虚假的 SizeOfCode。</p>
+<h3>IMAGE_DATA_DIRECTORY</h3>
+<pre><code>
+typedef struct _IMAGE_DATA_DIRECTORY {
+    DWORD VirtualAddress;
+    DWORD Size;
+} IMAGE_DATA_DIRECTORY;
+</code></pre>
+<p>| 成员 | 作用 | |---|---| | VirtualAddress | 通常是目标表的 RVA；Security Directory 是重要例外，其值是文件偏移 | | Size | 对应目录数据的大小 |</p>
+<p>数据目录保存的是「表在哪里、表有多大」，不是把导入表、资源表等直接放在 Optional Header 里。</p>
+<p>| 索引 | 标准名称 | 作用 | |---:|---|---| | 0 | Export Directory | 导出表，描述本模块向外提供的符号 | | 1 | Import Directory | 导入表，描述依赖的 DLL 和函数 | | 2 | Resource Directory | 资源表，包含图标、菜单、字符串、对话框、版本等 | | 3 | Exception Directory | 异常处理信息；在不同架构上的重要性不同 | | 4 | Security Directory | 安全证书/Authenticode 数据；VirtualAddress 字段实际按文件偏移解释 | | 5 | Base Relocation Directory | 基址重定位表，实际装载基址变化时修正绝对地址 | | 6 | Debug Directory | 调试目录，可能指向 CodeView/PDB 等信息 | | 7 | Architecture Directory | 架构相关保留目录 | | 8 | Global Pointer Directory | 全局指针相关，常见 PE32 x86 中通常不用 | | 9 | TLS Directory | TLS 数据、索引和 TLS Callback | | 10 | Load Configuration Directory | 装载配置和部分安全机制信息 | | 11 | Bound Import Directory | 绑定导入信息 | | 12 | IAT Directory | Import Address Table 范围 | | 13 | Delay Import Directory | 延迟导入信息 | | 14 | COM Descriptor Directory | CLR/.NET 运行时头 | | 15 | Reserved | 保留项，通常为 0 |</p>
+<h3>IMAGE_SECTION_HEADER</h3>
+<pre><code>
+#define IMAGE_SIZEOF_SHORT_NAME 8
+
+typedef struct _IMAGE_SECTION_HEADER {
+    BYTE Name[IMAGE_SIZEOF_SHORT_NAME];
+    union {
+        DWORD PhysicalAddress;
+        DWORD VirtualSize;
+    } Misc;
+    DWORD VirtualAddress;
+    DWORD SizeOfRawData;
+    DWORD PointerToRawData;
+    DWORD PointerToRelocations;
+    DWORD PointerToLinenumbers;
+    WORD  NumberOfRelocations;
+    WORD  NumberOfLinenumbers;
+    DWORD Characteristics;
+} IMAGE_SECTION_HEADER;
+</code></pre>
+<p>每个节头固定 40 字节（0x28）。</p>
+<p>| 成员 | 作用 | |---|---| | Name[8] | 节名，最多 8 字节；不保证以 0 结尾 | | Misc.PhysicalAddress | 与 VirtualSize 共用联合体；在 PE 映像中通常解释为 VirtualSize | | Misc.VirtualSize | 节装入内存后实际需要的逻辑大小，未对齐值 | | VirtualAddress | 节相对于 ImageBase 的起始 RVA | | SizeOfRawData | 节在文件中占用的大小，通常按 FileAlignment 对齐 | | PointerToRawData | 节原始数据在文件中的起始偏移 FOA | | PointerToRelocations | COFF 重定位信息的文件偏移；普通最终映像中通常为 0 | | PointerToLinenumbers | COFF 行号信息的文件偏移；普通最终映像中通常为 0 | | NumberOfRelocations | COFF 重定位项数量 | | NumberOfLinenumbers | COFF 行号项数量 | | Characteristics | 节属性：代码/数据、可读、可写、可执行、丢弃等 |</p>
+<p>常见节：</p>
+<p>| 节名 | 常见内容 | |---|---| | .text | 机器码，常为可读、可执行 | | .rdata | 只读数据、字符串、导入相关数据 | | .data | 已初始化可读写数据 | | .bss | 未初始化数据，内存中存在，文件中可能没有同等字节 | | .rsrc | 资源数据 | | .reloc | 基址重定位数据 |</p>
+<h3>FOA、RVA、VA 换算</h3>
+<p>| 名称 | 含义 | 示例 | |---|---|---| | FOA/FileOffset | 字节在磁盘文件中的偏移 | 0x0200 | | RVA | 相对于实际模块基址的内存偏移 | 0x3E21 | | VA | 进程中的虚拟地址 | 0x01003E21 | | ImageBase | 映像首选或实际装载基址；换算时必须明确是哪一个 | 0x01000000 |</p>
+<p>节内地址换算：</p>
+<pre><code>
+RVA = Section.VirtualAddress
+    + (FOA - Section.PointerToRawData)
+
+FOA = Section.PointerToRawData
+    + (RVA - Section.VirtualAddress)
+
+VA = ActualModuleBase + RVA
+</code></pre>
+<p>纯 Overlay 不属于任何节，不能直接套用节内 FOA/RVA 公式。</p>
+<h3>AEP、OEP 与入口</h3>
+<p>| 名称 | 含义 | |---|---| | AddressOfEntryPoint/AEP 字段 | Optional Header 中保存入口 RVA 的成员 | | 入口 RVA | AEP 字段的实际数值，例如 0x3E21 | | 入口 VA | 模块基址加入口 RVA，例如 0x01003E21 | | OEP | Original Entry Point，修改前的原始入口 | | 新入口 | 修改 AEP 后先执行的自定义 stub |</p>
+<p>入口改写后的执行链：Windows Loader → 新 AddressOfEntryPoint → 自定义入口 stub → MessageBoxW / 解密 / 初始化 → jmp 原始 OEP → 原程序继续运行。</p>
+<h3>Padding、Code Cave 与 Overlay</h3>
+<p>| 概念 | 所在位置 | 默认是否映射 | |---|---|---| | 节内有效数据 | 位于节的文件/内存有效范围 | 是 | | Padding | 为 FileAlignment 或 SectionAlignment 补齐的空白 | 取决于其属于文件节还是只在内存补零 | | Code Cave | 可用于放置代码的现有空白区域；通常要求已映射且有执行权限 | 条件满足时是 | | 严格 Overlay | 所有节的文件范围之后、不属于任何节的数据 | 默认不映射 | | Extra Data | 课堂口语可能泛指文件末尾附加字节，必须进一步判断是否属于某节 | 不能只凭「在末尾」判断 |</p>
+<p>课堂 Hello 样本的布局：</p>
+<pre><code>
+.rdata PointerToRawData = 0x400
+.rdata SizeOfRawData    = 0x200
+.rdata 文件范围         = 0x400 ～ 0x5FF
+0x600 开始的 BB         = 严格 Overlay
+</code></pre>
+<p>其中 0x540～0x5FF 的 00 仍属于 .rdata 的 Raw 范围，是节内 Padding，不是 Overlay。老师最终把代码放在「最后一个区段的最后一行」，实际使用的更可能是最后一节中的 Padding/Code Cave，而不是没有被节描述的纯 Overlay。</p>
+<h2>加载与畸形 PE</h2>
+<h3>研究 PE 的方向</h3>
+<p>1. <strong>调试器开发</strong>：定位入口点、解析节表和导入表、文件偏移与 RVA/VA 互转、识别代码和数据范围、对模块下断并反汇编 2. <strong>程序加密攻防（壳）</strong>：壳压缩或加密原代码，修改 AEP 让解密/解压 stub 先执行，stub 恢复原代码后跳回 OEP；逆向方需要找 OEP、恢复 IAT、Dump 内存映像 3. <strong>恶意软件攻防</strong>：恶意程序可能修改入口、节、导入或其他结构使自己的代码先执行；分析人员通过异常节权限、异常入口、Overlay、导入表和行为识别样本。同样的入口改写机制也可用于合法壳、插桩、兼容补丁和安全研究，技术本身不自动等于恶意用途</p>
+<h3>最小 PE 与对齐</h3>
+<p>课堂通过汇编写极简 Hello World，再使用链接器参数把多个节合并、降低对齐浪费，使默认几十 KB 的程序缩小到几百字节：</p>
+<pre><code>
+/MERGE:from=to
+/ALIGN:#
+/FILEALIGN:#
+</code></pre>
+<p>教学价值：文件空白更少、结构边界更清楚，能直接观察头部、节表、机器码、字符串和导入数据，便于验证每个字段对布局的影响，也便于制作畸形 PE 和最小实验样本。</p>
+<p>FileAlignment 控制磁盘文件布局，SectionAlignment 控制装入内存后的节布局，两者不能互换——文件中 0x200 对齐不代表内存也按 0x200 映射。常见值：</p>
+<pre><code>
+FileAlignment    = 0x200
+SectionAlignment = 0x1000
+</code></pre>
+<p>对齐让磁盘块和内存页映射更规整、便于加载器分配和设置页面权限、减少非对齐读取；产生的间隙可作为填充，但不自动等于可执行空间。</p>
+<p>课堂尝试 /ALIGN:1 失败、最低使用 /ALIGN:4。更准确地说，链接器通常要求对齐是 2 的幂，并受输入节对齐、PE 低对齐规则和工具链版本限制；「最低是 4」是当时链接器/样本的观察，不是所有 PE 的无条件最低值。</p>
+<h3>Windows 加载 PE 的核心流程</h3>
+<p>1. 检查 MZ 2. 读取 e_lfanew 3. 检查 PE 签名 4. 读取 FileHeader 与 OptionalHeader 5. 按 SizeOfImage 预留映像 6. 映射头部与各节 7. 处理导入、重定位和页面属性 8. 跳转到 ActualBase + AddressOfEntryPoint</p>
+<p>因此 PE 中「物理上存在某段字节」不等于「运行时一定映射」，「已经映射」也不等于「一定可执行」。</p>
+<h3>畸形 PE 为何影响调试器</h3>
+<p>节表位置由以下关系决定：</p>
+<pre><code>
+SectionTableFOA =
+    e_lfanew
+  + sizeof(Signature)          ; 4
+  + sizeof(IMAGE_FILE_HEADER)  ; 20
+  + SizeOfOptionalHeader
+</code></pre>
+<p>如果工具把 PE32 的 Optional Header 大小硬编码为 0xE0，而不是读取 SizeOfOptionalHeader，它在遇到缩短后的可选头时就会从错误位置读取节表。</p>
+<p>课堂构造畸形 PE 的思路：减小 SizeOfOptionalHeader → 从数据目录尾部删除对应字节 → 同步减少 NumberOfRvaAndSizes → 将节头向前移动 → 保持加载器需要的结构仍然自洽。这样 Windows 加载器可能仍能接受，而 OllyDbg、Depends 或简单解析器可能解析错误、拒绝或崩溃。效果取决于具体工具和版本，不是对所有调试器都有效。</p>
+<h3>入口改写原理</h3>
+<p>AEP 决定加载器完成映射后首先跳到哪里。把 AEP 从 OEP 改为自定义 stub 的 RVA，就能先执行弹框、初始化、校验、解密或解压，完成后恢复现场、跳回原始 OEP，原程序继续运行。</p>
+<p>这就是课堂「模拟熊猫烧香：扫雷运行前弹 Hello World」的核心，而不是复制整个 Hello EXE 到扫雷中。注意：课堂只模拟「先执行附加代码，再跳回原程序」这一控制流；真实恶意软件还包含传播、持久化、破坏等行为，本实验没有实现，也不应扩展。</p>
+<h3>为什么不能机械复制机器码</h3>
+<p>Hello 的机器码可能依赖：自己的 ImageBase、自己的 IAT、自己的字符串 VA、E8/E9 相对于原位置计算的位移、原节的权限和布局、重定位表是否覆盖绝对地址。所以「把 Hello 合并成一个节，只复制该节」可以作为观察实验，但不能保证移植后运行——节中还可能有绝对地址、相对调用、IAT 引用和字符串地址，必须在目标环境中重新确定 API 地址、字符串地址和跳转位移。</p>
+<h3>纯 Overlay 为何在调试器中搜不到</h3>
+<p>纯 Overlay 没有被任何节描述，Windows 默认不会将它映射进模块内存。因此：十六进制编辑器能在磁盘文件末尾看到它；x32dbg 在模块内存范围搜索时找不到它；把 AEP 指向它没有可靠的 RVA 映射。把代码放到最后一个节的末尾后，代码进入已映射区域，调试器才能定位和执行。</p>
+<h3>MessageBoxW 与目标程序 IAT</h3>
+<p>Hello 里的：</p>
+<pre><code>
+E8 01 00 00 00
+</code></pre>
+<p>不是「调用 MessageBoxW 的通用机器码」，而是从当前位置相对调用紧随其后的本地跳板：</p>
+<pre><code>
+FF 25 xx xx xx xx
+</code></pre>
+<p>跳板再经 Hello 自己的 IAT 调用 API。复制到扫雷后，相对位置和 IAT 都不同。</p>
+<p>扫雷中已存在 MessageBoxW 导入，调试器观察到：</p>
+<pre><code>
+FF 15 B8 10 00 01
+</code></pre>
+<p>其含义是通过地址 0x010010B8 处的 IAT 槽间接调用 MessageBoxW，所以在该固定样本中可以复用目标程序自己的导入。</p>
+<h3>AEP=0 与反调试</h3>
+<p>AEP=0 意味着入口 RVA = 0，入口 VA = ActualModuleBase，通常落在映射后的 PE Header 开头。若那里布置了可执行跳转，可以尝试让 CPU 从 MZ 位置开始执行；否则 MZ 的字节会被解释为机器码，可能跑飞或崩溃。</p>
+<ul>
+<li>DLL 的入口为 0 可以表示没有入口函数；EXE 的入口为 0 会计算到模块基址/头部，不代表必然正常运行</li>
+<li>是否能执行取决于头部机器码、页面权限和系统行为</li>
+<li>把 MZ 后面布置跳转属于特殊构造，不是标准程序入口设计</li>
+</ul>
+<p>课堂说软件断点会把 MZ 改为 CC，因此调试器「不敢下断点」，并用硬件断点绕过。原理上：软件断点需要临时修改目标内存字节为 CC；硬件执行断点通过调试寄存器监控地址，不修改目标字节。但成熟调试器通常会保存和恢复被替换字节，所以「必然无法下断点」并不严谨；头部页面能否执行还受映射权限、DEP/NX、系统版本和加载器行为影响。</p>
+<h2>x86 基础</h2>
+<h3>调用约定</h3>
+<p>| 调用约定 | 参数传递 | 顺序 | 清栈者 | 常见场景 | |---|---|---|---|---| | __stdcall | 主要通过栈 | 右到左 | 被调用者，常见 ret N | x86 Win32 API | | __cdecl | 主要通过栈 | 右到左 | 调用者，call 后 add esp,N | C 库、可变参数 | | __fastcall | 前两个常用 ECX、EDX，其余上栈 | 其余右到左 | 被调用者清理栈上传参 | 编译器优化 | | __pascal | 通过栈 | 左到右 | 被调用者 | 早期 Pascal/16 位 Windows，现已少见 | | __thiscall | this 常经 ECX | 其他参数通常右到左 | 依编译器和函数而定 | x86 C++ 成员函数 |</p>
+<p>MessageBoxW 的 x86 原型：</p>
+<pre><code>
+int MessageBoxW(
+    HWND    hWnd,
+    LPCWSTR lpText,
+    LPCWSTR lpCaption,
+    UINT    uType
+);
+</code></pre>
+<p>调用时右到左压栈：</p>
+<pre><code>
+push uType
+push lpCaption
+push lpText
+push hWnd
+call MessageBoxW
+</code></pre>
+<p>右到左压栈后，传统栈帧中 <code>[ebp+8]</code> 是第一个参数、<code>[ebp+12]</code> 是第二个参数，第一个固定参数的位置不受后面可变参数数量影响，便于实现 printf 一类可变参数函数。可变参数函数必须由调用者清栈，因为被调用函数无法仅靠固定函数声明知道每个调用点实际压入了多少参数。</p>
+<p>pascal 左到右压栈对固定参数函数仍可工作；它不利于 C 风格可变参数和主流 ABI 兼容只是局限之一，并非「第一个参数永远找不到」才淘汰。</p>
+<p>名称修饰常见形式：</p>
+<pre><code>
+_stdcallName@N
+_cdeclName
+@fastcallName@N
+</code></pre>
+<p>N 表示参数总字节数。它是编译器/链接器层面的符号约定，不等于运行时自动类型检查。</p>
+<p>注意：stdcall 的 ret N 不能永远靠函数结尾一眼确认——优化、尾调用、跳板、手写汇编和编译器差异可能让结尾不像标准模板；ret N、调用点 add esp,N 和符号修饰只能作为证据组合。</p>
+<h3>寄存器</h3>
+<p>| 寄存器 | 主要用途 | |---|---| | EAX | 累加器、常用函数返回值；乘除法默认寄存器之一 | | EBX | 通用基址寄存器；x86 常见 ABI 中属于 callee-saved | | ECX | 计数器、移位次数、fastcall 参数、this 指针 | | EDX | 数据寄存器、fastcall 参数、与 EAX 配合保存乘除法结果 | | ESI | 源索引，字符串/内存复制常用；callee-saved | | EDI | 目标索引，字符串/内存复制常用；callee-saved | | ESP | 栈顶指针，push/pop/call/ret 会修改它 | | EBP | 栈帧基址，传统栈帧中用于定位参数和局部变量 | | EIP | 指令指针，指向下一条执行指令，不能用普通 mov 直接赋值 | | EFLAGS | 保存零、进位、符号、溢出等状态，供条件跳转使用 |</p>
+<p>子寄存器关系：</p>
+<pre><code>
+EAX
+├── 高 16 位：无单独名称
+└── AX
+    ├── AH
+    └── AL
+</code></pre>
+<p>EBX/BX/BH/BL、ECX/CX/CH/CL、EDX/DX/DH/DL 同理。写 AX 只改 EAX 低 16 位，不会自动清零高 16 位。</p>
+<p>FS 在 32 位 Windows 中常用于访问当前线程的 TEB；平坦内存模型下传统段寄存器作用已大幅淡化。「ESP 绝对不要手动修改」的说法过于绝对——sub esp,N、add esp,N、push、pop 都在合法地修改 ESP，真正的规则是按栈帧和调用约定调整并确保最终平衡，不能无计划破坏返回地址、参数和栈平衡。</p>
+<h3>Caller-saved 与 Callee-saved</h3>
+<p>| 分类 | 常见寄存器 | 规则 | |---|---|---| | Caller-saved | EAX、ECX、EDX | 调用者若还要使用原值，应在 call 前自行保存 | | Callee-saved | EBX、ESI、EDI、EBP | 被调用函数若修改，返回前应恢复 | | 栈指针 | ESP | 双方共同按调用约定维持平衡 |</p>
+<p>寄存器数量有限，如果每次调用都保存所有寄存器开销很大，ABI 因而把责任拆分：EAX/ECX/EDX 适合临时值，由调用者决定是否保存；EBX/ESI/EDI/EBP 常保存较长期状态，由被调用函数恢复；EAX 用作返回值，通常允许被调用者覆盖；ESP 必须保持调用前后平衡。</p>
+<h3>栈帧与条件跳转</h3>
+<p>标准栈帧：</p>
+<pre><code>
+push ebp
+mov  ebp, esp
+sub  esp, LocalSize
+
+; [ebp+8]  第一个栈参数
+; [ebp+12] 第二个栈参数
+; [ebp-4]  局部变量
+
+mov  esp, ebp
+pop  ebp
+ret
+</code></pre>
+<p>条件比较：</p>
+<pre><code>
+cmp  eax, ebx
+je   equal       ; ZF = 1
+jne  not_equal   ; ZF = 0
+jg   greater     ; 有符号大于
+ja   above       ; 无符号大于
+</code></pre>
+<h2>实践操作</h2>
+<h3>手工定位 PE 各结构</h3>
+<p>1. 在文件偏移 0 检查 4D 5A 2. 在 DOS Header 的 0x3C 读取 e_lfanew 3. 跳到 e_lfanew 指向的 FOA，检查 50 45 00 00 4. 读取 20 字节 IMAGE_FILE_HEADER 5. 根据 SizeOfOptionalHeader 读取 Optional Header 6. 根据 NumberOfRvaAndSizes 确定声明的数据目录数量 7. 使用公式定位节表 8. 按 NumberOfSections 读取每个 40 字节节头 9. 使用 PointerToRawData/SizeOfRawData 定位文件节数据 10. 使用 VirtualAddress/VirtualSize 分析内存布局</p>
+<h3>小端序判断</h3>
+<p>多字节整数在 x86 PE 文件中按小端序保存：</p>
+<pre><code>
+字段值 0x0100     -&gt; 文件字节 00 01
+字段值 0x014C     -&gt; 文件字节 4C 01
+字段值 0x00003E21 -&gt; 文件字节 21 3E 00 00
+字段值 0x0001F1E0 -&gt; 文件字节 E0 F1 01 00
+</code></pre>
+<h3>构建最小 PE</h3>
+<p>1. 用汇编编写最小 Hello World 2. 尽量减少运行库和默认依赖 3. 使用 /MERGE 合并节 4. 使用 /ALIGN 调整内存对齐 5. 必要时用 /FILEALIGN 调整文件对齐 6. 对比修改前后的节数量、文件大小和空白区域 7. 每次修改后检查 PE 头字段是否与实际布局一致</p>
+<p>注意：/MERGE 合并后必须重新检查 Characteristics，避免无意得到可写且可执行的节。</p>
+<h3>构造畸形 PE</h3>
+<p>课堂样本原始值：</p>
+<pre><code>
+SizeOfOptionalHeader = E0 00     -&gt; 0x00E0
+NumberOfRvaAndSizes  = 10 00 00 00 -&gt; 16
+</code></pre>
+<p>若从数据目录末尾删除 16 字节（两个 IMAGE_DATA_DIRECTORY）：</p>
+<pre><code>
+SizeOfOptionalHeader: 0xE0 -&gt; 0xD0
+NumberOfRvaAndSizes:  0x10 -&gt; 0x0E
+节表：整体向前移动 0x10 字节
+</code></pre>
+<p>还应检查：</p>
+<ul>
+<li>删除的是目录尾部，而不是把仍在使用的目录从中间截断</li>
+<li>节表起点和所有节头仍正确</li>
+<li>如果实际删除文件字节，受影响的 PointerToRawData 等 FOA 是否需要调整</li>
+<li>SizeOfHeaders 是否仍覆盖完整头部并满足 FileAlignment</li>
+<li>加载器与工具是否接受该组合</li>
+</ul>
+<h3>判断末尾字节是不是 Overlay</h3>
+<p>对每个节计算 <code>SectionRawEnd = PointerToRawData + SizeOfRawData</code>，取所有节中最大的 SectionRawEnd：</p>
+<ul>
+<li>文件大小等于最大值：通常没有尾部 Overlay</li>
+<li>文件大小大于最大值：多出的尾部是候选 Overlay</li>
+<li>位于最后一个节 Raw 范围中的 00：节内 Padding，不是严格 Overlay</li>
+</ul>
+<p>课堂样本：</p>
+<pre><code>
+.rdata Raw = 0x400
+.rdata RawSize = 0x200
+结束位置 = 0x600（范围最后一字节是 0x5FF）
+0x600 开始的 BB = Overlay
+</code></pre>
+<h3>让追加代码进入可执行映射</h3>
+<p>方法一：使用现有 Code Cave</p>
+<ul>
+<li>找到已经属于某节的连续空白</li>
+<li>确认它位于映射范围</li>
+<li>确认所在页具有执行权限</li>
+<li>确认不会覆盖真实数据</li>
+<li>计算它的 RVA 和 VA</li>
+</ul>
+<p>方法二：扩大或新增节。扩大最后一个节时通常需要核对 VirtualSize、SizeOfRawData（按 FileAlignment 对齐）、Characteristics 的执行权限、SizeOfImage（按 SectionAlignment 对齐）；如果移动了文件数据，还要更新 PointerToRawData 等 FOA。</p>
+<p>仅仅向文件末尾追加字节，不会自动使其成为可执行节。</p>
+<h3>调试器中改写入口 stub</h3>
+<p>1. 给原始 OEP 下断点，记录入口 2. 在最后一个节的空白位置写入临时代码 3. 用 x32dbg 的汇编功能生成正确机器码 4. 从目标程序现有调用中确认 MessageBoxW 的 IAT 槽 5. 先用四个 0 参数验证 API 调用 6. 添加跳回 OEP 的 E9 7. 计算新代码 RVA 8. 把 Optional Header 的 AddressOfEntryPoint 改为新 RVA 9. 从磁盘重新加载修改后的文件，验证弹框和原程序是否继续运行 10. 最后再换成 UTF-16LE 文本地址</p>
+<h3>计算 E8/E9 相对位移</h3>
+<p>x86 near call/jmp 的 rel32：</p>
+<pre><code>
+rel32 = TargetVA - NextInstructionVA
+</code></pre>
+<p>课堂最终跳转的计算：</p>
+<pre><code>
+指令地址        = 0x0101F1EE
+E9 指令长度     = 5
+下一条地址      = 0x0101F1F3
+目标 OEP        = 0x01003E21
+
+rel32 = 0x01003E21 - 0x0101F1F3
+      = 0xFFFE4C2E
+
+小端字节 = 2E 4C FE FF
+完整指令 = E9 2E 4C FE FF
+</code></pre>
+<h3>调用 MessageBoxW</h3>
+<p>验证代码（空白弹框）：</p>
+<pre><code>
+push 0        ; uType
+push 0        ; lpCaption
+push 0        ; lpText
+push 0        ; hWnd
+call dword ptr [010010B8]
+</code></pre>
+<p>四个参数都为 0，只验证了 API 调用链，文本和标题为空。</p>
+<p>最终 Hello World 所需思路：</p>
+<ul>
+<li>lpText 指向 UTF-16LE 的 Hello World 字符串</li>
+<li>lpCaption 指向 UTF-16LE 标题，或者保留 0</li>
+<li>hWnd 可设为 0；uType 可设为 MB_OK，即 0</li>
+<li>导入表中的函数名 MessageBoxW 仍然是 ASCII，lpText、lpCaption 指向的内容才是 UTF-16LE</li>
+<li>绝对地址必须针对目标模块重新计算；若考虑 ASLR，还要处理实际模块基址和重定位</li>
+</ul>
+<h3>调用约定与栈平衡</h3>
+<p>调用 API 前后观察 ESP：</p>
+<pre><code>
+push 0
+push 0
+push 0
+push 0
+call dword ptr [MessageBoxW]
+</code></pre>
+<p>x86 stdcall 的 MessageBoxW 返回时由被调用者清理 16 字节参数。若调用自己的 cdecl 函数，则通常需要：</p>
+<pre><code>
+call CdeclFunc
+add  esp, 参数总字节数
+</code></pre>
+<p>入口 stub 如果还要使用 EAX/ECX/EDX 的旧值，应自行保存；若修改 EBX/ESI/EDI/EBP，应在跳回 OEP 前恢复。是否必须 pushfd/pushad 要结合原入口对初始寄存器的真实依赖验证，不能无条件套模板。</p>
+<h2>实验记录</h2>
+<h3>DOS Header 与 Stub 覆盖实验</h3>
+<p>观察：MZ 保留、e_lfanew 保留、DOS Header 其余大量字段替换为 AA、DOS Stub 替换为 AA，Windows 中程序仍能运行。</p>
+<p>结论：当前样本的 Windows 加载流程没有依赖被覆盖字段，但不能据此推出所有环境都不使用这些字段；把入口代码直接放在该区域时崩溃，说明「文件中有空间」不等于「那里可作为入口代码执行」。</p>
+<h3>最小 Hello PE 的关键布局</h3>
+<p>从十六进制数据确定：</p>
+<pre><code>
+e_lfanew = B0 00 00 00 -&gt; 0xB0
+NT Signature 位于 0xB0：50 45 00 00
+Machine = 4C 01 -&gt; 0x014C
+NumberOfSections = 02 00 -&gt; 2
+SizeOfOptionalHeader = E0 00 -&gt; 0xE0
+Characteristics = 0F 01 -&gt; 0x010F
+OptionalHeader.Magic = 0B 01 -&gt; 0x010B（PE32）
+</code></pre>
+<p>节表从 <code>0xB0 + 4 + 0x14 + 0xE0 = 0x1A8</code> 开始。</p>
+<p>.text 节头（0x1A8 起）：</p>
+<pre><code>
+Name                 = .text
+VirtualSize          = 0x28
+VirtualAddress       = 0x1000
+SizeOfRawData        = 0x200
+PointerToRawData     = 0x200
+Characteristics      = 0x60000020
+</code></pre>
+<p>.rdata 节头：</p>
+<pre><code>
+Name                 = .rdata
+VirtualSize          = 0xA6
+VirtualAddress       = 0x2000
+SizeOfRawData        = 0x200
+PointerToRawData     = 0x400
+Characteristics      = 0x40000040
+</code></pre>
+<p>因此：</p>
+<pre><code>
+.text  Raw 范围 = 0x200 ～ 0x3FF
+.rdata Raw 范围 = 0x400 ～ 0x5FF
+0x600 开始的 BB = Overlay
+</code></pre>
+<h3>HelloA 版本中的代码、跳板和字符串</h3>
+<p>.text 中关键机器码：</p>
+<pre><code>
+6A 00                    push 0
+68 1D 20 40 00           push 0040201D
+68 10 20 40 00           push 00402010
+6A 00                    push 0
+E8 09 00 00 00           call 本地跳板
+
+6A 00                    push 0
+E8 08 00 00 00           call ExitProcess 跳板
+C3                       ret
+CC                       int3
+
+FF 25 08 20 40 00        jmp dword ptr [00402008]
+FF 25 00 20 40 00        jmp dword ptr [00402000]
+</code></pre>
+<p>.rdata 中可见：</p>
+<pre><code>
+Hello World!\0
+51asm\0
+MessageBoxA\0
+user32.dll\0
+ExitProcess\0
+kernel32.dll\0
+</code></pre>
+<p>这说明 Hello 程序不是只有 push/call 机器码，它还依赖字符串、导入描述和 IAT。</p>
+<h3>HelloW 初始版本</h3>
+<p>将导入函数改为 MessageBoxW 后，文件中可见：</p>
+<pre><code>
+MessageBoxW\0
+user32.dll\0
+</code></pre>
+<p>问题代码中仍有指向 Hello 自己地址空间的参数：</p>
+<pre><code>
+push 0
+push 00401015
+push 00401008
+push 0
+call 本地跳板
+</code></pre>
+<p>即使导入函数改成 W，原先的 Hello World 和 51asm 数据仍是单字节 ASCII；传给 MessageBoxW 的字符串应该是 UTF-16LE。仅修改函数名不能自动把数据变成宽字符。</p>
+<h3>参数全部改成 0 的 HelloW 验证版</h3>
+<pre><code>
+0208  6A 00                 push 0
+020A  6A 00                 push 0
+020C  6A 00                 push 0
+020E  6A 00                 push 0
+0210  E8 01 00 00 00        call 0216
+0215  CC                    int3
+0216  FF 25 00 10 40 00     jmp dword ptr [00401000]
+</code></pre>
+<p>最初计划只复制 <code>6A 00 6A 00 6A 00 6A 00 E8 01 00 00 00</code>，问题在于：E8 的目标依赖后面的 0216 跳板；只复制到另一个位置后目标随之变化；扫雷没有 Hello 的 00401000 IAT 语义；如果放入纯 Overlay，调试器内存搜索不到。</p>
+<h3>在扫雷内定位现有 MessageBoxW 调用</h3>
+<p>扫雷已有代码：</p>
+<pre><code>
+010039DA | 50                    | push eax
+010039DB | 6A 00                 | push 0
+010039DD | FF15 B8100001         | call dword ptr ds:[010010B8]
+010039E3 | C9                    | leave
+</code></pre>
+<p>调试器把 0x010010B8 识别为 MessageBoxW 的 IAT 槽。因此实验使用目标程序自己的导入，而不是复制 Hello 的 IAT。</p>
+<h3>错误位置与重新定位过程</h3>
+<p>最初在调试器中曾找到另一段原程序代码：</p>
+<pre><code>
+01003E21 | 6A 70                 | push 70
+01003E23 | 68 90130001           | push 01001390
+01003E28 | E8 DF010000           | call 0100400C
+</code></pre>
+<p>这是扫雷的原始入口附近代码，不是复制的四个 push 0。随后确认复制的代码在：</p>
+<pre><code>
+0101F1F0 | 6A 00
+0101F1F2 | 6A 00
+0101F1F4 | 6A 00
+0101F1F6 | 6A 00
+0101F1F8 | E8 01 00 00 00
+</code></pre>
+<p>由于还要容纳正确 API 调用和跳回 OEP，原位置空间不够，最终将 stub 往前移动到 0x0101F1E0。</p>
+<h3>修正后的最终入口 stub</h3>
+<pre><code>
+0101F1E0 | 6A 00                 | push 0
+0101F1E2 | 6A 00                 | push 0
+0101F1E4 | 6A 00                 | push 0
+0101F1E6 | 6A 00                 | push 0
+0101F1E8 | FF15 B8100001         | call dword ptr ds:[010010B8]
+0101F1EE | E9 2E4CFEFF           | jmp 01003E21
+</code></pre>
+<p>| 地址/机器码 | 来源与作用 | |---|---| | 0x0101F1E0 | 最终放置 stub 的 VA | | 6A 00 × 4 | MessageBoxW 四个 DWORD 参数均为 0 | | FF 15 B8 10 00 01 | 通过扫雷自己的 0x010010B8 IAT 槽调用 MessageBoxW | | 0x01003E21 | 原始入口 OEP VA | | E9 2E 4C FE FF | 从 0x0101F1EE 相对跳回 OEP |</p>
+<h3>AddressOfEntryPoint 的修改</h3>
+<p>原始：</p>
+<pre><code>
+OEP VA = 0x01003E21
+ImageBase = 0x01000000
+OEP RVA = 0x00003E21
+PE 字节 = 21 3E 00 00
+</code></pre>
+<p>新入口：</p>
+<pre><code>
+Stub VA = 0x0101F1E0
+ImageBase = 0x01000000
+New AEP RVA = 0x0001F1E0
+PE 字节 = E0 F1 01 00
+</code></pre>
+<p>实验结果：MessageBoxW 成功弹出，跳转回原始入口，扫雷继续运行；最后明确确认的参数仍是四个 0，弹框内容为空。UTF-16LE 的 Hello World 文本是否已写入没有记录，文本完成情况待确认。</p>
+<h3>畸形 PE 原始数据定位</h3>
+<p>关键片段：</p>
+<pre><code>
+00C4  E0 00 0F 01 0B 01 ...
+       └─┘ └─┘ └─┘
+       |    |    OptionalHeader.Magic = 0x010B
+       |    Characteristics = 0x010F
+       SizeOfOptionalHeader = 0x00E0
+</code></pre>
+<p>NumberOfRvaAndSizes 的 <code>10 00 00 00</code> 位于 Optional Header 后部。按本样本结构计算，其字段起点应在约 0x124；记录中曾出现「0x125 地址的 10」，可能是光标显示或修改后偏移，最终应以模板字段起点为准。</p>
+<p>节头名称 .text 从 0x1A8 开始，证明标准布局满足 <code>0xB0 + 4 + 20 + 0xE0 = 0x1A8</code>。删除两个目录项后，要把 .text 节头整体前移 0x10。</p>
+<h3>工具与系统现象</h3>
+<p>| 工具 | 用途 | |---|---| | Visual Studio 2019 Developer Command Prompt / LINK | 查看 /MERGE、/ALIGN、/FILEALIGN 等链接选项 | | 010 Editor | 查看和修改 PE 十六进制数据、模板解析 | | CFF Explorer | 比较不同 PE 的 Machine、Characteristics 等属性 | | x32dbg/x64dbg | 定位内存代码、汇编机器码、观察 IAT 调用、设置断点 | | OllyDbg | 畸形 PE 解析与入口反调试课堂示例 | | Depends | 导入依赖解析，可能受畸形结构影响 |</p>
+<p>系统现象：课堂扫雷样本涉及 XP 版本；某种改写在 Win10/Win11 能运行，在 XP 崩溃。没有完整异常码、加载日志和文件哈希，原因待确认，可能涉及文件版本、权限、加载器、API、DEP、补丁或实验文件差异；不应单凭系统名称推断加载器规律。</p>
+<h3>待确认问题</h3>
+<p>1. Windows 加载器必读哪些 DOS/NT/Optional Header 字段，哪些只供工具使用？ 2. SizeOfOptionalHeader、NumberOfRvaAndSizes 和节表起点必须满足什么精确关系？ 3. 课堂所称 Extra Data 是严格 Overlay，还是最后一个节中的 Padding/Code Cave？ 4. 扩大最后一个节时 VirtualSize、SizeOfRawData、Characteristics、SizeOfImage 分别如何改？ 5. VirtualSize 与 SizeOfRawData 不等时，RVA/FOA 范围应如何判断？ 6. AEP=0 对 EXE 和 DLL 的含义是否不同，头部页面在不同系统上能否执行？ 7. 软件断点临时覆盖 MZ 后，加载完成的系统是否还会重新检查 MZ？ 8. 新入口调用 MessageBoxW 后，跳回 OEP 前哪些寄存器和 EFLAGS 必须恢复？ 9. 硬编码 IAT 地址 0x010010B8 遇到 ASLR 或重定位时是否仍然有效？ 10. E9 相对跳转在模块整体重定位后为何通常仍保持同一模块内部关系？ 11. TLS Callback 是否可能早于 AddressOfEntryPoint 执行？ 12. /ALIGN:4 的低对齐 PE 对 FileAlignment 和节 FOA/RVA 有哪些额外约束？ 13. /MERGE 后的节 Characteristics 如何合并，是否可能产生 RWX？ 14. 修改文件后校验和、数字签名和 Security Directory 会发生什么变化？</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

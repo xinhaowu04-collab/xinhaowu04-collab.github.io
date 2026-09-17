@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>逆向定位实战 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">逆向定位实战</h1>
+<div class="meta"><span class="cat">32 位汇编</span></div>
+<article>
+<h1>逆向定位实战</h1>
+<h2>Cheat Engine 实战：扫雷破解</h2>
+<h3>数值扫描定位内存</h3>
+<ul>
+<li><strong>精确数值扫描</strong>：已知"剩余雷数"当前显示值，先扫描；改变游戏状态（插一次旗，雷数 -1）后再做"数值已改变"过滤，反复收敛锁定地址。</li>
+<li><strong>数值增加扫描</strong>："用时"字段持续自增，用"数值增加"类型多次扫描收敛。</li>
+</ul>
+<h3>结合 OllyDbg 定位修改代码</h3>
+<ul>
+<li>CE 锁定地址后，用"找出是谁在写入这个地址"功能（本质硬件写入断点），或手动切到 OD 对该地址下硬件写入断点。</li>
+<li>断下后 OD 停在正在修改该数值的汇编指令上，直接看到运算方式（<code>dec</code>/<code>sub</code>/<code>inc</code>/<code>add</code>）。</li>
+</ul>
+<h3>补丁思路</h3>
+<p>| 目标 | 修改 | |------|------| | 雷数"加血" | <code>sub</code> → <code>add</code>，或 NOP 掉递减逻辑 | | 时间静止 | NOP 掉自增指令（<code>inc</code>/<code>add</code>） |</p>
+<p>修改完成后：OD "复制到可执行文件（Copy to executable）→ 保存文件"生成持久化补丁 exe，而非仅内存临时生效。</p>
+<h2>逆向思维：API 断点与栈回溯</h2>
+<h3>API 断点</h3>
+<p>原理：在系统 DLL 导出函数入口下断点，程序调用 API 时断下。</p>
+<h3>三种下断方式</h3>
+<p>| 方式 | 命令/操作 | 特点 | |------|----------|------| | <strong>符号断点</strong> | <code>bp MessageBoxA</code> / <code>bp user32.MessageBoxA</code> | 调试器解析导出表找地址，最常用，所有调用都断 | | <strong>IAT 调用处断点</strong> | Find Intermodular Calls → 选中 → F2 | 断在程序<strong>自己的 CALL 指令处</strong>，只断指定调用点 | | <strong>地址断点</strong> | 直接对 API 实现地址 F2 | 受 ASLR 影响，地址每次可能变 |</p>
+<p>符号断点断在 API 实现入口（DLL 里），IAT 断点断在用户调用指令处。需要看参数时，IAT 断点停在调用现场，参数刚压完栈，更直观。</p>
+<h3>断下后如何读参数（关键）</h3>
+<p>x86 stdcall（Win32 API 统一约定）：断在 API 入口第一行（尚未 <code>push ebp</code>），用 <strong>ESP</strong>：</p>
+<pre><code>
+[ESP]     = 返回地址（调用者 CALL 的下一条）
+[ESP+4]   = 参数 1
+[ESP+8]   = 参数 2
+[ESP+12]  = 参数 3
+...
+</code></pre>
+<p>注意：是 <strong>ESP 不是 EBP</strong>！API 入口还没建栈帧，EBP 还是调用者的值。新手常犯的错：在 API 入口用 <code>[EBP+8]</code> 取参数，取到的是调用者数据。</p>
+<p>x64 Microsoft 约定：</p>
+<p>| 参数 | 位置 | |------|------| | 第 1 参 | RCX | | 第 2 参 | RDX | | 第 3 参 | R8 | | 第 4 参 | R9 | | 第 5 参起 | <code>[RSP+0x28]</code>（返回地址 8 + 影子空间 32） |</p>
+<h3>常用 API 断点切入点</h3>
+<p>| 逆向目的 | 关键 API | |---------|---------| | 弹窗/提示 | <code>MessageBoxA/W</code>、<code>MessageBoxExA</code> | | 文件读写 | <code>CreateFileA/W</code>、<code>ReadFile</code>、<code>WriteFile</code> | | 注册表 | <code>RegOpenKeyExA/W</code>、<code>RegQueryValueA/W</code> | | 网络 | <code>WSAStartup</code>、<code>connect</code>、<code>send</code>、<code>recv</code>、<code>InternetOpenA</code> | | 进程/注入 | <code>CreateProcessA/W</code>、<code>OpenProcess</code>、<code>CreateRemoteThread</code>、<code>WriteProcessMemory</code> | | 内存分配 | <code>VirtualAlloc</code>、<code>VirtualAllocEx</code>（壳常用） | | 窗口查找 | <code>FindWindowA/W</code>（反调试常用） | | 绘图 | <code>BitBlt</code>、<code>TextOutA/W</code>、<code>DrawTextA/W</code> | | 字符串比较 | <code>lstrcmpA/W</code>、<code>strcmp</code>（注册码校验常用） |</p>
+<p>A/W 后缀：A = ANSI 多字节，W = Wide Unicode。不确定时两个都下。</p>
+<h3>条件 API 断点（减少噪音）</h3>
+<p>API 调用频繁，每次都断太吵。结合条件断点，只在特定参数时断：</p>
+<pre><code>
+bp CreateFileW
+条件: [ESP+4] 指向的字符串包含 &quot;flag&quot;
+</code></pre>
+<p>只有当程序打开文件名含 "flag" 时才断下。</p>
+<h3>反 API 断点对抗</h3>
+<p>| 对抗手段 | 原理 | 应对 | |---------|------|------| | 动态解析 API | <code>LoadLibrary+GetProcAddress</code> 自取地址，不走 IAT | IAT 断点失效，改用符号断点 <code>bp</code> | | 调用 ntdll 内部函数 | 绕过 kernel32/user32 包装层 | 在 ntdll 更底层函数下断 | | 检测 0xCC | 扫描 API 入口字节是否被改 | 改用<strong>硬件断点</strong>下 API | | API Hook 检测 | 校验 API 前 N 字节完整性 | 硬件断点 + ScyllaHide |</p>
+<h3>栈回溯（Call Stack）</h3>
+<p>原理：基于 x86 函数调用机制和 EBP 链。<code>CALL</code> 指令等价于 <code>push 返回地址; jmp target</code>。标准函数序言：</p>
+<pre><code>
+push ebp          ; 保存调用者栈帧基址
+mov  ebp, esp     ; 建立当前栈帧
+sub  esp, N       ; 局部变量空间
+</code></pre>
+<p>每个函数栈帧里 <code>[EBP]</code> 存的是<strong>调用者的 EBP</strong>，串成一条链，<code>[EBP+4]</code> 存的是<strong>返回地址</strong>。</p>
+<h3>栈帧结构（必须记牢）</h3>
+<pre><code>
+高地址
+┌─────────────────┐
+│ 参数 N          │  [EBP + 4 + 4*N]
+├─────────────────┤
+│ 参数 1          │  [EBP + 8]      ← stdcall/cdecl 参数起始
+├─────────────────┤
+│ 返回地址        │  [EBP + 4]      ← CALL 压入，调用者代码位置
+├─────────────────┤
+│ 保存的 EBP      │  [EBP]          ← 指向上一层栈帧
+├─────────────────┤  ← 当前 EBP 锚定此处
+│ 局部变量 1      │  [EBP - 4]
+├─────────────────┤
+│ ...             │
+├─────────────────┤  ← ESP 指向栈顶
+低地址
+</code></pre>
+<h3>栈回溯算法</h3>
+<pre><code>
+void* ebp = 当前EBP;
+while (ebp != 0 &amp;&amp; 合法地址) {
+    void* ret_addr = *(void**)(ebp + 4);   // 返回地址 = 调用者代码位置
+    ebp = *(void<strong>)ebp;                     // 爬到上一层 EBP
+}
+</code></pre>
+<p>调试器 Call Stack 窗口就是这么算的。</p>
+<h3>栈回溯失效场景</h3>
+<p>| 场景 | 原因 | 后果 | |------|------|------| | </strong>FPO 优化<strong> | 编译器省掉 <code>push ebp/mov ebp,esp</code>，直接用 ESP 寻址 | EBP 链断裂，回溯只到当前层 | | </strong>叶子函数<strong> | 不调用其他函数的简单函数，可能无标准栈帧 | 同上 | | </strong>手写汇编<strong> | 非标准序言 | 链路不规则 | | </strong>栈被破坏<strong> | 缓冲区溢出覆盖返回地址/EBP | 回溯出乱码或崩溃 | | </strong>Release 优化<strong> | VS <code>/O2</code> 默认开 FPO | 经常回溯不全 |</p>
+<p>FPO 是栈回溯最大敌人。x64 有 PE 的 <code>.pdata</code> 段 unwind 信息，即使没 EBP 链也能精确回溯——这是 x64 架构优势。</p>
+<h3>两种断点参数读取对比</h3>
+<p>| 时机 | 用什么取参 | 原因 | |------|----------|------| | API 入口（断在函数第一行） | </strong>ESP<strong> | 还没建栈帧，EBP 是调用者的 | | API 内部（已 push ebp/mov ebp,esp） | </strong>EBP<strong> | 栈帧已建，参数在 <code>[EBP+8]</code> | | IAT 调用处（断在 CALL 指令） | </strong>ESP<strong> | 参数刚压完栈，<code>[ESP]</code>=参数1（还没 CALL） |</p>
+<p>注意：断在 CALL </strong>之前<strong>（还没执行 CALL），<code>[ESP]</code>=参数1，没有返回地址；断在 CALL </strong>之后<strong>（进入 API），<code>[ESP]</code>=返回地址，<code>[ESP+4]</code>=参数1。差一层，别搞混。</p>
+<h3>API 断点 + 栈回溯协同流程</h3>
+<p>这是逆向最通用的切入套路：</p>
+<pre><code>
+① 下 API 断点（切入）—— 程序行为暴露关键逻辑
+② 断下后读参数（确认行为）—— ESP 取参
+③ 栈回溯（定位调用者）—— Call Stack 找用户代码
+④ 跳到调用者代码（分析关键逻辑）
+⑤ 条件断点/内存断点（深入追踪）
+</code></pre>
+<p>示例（想知道程序在哪读琴谱文件）：</p>
+<p>1. <code>bp CreateFileA</code> 2. F9 运行，触发读文件操作 3. 断在 CreateFileA，看 <code>[ESP+4]</code> 指向的字符串 = 文件路径 4. 打开 Call Stack，双击上一层（调用者） 5. 跳到程序自己的代码——就是处理读文件的逻辑位置</p>
+<h3>推导扫雷内部数据结构</h3>
+<p>切入思路：游戏最终必须调用 Windows 图形 API 把格子画到屏幕，从"结果"（绘图 API）反推"数据源"。典型切入点：<code>BitBlt</code> / <code>StretchBlt</code>。</p>
+<p>经典扫雷位标志编码体系（以 XP winmine.exe 为例，不同版本有差异，以动态调试观察为准）：</p>
+<p>| 位 | 含义 | |----|------| | bit7 (0x80) | 是否为雷 | | bit6 (0x40) | 是否已翻开 | | 低 3 位 (0x07) | 周围雷数 |</p>
+<p>| 字节值 | 含义 | 二进制 | |--------|------|--------| | 0x0F | 未翻开（非雷） | 0000 1111 | | 0x8F | 未翻开（雷） | 1000 1111 | | 0x40 | 已翻开（0 雷/空） | 0100 0000 | | 0x41~0x48 | 已翻开（1~8 雷） | 0100 0001 ~ 0100 1000 | | 0x4E / 0xCC | 踩雷/边界（版本差异） | — |</p>
+<p>数组按行×列线性存放在连续内存中，格子间偏移固定。找到数组基址与每格字节大小后，遍历即可还原整张图。</p>
+<h3>作弊程序设计思路</h3>
+<p>| 思路 | 实现 | 隐蔽性 | |------|------|--------| | </strong>透视（只读）<strong> | <code>ReadProcessMemory</code> 读取数组、解析每字节含义，悬浮窗口标雷 | 高，不修改游戏数据 | | </strong>自动标记/提示<strong> | 读取数据后外部计算屏幕坐标，模拟鼠标辅助玩家 | 较高，接近"辅助" | | </strong>内存篡改<strong> | 直接修改内存让雷显示 | 低，检测风险高 |</p>
+<h2>其他定位技巧与 x64dbg</h2>
+<h3>字符串参考定位法</h3>
+<p>程序关键逻辑分支旁常有提示文本（"注册成功""序列号错误"）。OD "查找所有字符串参考"列出模块中被引用的所有 ASCII/Unicode 字符串，搜索关键词双击跳转到引用处。对未做字符串加密的程序，效率远高于盲目扫描代码段。</p>
+<h3>查找模块间调用（Find Intermodular Calls）</h3>
+<p>Ctrl+N 打开名称窗口，或右键 "Search for → Intermodular calls"，列出当前模块</strong>所有跨模块 CALL<strong>（调用 API 的地方）。想找程序在哪调用 <code>CreateFile</code>，这比全代码段搜索快得多。</p>
+<h3>跟踪功能（Trace）</h3>
+<p>Trace 自动逐条执行并记录经过的每条指令与寄存器状态，无需人工 F7/F8。</p>
+<ul>
+<li></strong>用途<strong>：应对花指令/垃圾指令混淆，用动态执行结果代替静态反汇编，绕开混淆陷阱。</li>
+<li></strong>条件 Trace**：设"当 EIP 落在某地址范围才记录"或"寄存器满足条件才记录"，过滤系统 DLL 和无关代码。对付 VMP/Themida 重混淆，条件 Trace 是还原执行路径的主力。</li>
+</ul>
+<h3>执行控制补充</h3>
+<p>| 操作 | 快捷键 | 作用 | |------|--------|------| | 运行到选中行 | F4 | 临时跑到此处，实战高频 | | 设置新 EIP | Ctrl+\* | 跳过/重放代码 | | 执行到返回 | Ctrl+F9 | 在栈帧返回地址下临时断点 | | 自动步入/步过 | Animate | 自动连续单步，可视化执行流 |</p>
+<h3>调用约定识别（看懂函数参数的基础）</h3>
+<p>逆向看一段汇编，第一件事是判断"参数怎么传、谁清栈"：</p>
+<p>| 调用约定 | 参数传递 | 清栈方 | 汇编特征（x86） | |---------|---------|--------|----------------| | <code>cdecl</code> | 从右到左压栈 | <strong>调用者</strong> | call 后紧跟 <code>add esp, N</code> | | <code>stdcall</code> | 从右到左压栈 | <strong>被调者</strong> | 函数内 <code>ret N</code>，调用后无 add esp | | <code>fastcall</code> | 前两参走 ECX/EDX，其余压栈 | 被调者 | 直接用 ECX/EDX，不 mov 取栈参数 | | <code>thiscall</code> | this 走 ECX，其余压栈 | 被调者 | 成员函数常见 |</p>
+<p>Win32 API 统一是 <code>stdcall</code>（<code>WINAPI</code> 宏），API 调用后<strong>不会</strong>有 <code>add esp</code>。C 运行时函数多为 <code>cdecl</code>，调用后有 <code>add esp, N</code>。看这一条就能区分调用的是 API 还是 CRT 函数。</p>
+<h3>结构体解析</h3>
+<p>在 Dump 窗口应用结构体定义（如 <code>WNDCLASSEX</code>、<code>_TEB</code>），按字段名查看而非裸字节。x64dbg 内置结构体查看器，OD 依赖插件。</p>
+<h3>x64dbg 与 OllyDbg 对比</h3>
+<p>| 维度 | OllyDbg | x64dbg | |------|---------|--------| | 位数支持 | 仅 32 位 | 32/64 位（x32dbg/x64dbg） | | 界面 | 较老旧，插件生态老化 | 现代化，布局灵活 | | 流程图 | 无原生支持（需插件） | 原生 Graph 视图 | | 结构体解析 | 弱，依赖插件 | 内置结构体查看器 | | 异常处理配置 | 选项简单 | 可按异常码分别配置策略 | | FPO 回溯 | 弱 | 强（利用 .pdata unwind 信息） | | 维护状态 | 已停止更新多年 | 开源、社区活跃、持续更新 |</p>
+<h3>x64 调用约定差异（迁移 x64dbg 必懂）</h3>
+<p>| 维度 | x86（stdcall） | x64（Microsoft） | |------|---------------|----------------| | 前 4 个参数 | 全压栈 | <strong>RCX/RDX/R8/R9</strong> 寄存器传 | | 其余参数 | 压栈 | 压栈 | | 栈空间 | 实参大小 | 预留 <strong>32 字节影子空间</strong> | | 清栈方 | 被调者 | 调用者 | | 寻址方式 | 任意 | <strong>RIP 相对寻址</strong>（影响地址计算） |</p>
+<p>不懂这个，到 x64dbg 里看 API 调用会找不到参数——它们不在栈上，在 RCX/RDX/R8/R9 里。</p>
+<h3>调试器底层：Debug Loop</h3>
+<p>理解调试器本质要懂调试循环：</p>
+<pre><code>
+DebugActiveProcess / CreateProcess(DEBUG_ONLY_THIS_PROCESS)
+    ↓ 循环
+WaitForDebugEvent(&amp;de, INFINITE)   ; 等调试事件
+    处理异常/断点
+ContinueDebugEvent(...)             ; 继续被调试进程
+</code></pre>
+<p>所有断点、单步、异常，本质都是这个循环里收到 <code>EXCEPTION_DEBUG_EVENT</code>。理解这个，才明白"附加"和"直接启动"行为不同（创建标志不同），以及 <code>ThreadHideFromDebugger</code> 怎么让调试器收不到事件。</p>
+<h2>Cheat Engine 高级技巧：基址查找</h2>
+<h3>动态地址与基址问题</h3>
+<p>| 内存类型 | 地址稳定性 | 原因 | |---------|-----------|------| | 全局/静态变量（.data/.bss） | 固定（相对模块基址） | 编译期确定，即使 ASLR，"模块基址+固定偏移"关系不变 | | 堆（heap） | 每次变化 | 取决于分配器当时状态 | | 栈（stack） | 每次变化 | 取决于函数调用深度 |</p>
+<p>直接记录"这次运行"的绝对地址，重启后大概率失效。需要一条"从固定基址出发，经若干级解引用/偏移，始终能算出正确地址"的路径，即<strong>基址 + 多级偏移</strong>。</p>
+<p>指针链的<strong>静态起点</strong>必须在模块的 <code>.data</code>/<code>.bss</code> 段，不能在堆栈上。指针扫描的本质就是反向搜索一条从静态地址通向动态地址的解引用链。</p>
+<h3>CE 指针扫描（Pointer Scan）</h3>
+<p>1. 用常规数值扫描定位到"这次运行"中数据的动态地址 2. 对该地址执行 Pointer Scan，CE 在整个进程内存空间反向搜索：哪些位于固定段的静态地址，其存放的值经 0~N 级偏移解引用后，恰好能算出目标地址 3. 得到若干候选指针链（基址 + 偏移1 + 偏移2 + …）</p>
+<h3>验证</h3>
+<p>重启目标程序，用同一条指针链重新计算地址，与重新扫描得到的实际地址核对是否一致；吻合则该指针链稳定有效，之后直接用"基址+偏移"公式定位，无需每次重新扫描。</p>
+<h2>PE 基础与脱壳</h2>
+<h3>PE 结构基础</h3>
+<p>| 结构 | 作用 | |------|------| | DOS 头 | <code>MZ</code> 标志，指向 PE 头 | | PE 头 | 包含 EP（入口点）、节表、可选头 | | 节表 | 描述各节（.text/.data/.rdata/.rsrc 等）属性 | | 导入表（IAT） | 程序调用的外部 API 地址表 | | 导出表 | DLL 对外暴露的函数 | | 重定位表 | ASLR 下修正绝对地址 | | <strong>TLS 目录</strong> | TLS 回调函数表（见下） |</p>
+<h3>EP 与 OEP</h3>
+<p>| 概念 | 含义 | |------|------| | <strong>EP（Entry Point）</strong> | PE 头记录的入口点，调试器直接打开断在这里 | | <strong>OEP（Original EP）</strong> | 加壳程序的<strong>真实</strong>入口点，脱壳就是找它 |</p>
+<h3>TLS 回调（重要反调试点）</h3>
+<p>TLS 回调是<strong>在 EP 之前执行</strong>的代码段。调试器默认断在 EP，但 TLS 回调已经跑完了——这是经典反调试藏匿点。</p>
+<p>注意：很多壳/保护把反调试放在 TLS 回调里，你断在 EP 时它早就检测完了。新手调试加壳程序"一附加就被发现"，十有八九是 TLS 回调作祟。调试时必须勾选"在 TLS 回调处断下"。</p>
+<h3>脱壳基本流程</h3>
+<pre><code>
+① 找 OEP（运行到真实入口，常用内存断点/硬件断点定位）
+② Dump（把内存中解密后的代码转存成新 PE）
+③ 修复 IAT（壳运行时才重建导入表，dump 出来的 IAT 是乱的，用 Scylla 修复）
+④ 修复重定位（如有需要）
+</code></pre>
+<h3>工具生态</h3>
+<p>| 工具 | 用途 | |------|------| | <strong>ScyllaHide</strong> | 反反调试，hook 各类检测点 | | <strong>Scylla</strong> | IAT 修复 + Dump | | <strong>IDA Pro</strong> | 静态反汇编/反编译，配合动态调试 | | <strong>CFF Explorer</strong> | PE 查看/编辑/修复 | | <strong>LordPE</strong> | PE 编辑、Dump | | <strong>Detect It Easy (DIE)</strong> | 查壳/查编译器 |</p>
+<p>动态（OD/x64dbg）+ 静态（IDA）+ PE 工具（CFF Explorer）是逆向三板斧。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

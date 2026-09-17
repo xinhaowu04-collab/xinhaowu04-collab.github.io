@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重载静态成员与继承 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">重载静态成员与继承</h1>
+<div class="meta"><span class="cat">C++ 逆向</span></div>
+<article>
+<h1>重载静态成员与继承</h1>
+<h2>重载函数与运算符重载识别</h2>
+<pre><code>
+  无符号：重载只是几个不同的函数地址，语法层信息全灭
+    → 只能靠功能逻辑人工归类
+      （operator= 特征：返回值是 *this 引用、内部逐成员拷贝）
+
+  有符号：名称粉碎白送类名和参数
+    ??4MyClass@@QAEAAV0@ABV0@@Z = MyClass::operator=
+
+  优化干扰：运算符重载常被内联
+    → 汇编里看不到 call，只剩&quot;逐成员对称运算&quot;的形状
+</code></pre>
+<h2>静态成员变量</h2>
+<pre><code>
+  编译后 = 全局变量
+    → 不占对象内存，对象布局里找不到它
+
+  二进制里看不到&quot;类作用域&quot;，只能按相关性推断：
+    - 被同一批成员函数反复访问的全局变量
+    - 初始化出现在 CRT 动态初始化表（同全局对象机制）
+    - 功能与类强相关（实例计数器、共享句柄之类）
+</code></pre>
+<h2>继承·内存结构（x86，x64 指针偏移翻倍）</h2>
+<pre><code>
+  Base:
+    +00 vptr → Base_vftable { Base::vfun1, Base::vfun2 }
+    +04 Base::member
+
+  Derived:
+    +00 vptr → Derived_vftable { Derived::vfun1,   ← 重写的槽被覆盖
+                                  Base::vfun2,      ← 没重写原样继承
+                                  Derived::vfun3 }  ← 新增虚函数追加表尾
+    +04 Base::member     ← 基类成员做前缀
+    +08 Derived::member  ← 新增成员追加在后
+
+  单继承：一个 vptr、一张虚表、this 全程不调整
+</code></pre>
+<h2>构造/析构顺序</h2>
+<pre><code>
+  构造：基类构造 → 填派生虚表 → 成员初始化 → 构造函数体
+    mov ecx, this
+    call Base_ctor                ; 基类构造（内部写基类虚表）
+    mov [ecx], offset Derived_vt  ; 覆盖为派生虚表
+    ...成员初始化...
+
+  析构严格逆序：函数体/成员析构 → 恢复基类虚表 → 调基类析构
+
+  区分基类构造 vs 成员构造（难点）：
+    基类构造：this 原样传入，写虚表在 [this+0]
+    成员构造：lea ecx, [this+N]，传的是成员子对象地址
+</code></pre>
+<h2>继承·汇编特征清单</h2>
+<pre><code>
+  ① 填虚表之前有 call        → 基类构造
+  ② 虚表被写入两次           → 有继承（先基类表后派生表）
+  ③ this 有偏移调整          → 多重/虚继承（单继承无此特征）
+     add ecx, 8 / sub ecx, 10h 再 jmp = adjustor thunk
+  ④ 虚表[-1] 有指针被引用    → RTTI
+  ⑤ 类无虚函数则 ①②④ 全灭  → 只能靠构造链 + 成员偏移聚类硬啃
+</code></pre>
+<h2>RTTI 辅助识别</h2>
+<pre><code>
+  位置：虚表[-1] → Complete Object Locator
+       → Class Hierarchy Descriptor
+       → Base Class Array（基类描述符数组）
+       → 各基类的类型名 + 在对象中的偏移量
+
+  局限：
+    - 只对多态类生成（类里必须有虚函数）
+    - /GR- 可关，发布版可能没有
+    - 用了 dynamic_cast/typeid 会强制开启
+</code></pre>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

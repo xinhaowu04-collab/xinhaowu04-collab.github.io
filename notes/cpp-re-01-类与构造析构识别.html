@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>类与构造析构识别 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">类与构造析构识别</h1>
+<div class="meta"><span class="cat">C++ 逆向</span></div>
+<article>
+<h1>类与构造析构识别</h1>
+<h2>类识别</h2>
+<pre><code>
+  内存布局 = 结构体（成员按序排 + 对齐/padding）
+
+  thiscall：ECX 传 this，其余参数走栈（x86）
+    → 有无成员参数都先占 ECX，这是识别成员函数的关键
+
+  例外与酌情还原：
+    - 调用约定可被作者强改（一般不改）→ 还原时酌情
+    - 函数被导出：即使改了约定，导出名（名称粉碎）
+      仍暴露所属类，如 ??4MyClass@@QAEAAV0@ABV0@@Z
+    - 无符号：按可读性自由选择 类 or 结构体
+</code></pre>
+<h2>构造/析构识别</h2>
+<pre><code>
+  构造：thiscall
+    语法：对象生命周期内第一个被调 + 功能是初始化
+    汇编：返回值 = this（MSVC 惯例，mov eax, ecx 收尾）
+
+  析构：thiscall
+    语法：最后一个被调 + 功能是释放资源
+    汇编：返回 void
+</code></pre>
+<h2>堆对象 new（release）</h2>
+<pre><code>
+  ptr = operator new(sizeof)
+  → 构造函数直接内联在 new 调用之后（不是 call ctor）
+  → 识别：new 返回值立刻被初始化代码（内敛后的构造函数）使用
+</code></pre>
+<h2>析构函数族（MSVC 生成三个变体）</h2>
+<pre><code>
+  base dtor           ：只析构成员，不管内存
+
+  deleting dtor       ：析构 + operator delete（无参）
+
+  vector deleting dtor：带整型位标志参数：
+      bit0: 是否 delete 内存
+      bit1: 是否数组
+      0 = 只析构         1 = 析构+delete单对象
+      2 = 析构数组不删    3 = 析构数组+delete
+  显式调用 obj.~T() 走 base dtor → 天然不会释放内存
+
+  识别：析构函数带一个 0/1/2/3 的参数且内部 cmp/branch
+</code></pre>
+<h2>对象数组（new[]）</h2>
+<pre><code>
+  走&quot;迭代器&quot;函数（eh vector ctor/dtor iterator）
+
+  参数：数组首地址、元素大小、个数、构造/析构函数指针
+  Point ary1[3] 编译成两个循环：一循环调构造、一循环调析构
+  内部含 SEH：第 N 个构造抛异常 → 自动析构已成功的 0..N-1
+  → 看到 try/except 包着的构造循环 = 数组构造迭代器
+</code></pre>
+<h2>全局对象生命周期</h2>
+<pre><code>
+  构造：main 之前（CRT 动态初始化表 __xc_a~__xc_z，
+        _initterm 遍历执行，同 int g = foo() 的机制）
+
+  析构：main 返回之后——构造完成后编译器立刻生成
+        atexit(&amp;dtor) 注册；atexit 本质也是函数指针数组，
+        exit() 时挨个回调
+
+  推论：ExitProcess/TerminateProcess 强杀进程
+        会跳过 exit 流程 → 全局对象不析构 → 资源泄漏
+</code></pre>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

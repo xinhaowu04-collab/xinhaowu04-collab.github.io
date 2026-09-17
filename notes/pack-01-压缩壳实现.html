@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>压缩壳实现 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">压缩壳实现</h1>
+<div class="meta"><span class="cat">壳与脱壳</span></div>
+<article>
+<h1>压缩壳实现</h1>
+<p>课堂实现的是一个 32 位 PE 压缩壳：壳生成器 <code>Packer.exe</code> 在磁盘上读取并压缩原 EXE，重建一个新的 PE；新 PE 启动时先执行 Stub，Stub 解压原文件、恢复节和运行环境，最后跳回原程序入口点 OEP。本笔记只用于自有程序、课堂样本和授权实验环境中的 PE32 学习与防御分析。</p>
+<h2>壳的目标与总体结构</h2>
+<p>核心对象：</p>
+<p>| 对象 | 所在阶段 | 责任 | |---|---|---| | <code>CPeParse</code> | 加壳时 | 通过 <code>ImageLoad</code> 读取 DOS 头、NT 头、节表、对齐值和原文件字节 | | <code>CPacker</code> | 加壳时 | 压缩原文件、保存 <code>PackInfo</code>、重建 PE、写入 Stub | | <code>g_StubCode[]</code> | 加壳后运行时 | 由 <code>StubCode</code> 项目编译、反汇编后复制出的 x86 机器码 | | <code>RunEnv</code> | 加壳后运行时 | 保存 ImageBase 和动态取得的 API 函数指针 | | <code>.old</code> | 新 PE 的内存布局 | 为原程序映像预留连续内存；课堂版本磁盘大小为 0 | | <code>.pack</code> | 新 PE 的磁盘与内存布局 | 保存 <code>PackInfo + 压缩数据 + Stub机器码</code> | | 资源数据 | Explorer 读取阶段 | 为外壳文件提供无需执行 Stub 就能读取的图标 |</p>
+<p>壳信息结构：</p>
+<pre><code>
+struct PackInfo {
+    DWORD dwDataSize;      // 原始 PE 文件字节数/解压目标大小
+    DWORD dwComDataSize;   // 压缩后的有效字节数
+    DWORD dwEntryPoint;    // 原程序入口 RVA，不是 VA
+};
+</code></pre>
+<p>压缩后的原 PE 不再以正常节数据形式直接放在磁盘上，Windows Loader 只能先装载外壳自己的头和 <code>.pack</code>，Stub 必须承担一部分"手动加载器"的工作：</p>
+<pre><code>
+Windows 按外壳 PE 头装载文件
+  → 执行新 AEP：.pack 中的 MainEntry
+  → 保存寄存器并初始化 RunEnv
+  → 从 .pack 读取 PackInfo 和压缩数据
+  → 调用 Cabinet 解压到临时缓冲区
+  → 恢复原 PE 头和各节
+  → 修复 IAT
+  → 修复重定位
+  → 恢复节内存属性并处理 TLS
+  → 释放临时缓冲区
+  → ImageBase + 原入口 RVA
+  → 恢复寄存器并跳到 OEP
+</code></pre>
+<p>加壳端 <code>CPacker::Pack</code> 的顺序：</p>
+<pre><code>
+bool CPacker::Pack(std::string SrcPath, std::string DstPath)
+{
+    // 1. m_Pe.Load(SrcPath)：解析原 PE
+    // 2. CompressorData()：LZMS 压缩整个原文件
+    // 3. g_StubCode[]：使用 StubCode 项目的机器码
+    // 4. BuildNewPe(DstPath)：重建外壳 PE
+    // 5. 后续实验：复制原 EXE 的图标资源
+}
+</code></pre>
+<p>运行端 <code>Entry</code> 的后期版本顺序：</p>
+<pre><code>
+InitEnv(&amp;Env);
+// 找到 PackInfo，创建解压器并解压
+FixSections(&amp;Env, (UCHAR*)DecompressedBuffer);
+FixImportTable(&amp;Env);
+FixRelTable(&amp;Env);
+FixMemProto(&amp;Env);
+FixTlsCallback(&amp;Env);
+return Env.ImageBase + pPackInfo-&gt;dwEntryPoint;
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>"加密壳"是课堂称呼，实际代码使用 <code>COMPRESS_ALGORITHM_LZMS</code> 做压缩，没有独立的加密算法和密钥管理；严格说当前实现首先是压缩壳。</li>
+<li>Stub 没写完时，能解压并计算 OEP 不等于原程序一定能运行，IAT、重定位、节权限、TLS 仍可能缺失。早期 Stub 在解压后只留下"解析 PE、处理导入表、处理重定位表"的注释就直接返回 OEP；后期附件才补齐 <code>FixSections</code>、<code>FixImportTable</code>、<code>FixRelTable</code>、<code>FixMemProto</code>、<code>FixTlsCallback</code>。</li>
+<li>"数据目录清零"只是外壳磁盘头的策略，原程序的导入表、重定位表和 TLS 要在解压后由 Stub 恢复或处理。</li>
+<li>本设计把整个原文件压缩，并不是把原有每个节逐个压缩。</li>
+<li>样本的实际 ImageBase、OEP RVA、压缩前后字节数和压缩率均未提供，属待确认。</li>
+</ul>
+<h2>CPeParse 与 PE 基础地址/对齐</h2>
+<p><code>CPeParse</code> 用 <code>ImageLoad</code> 保存一个 <code>PLOADED_IMAGE</code>，对外提供：</p>
+<p>| 方法 | 返回内容 | |---|---| | <code>GetDosHeader()</code> | <code>MappedAddress</code> 处的 <code>IMAGE_DOS_HEADER</code> | | <code>GetDosHeaderSize()</code> | <code>e_lfanew</code>，即从文件开头到 PE 签名的偏移 | | <code>GetNtHeader()</code> | <code>IMAGE_NT_HEADERS</code> | | <code>GetFileHeader()</code> | <code>IMAGE_FILE_HEADER</code> | | <code>GetOptionHeader()</code> | <code>IMAGE_OPTIONAL_HEADER</code> | | <code>GetSectionNumber()</code> | 节数量 | | <code>GetSection()</code> | 第一项 <code>IMAGE_SECTION_HEADER</code> | | <code>GetMapBase()</code> | 映射文件的起点 | | <code>GetMapSize()</code> | 原文件大小 | | <code>GetMemAlgin()</code> | 按 <code>SectionAlignment</code> 向上对齐 | | <code>GetFileAlgin()</code> | 按 <code>FileAlignment</code> 向上对齐 |</p>
+<p>文件落盘和装入内存使用两套坐标：</p>
+<p>| 概念 | 含义 | 常见来源 | |---|---|---| | FOA/文件偏移 | 某字节距离文件开头的偏移 | <code>PointerToRawData</code> | | RVA | 某对象距离模块 ImageBase 的偏移 | <code>VirtualAddress</code>、<code>AddressOfEntryPoint</code>、数据目录 | | VA | 进程中的实际虚拟地址 | <code>VA = 实际 ImageBase + RVA</code> |</p>
+<pre><code>
+FOA = section.PointerToRawData + (RVA - section.VirtualAddress)
+VA  = ActualImageBase + RVA
+</code></pre>
+<p>两种对齐：</p>
+<p>| 对齐 | 控制对象 | 本代码中的字段 | |---|---|---| | <code>FileAlignment</code> | 节在磁盘中的原始大小和偏移 | <code>SizeOfRawData</code>、<code>PointerToRawData</code> | | <code>SectionAlignment</code> | 节在内存中的 RVA 和映像范围 | <code>VirtualAddress</code>、<code>VirtualSize</code>、<code>SizeOfImage</code> |</p>
+<p>向上对齐公式：</p>
+<pre><code>
+aligned = (size / align + (size % align == 0 ? 0 : 1)) * align;
+</code></pre>
+<p>加载时先验证 <code>ImageLoad</code> 返回值；析构时使用 <code>ImageUnload</code>。允许同一对象重复调用 <code>Load</code> 时，应先卸载旧的 <code>m_pLoadImage</code>，否则泄漏旧映射。重建节时分别计算磁盘大小和内存大小：</p>
+<pre><code>
+NewSections[1].Misc.VirtualSize = m_Pe.GetMemAlgin(packDataSize);
+NewSections[1].SizeOfRawData    = m_Pe.GetFileAlgin(packDataSize);
+</code></pre>
+<p>注意：</p>
+<ul>
+<li><code>GetDosHeaderSize()</code> 返回的是 <code>e_lfanew</code>，不是 <code>sizeof(IMAGE_DOS_HEADER)</code>。课堂代码借此复制 DOS 头和 DOS Stub，随后再单独写 <code>PE\0\0</code>。</li>
+<li><code>AddressOfEntryPoint</code> 是入口 RVA，不是文件偏移，也不是最终 VA。</li>
+<li><code>SizeOfHeaders</code> 已表示经文件对齐后的头部范围；实际文件指针仍应精确填充到节表声明的 <code>PointerToRawData</code>，不能只凭当前指针再次随意对齐。</li>
+<li><code>ImageLoad</code> 的 <code>MappedAddress</code> 用于解析原文件布局，不要等同于 Windows 正常执行时已按 RVA 映射、导入已修复的进程映像。</li>
+<li>原代码用 <code>GetFileSize(m_pLoadImage->hFile, NULL)</code> 得到待压缩的整个原文件大小。</li>
+<li><code>GetMemAlgin</code>/<code>GetFileAlgin</code> 的函数名拼写为 <code>Algin</code>，语义仍是 Alignment。</li>
+<li>课堂总结曾以 <code>0x200</code> 作为常见文件对齐示例，但当前样本真实对齐值待确认。</li>
+</ul>
+<h2>压缩数据与重建新的 PE</h2>
+<p><code>CompressorData()</code> 使用 Windows Compression API：</p>
+<pre><code>
+CreateCompressor(COMPRESS_ALGORITHM_LZMS, NULL, &amp;hCompressor);
+Compress(..., NULL, 0, &amp;CompressedBufferSize); // 查询所需大小
+Compress(..., m_pCompressedBuffer, CompressedBufferSize,
+         &amp;m_PackInfo.dwComDataSize);           // 真正压缩
+</code></pre>
+<p>第一次 <code>Compress</code> 预期因缓冲区不足而失败，通过 <code>ERROR_INSUFFICIENT_BUFFER</code> 返回所需大小；随后申请缓冲区再次调用。</p>
+<p>新 PE 的课堂布局只有两个手写节：</p>
+<pre><code>
+文件布局：
+[DOS 区][PE 签名][FileHeader][OptionalHeader][2 个节头][Padding]
+[.pack: PackInfo][压缩的原 PE][StubCode][Padding]
+
+内存布局：
+[Headers]
+[.old: 原程序映像的预留区域，RWX]
+[.pack: PackInfo + 压缩数据 + Stub，RWX]
+</code></pre>
+<p>主要字段：</p>
+<pre><code>
+NewFileHeader.NumberOfSections = 2;
+
+NewSections[0].Name             = &quot;.old&quot;;
+NewSections[0].VirtualAddress   = 原第一节 RVA;
+NewSections[0].Misc.VirtualSize = 原 SizeOfImage - 对齐后的头部大小;
+NewSections[0].PointerToRawData = 0;
+NewSections[0].SizeOfRawData    = 0;
+
+NewSections[1].Name             = &quot;.pack&quot;;
+NewSections[1].VirtualAddress   = .old.VirtualAddress + .old.VirtualSize;
+NewSections[1].PointerToRawData = NewOptionHeader.SizeOfHeaders;
+</code></pre>
+<p><code>.pack</code> 内顺序决定新入口计算：</p>
+<pre><code>
+NewOptionHeader.AddressOfEntryPoint =
+    NewSections[1].VirtualAddress
+    + sizeof(PackInfo)
+    + m_PackInfo.dwComDataSize;
+</code></pre>
+<p>Stub 紧跟在 <code>PackInfo</code> 和压缩数据之后，新 AEP 正好指向 <code>g_StubCode[0]</code>。</p>
+<p>重建过程：</p>
+<p>1. 复制文件开头到 <code>e_lfanew</code> 的 DOS 区。 2. 写入 PE 签名：<code>DWORD dwSignature = 0x00004550;</code>（磁盘字节为 <code>50 45 00 00</code>，即 <code>"PE\0\0"</code>）。 3. 复制并修改文件头、可选头。 4. 清空外壳的数据目录内容，使系统不提前按原导入/重定位/TLS 处理压缩数据。 5. 写 <code>.old</code>、<code>.pack</code> 两项节头。 6. 精确填充到 <code>.pack.PointerToRawData</code>。 7. 依次写 <code>PackInfo</code>、压缩字节、Stub 字节。 8. 精确填充到 <code>.pack.PointerToRawData + .pack.SizeOfRawData</code>。</p>
+<p>资源修正版保留数据目录数组的数量，但将每一项内容清零：</p>
+<pre><code>
+// 问题版本
+NewOptionHeader.NumberOfRvaAndSizes = 0;
+ZeroMemory(NewOptionHeader.DataDirectory,
+           sizeof(NewOptionHeader.DataDirectory));
+
+// 修正版本
+NewOptionHeader.NumberOfRvaAndSizes =
+    IMAGE_NUMBEROF_DIRECTORY_ENTRIES; // 16
+ZeroMemory(NewOptionHeader.DataDirectory,
+           sizeof(NewOptionHeader.DataDirectory));
+</code></pre>
+<p>注意：</p>
+<ul>
+<li><code>NumberOfRvaAndSizes = 0</code> 与"16 个目录项全部清零"不是同一表达。前者声明目录数组中没有有效项；后者仍保留标准目录槽位，允许后续资源更新器填写资源目录。</li>
+<li><code>.old</code> 只是自定义节名，不是 PE 标准节类型；真正起作用的是 RVA、大小和属性。</li>
+<li>将 <code>.old</code> 设为 RWX 是课堂简化，后续应由 <code>FixMemProto</code> 按原节属性恢复，长期 RWX 并不理想。</li>
+<li><code>NewOptionHeader.SizeOfImage += packVirtualSize</code> 依赖原 <code>SizeOfImage</code> 与新 <code>.pack</code> 起点连续的假设；更稳妥的思路是由最后一节末尾按 <code>SectionAlignment</code> 重新计算。</li>
+<li>仅把 <code>NumberOfSections</code> 改成 3 却只写两个有效节头，会制造不一致 PE。中间附件确实出现过这个版本，后来恢复为 2，让资源 API 自己重建资源数据。最初版本 <code>NumberOfSections = 2</code> 且数据目录数量和内容均清零；最终可用方案的手写阶段仍保持两个节，资源更新 API 在文件生成后再写资源。</li>
+<li>修正版还增加了"源路径不能等于目标路径"的保护，并按节头记录的确切 Raw Offset/Raw End 填充文件。</li>
+</ul>
+<h2>无导入 Stub、PEB、导出表与机器码入口</h2>
+<p>外壳可选头的数据目录被清空后，Stub 不能依赖自己的静态导入表，而是通过 PEB 找模块基址，再手动解析导出表取得 API。<code>RunEnv</code> 中保存的主要函数指针：</p>
+<pre><code>
+LoadLibraryA
+GetProcAddress
+VirtualAlloc
+VirtualFree
+VirtualProtect
+CreateDecompressor
+Decompress
+CloseDecompressor
+</code></pre>
+<p>x86 下通过 <code>fs:[0x30]</code> 取得 PEB：</p>
+<pre><code>
+mov eax, fs:[30h]
+mov eax, [eax + 0Ch]   ; PEB_LDR_DATA
+mov eax, [eax + 0Ch]   ; 模块链表（课堂写法）
+</code></pre>
+<p>课堂分别写了 <code>MyGetModuleBase()</code> 和 <code>MyGetKernelBase()</code>。取得 Kernel32 基址后，<code>MyGetProcAddress</code> 解析导出目录：</p>
+<pre><code>
+IMAGE_DATA_DIRECTORY* dir =
+    &amp;NtHeader-&gt;OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+
+IMAGE_EXPORT_DIRECTORY* exp =
+    (IMAGE_EXPORT_DIRECTORY*)((BYTE*)hModule + dir-&gt;VirtualAddress);
+</code></pre>
+<p>名称导出要经过三张表：</p>
+<pre><code>
+AddressOfNames[i] -&gt; 函数名 RVA
+AddressOfNameOrdinals[i] -&gt; EAT 下标
+AddressOfFunctions[EAT下标] -&gt; 函数 RVA
+</code></pre>
+<p>序号导出则用 <code>ordinal - ExportTable->Base</code> 得到 EAT 下标。</p>
+<p>API 名称在函数内部使用字符数组构造，减少对全局字符串绝对地址的依赖：</p>
+<pre><code>
+char szLoadLibraryA[] = {
+    &#x27;L&#x27;,&#x27;o&#x27;,&#x27;a&#x27;,&#x27;d&#x27;,&#x27;L&#x27;,&#x27;i&#x27;,&#x27;b&#x27;,&#x27;r&#x27;,&#x27;a&#x27;,&#x27;r&#x27;,&#x27;y&#x27;,&#x27;A&#x27;,&#x27;\0&#x27;
+};
+</code></pre>
+<p>先自行找到 <code>GetProcAddress</code>，随后取得其他 Kernel32 API；再 <code>LoadLibraryA("Cabinet.dll")</code>，从 Cabinet 取得解压 API。</p>
+<p>入口使用 naked 函数，避免编译器自动生成常规序言/结尾：</p>
+<pre><code>
+__declspec(naked) void MainEntry()
+{
+    __asm {
+        pushad
+        call Entry
+        xchg [esp+18h], eax
+        popad
+        jmp ecx
+    }
+}
+</code></pre>
+<p><code>pushad</code> 后，从当前 ESP 开始的保存槽位：</p>
+<p>| 偏移 | 恢复到寄存器 | |---:|---| | <code>+00h</code> | EDI | | <code>+04h</code> | ESI | | <code>+08h</code> | EBP | | <code>+0Ch</code> | 原 ESP（<code>popad</code> 跳过） | | <code>+10h</code> | EBX | | <code>+14h</code> | EDX | | <code>+18h</code> | ECX | | <code>+1Ch</code> | EAX |</p>
+<p>新版本把 <code>Entry</code> 返回的 OEP VA 与保存的 ECX 交换；<code>popad</code> 后 ECX 得到 OEP，再 <code>jmp ecx</code>。</p>
+<p>两版 <code>g_StubCode[]</code> 实测：</p>
+<p>| 版本 | 实际字节数 | SHA-256 | 入口前 16 字节 | |---|---:|---|---| | 早期数组 | 2048 | <code>c65f5ab688f4dbcc452fa62eb68aa252cf210b12607f36ebac5acc66139e47f2</code> | <code>60 E8 0A 00 00 00 87 44 24 1C 61 FF E0 CC CC CC</code> | | 后期数组 | 3353 | <code>cef9df4acedd4a5e980d9cc59cb858ddbdab7bf19d433d6b9e9273f222a8399f</code> | <code>60 E8 1A 0C 00 00 87 44 24 18 61 FF E1 CC CC CC</code> |</p>
+<p>入口机器码对应关系：</p>
+<pre><code>
+60                         pushad
+E8 1A 0C 00 00            call 相对地址       ; rel32 = 00000C1Ah
+87 44 24 18               xchg [esp+18h], eax
+61                         popad
+FF E1                      jmp ecx
+CC CC CC                   int3 填充/函数间隙
+</code></pre>
+<p>后期 <code>call</code> 的下一条指令偏移为 <code>0x6</code>，以数组起点为 0 时目标偏移为 <code>0x00000006 + 0x00000C1A = 0x00000C20</code>，反映后期 <code>Entry</code> 被链接到数组中较后位置。早期入口同理：<code>0x6 + 0xA = 0x10</code>。</p>
+<p>注意：</p>
+<ul>
+<li>"不用导入表"不是不用 API，而是运行时自行查找 API 地址。</li>
+<li><code>/FIXED</code>、关闭 ASLR 并不能自动产生 PIC。真正的 PIC 仍要求避免全局变量、绝对地址和未经处理的重定位。</li>
+<li>PEB 模块链顺序属于实现细节，课堂通过固定遍历次数找 Kernel32 的方式在受控 x86 实验中可用，但不宜当作所有系统版本的绝对保证。</li>
+<li>当前 <code>MyGetProcAddress</code> 没有处理转发导出。若 EAT 中的 RVA 落在导出目录范围内，它可能指向 <code>DLL.Func</code> 字符串而不是真正代码，需另行解析；本次课堂代码未完成这一点。</li>
+<li>第一份源码曾用 <code>xchg [esp+1Ch], eax</code> 后 <code>jmp eax</code>；后期改为 <code>+18h</code> 和 <code>jmp ecx</code>。两种都能表达"把返回地址放进将要恢复的寄存器"，但偏移和最终跳转寄存器必须配套。</li>
+</ul>
+<h2>解压后恢复节、IAT、重定位、权限和 TLS</h2>
+<p>后期 Stub 把临时缓冲区中的"原 PE 文件布局"恢复到当前进程的"原 PE 内存布局"：不是简单 <code>memcpy</code> 整个文件，而是先复制头，再按节表将每个节的 Raw Data 放到其 RVA。</p>
+<p><code>FixSections</code> 的核心地址关系：</p>
+<pre><code>
+源地址 = lpMapAddress + section.PointerToRawData; // 文件布局
+目标地址 = ImageBase + section.VirtualAddress;   // 内存布局
+</code></pre>
+<p>恢复头后，Stub 才能重新看见原 PE 的导入、重定位、TLS 等数据目录。之后 <code>FixImportTable</code> 把函数实际地址写入 <code>FirstThunk</code> 指向的 IAT，<code>FixRelTable</code> 根据实际加载基址修正绝对地址，<code>FixMemProto</code> 根据原节属性恢复页面权限，<code>FixTlsCallback</code> 调用原程序 TLS 回调。</p>
+<h3>恢复节</h3>
+<pre><code>
+VirtualProtect(ImageBase, SizeOfHeaders, PAGE_READWRITE, &amp;oldProtect);
+MyCopyMemory(ImageBase, lpMapAddress, originalSizeOfHeaders);
+VirtualProtect(ImageBase, SizeOfHeaders, oldProtect, &amp;oldProtect);
+
+for (每个原节) {
+    if (SizeOfRawData != 0) {
+        MyCopyMemory(ImageBase + VirtualAddress,
+                     lpMapAddress + PointerToRawData,
+                     SizeOfRawData);
+    }
+}
+</code></pre>
+<h3>修复导入表</h3>
+<p>每个 <code>IMAGE_IMPORT_DESCRIPTOR</code>：</p>
+<pre><code>
+Name                 -&gt; DLL 名称 RVA
+OriginalFirstThunk   -&gt; INT；名称/序号描述
+FirstThunk           -&gt; IAT；写入最终函数 VA
+</code></pre>
+<p>当 <code>OriginalFirstThunk == 0</code> 时，课堂代码退回使用 <code>FirstThunk</code> 作为查找表。</p>
+<p>判断当前 INT 项是否为序号导入，要检查第 i 项而不是永远检查第一项：</p>
+<pre><code>
+// 问题代码：循环中总在检查第 0 项
+if (*pImportNameTable &amp; 0x80000000) { ... }
+
+// 修正方向：检查第 i 项并使用系统宏
+if (pImportNameTable[i] &amp; IMAGE_ORDINAL_FLAG32) {
+    WORD ordinal = IMAGE_ORDINAL32(pImportNameTable[i]);
+    Func = pEnv-&gt;GetProcAddress(hDll, MAKEINTRESOURCEA(ordinal));
+} else {
+    auto pName = (PIMAGE_IMPORT_BY_NAME)
+        (pEnv-&gt;ImageBase + pImportNameTable[i]);
+    Func = pEnv-&gt;GetProcAddress(hDll, (LPCSTR)pName-&gt;Name);
+}
+</code></pre>
+<h3>修复重定位</h3>
+<p>每个重定位块由 8 字节头和若干 <code>WORD TypeOffset</code> 组成：</p>
+<pre><code>
+count = (SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
+type  = TypeOffset[i] &gt;&gt; 12;
+off   = TypeOffset[i] &amp; 0x0FFF;
+patch = ImageBase + block.VirtualAddress + off;
+</code></pre>
+<p>PE32 的 <code>IMAGE_REL_BASED_HIGHLOW</code> 项修正为：</p>
+<pre><code>
+新值 = 旧值 - 原 OptionalHeader.ImageBase + 实际 ImageBase
+</code></pre>
+<h3>恢复节权限和 TLS</h3>
+<p>根据节头 <code>Characteristics</code> 的 EXECUTE/READ/WRITE 位组合选择 <code>PAGE_*</code>，然后 <code>VirtualProtect</code>。TLS 目录存在且 <code>AddressOfCallBacks != 0</code> 时遍历以 NULL 结束的回调数组。</p>
+<p>注意：</p>
+<ul>
+<li>课堂重定位代码写成 <code>(RelTable->SizeOfBlock - sizeof(PIMAGE_BASE_RELOCATION)) / sizeof(WORD)</code>。<code>sizeof(PIMAGE_BASE_RELOCATION)</code> 是指针大小，x86 为 4；重定位块头实际是 <code>sizeof(IMAGE_BASE_RELOCATION) == 8</code>。应减结构体大小，否则会多算两项。</li>
+<li>只以 <code>SizeOfBlock == 0</code> 结束不够稳妥；还应以重定位数据目录的 <code>Size</code> 限制总范围，并拒绝过小、奇数或越界块。</li>
+<li><code>VirtualAlloc(NULL, size, MEM_COMMIT, ...)</code> 的课堂写法应核对；常见稳妥写法是 <code>MEM_RESERVE | MEM_COMMIT</code>。</li>
+<li><code>VirtualFree(buffer, DecompressedDataSize, MEM_RELEASE)</code> 不符合 <code>MEM_RELEASE</code> 的参数规则；释放整个区域时 <code>dwSize</code> 应为 0。</li>
+<li>TLS 回调第三方加载器通常模拟 <code>DLL_PROCESS_ATTACH</code>；课堂代码传入 <code>0</code>，它代表 <code>DLL_PROCESS_DETACH</code>，需要结合样本类型和老师后续修正确认。</li>
+<li>只判断 <code>Characteristics == IMAGE_SCN_MEM_READ</code> 会漏掉同时包含内容标志的正常只读节；权限判断应按位测试，并覆盖未匹配组合，避免把 <code>dwNewProto = 0</code> 传给 <code>VirtualProtect</code>。</li>
+<li><code>FixSections</code> 执行后原 PE 头覆盖了外壳头，但此前取得的 <code>pPackInfo</code> 指针仍作为局部值保存；不要在覆盖后重新根据已经恢复的"原第二节"去寻找 <code>.pack</code>。</li>
+<li>附件里 <code>RunEnv</code> 重复声明了两次相同的 <code>CloseDecompressor</code> 匿名联合成员；同名成员会导致编译问题，应只保留一份。</li>
+<li>调试截图曾显示 <code>FixSections</code> 中 <code>lpMapAddress == NULL</code>，读取 <code>pMapDosHeader->e_lfanew</code> 触发"读取访问权限冲突"。该截图后被排除为图标问题原因，但从调试知识看，进入 <code>FixSections</code> 前仍应检查解压缓冲区、解压返回值和实际解压大小。</li>
+</ul>
+<h2>资源与图标</h2>
+<p>Windows EXE 的图标通常作为 PE 资源存在于资源目录树中，常见数据位于 <code>.rsrc</code> 节：</p>
+<pre><code>
+RT_GROUP_ICON（资源类型 14）
+└── 图标组：描述多个尺寸/色深并引用图标 ID
+
+RT_ICON（资源类型 3）
+└── 各个尺寸真正的图像字节
+</code></pre>
+<p>"图标被拆分"的准确含义是：一个图标组资源引用多个 <code>RT_ICON</code> 条目；不是把一张图片随意切碎后分散到多个 PE 节。</p>
+<p>程序运行后能使用原资源，而资源管理器不显示原图标，是因为二者发生在不同时间：</p>
+<p>| 使用者 | 读取时间 | 能否执行 Stub | 看到的数据 | |---|---|---|---| | Windows Explorer | 启动程序之前 | 不能 | 加壳文件磁盘上的资源目录 | | 原程序运行代码 | Stub 解压修复之后 | 已执行 | 内存里恢复的原 PE 资源 |</p>
+<p>原 <code>.rsrc</code> 被包含在整个原文件的压缩数据里时，Explorer 不会先解压 <code>.pack</code>，所以无法取得图标，必须在外壳磁盘 PE 中保留一份可直接解析的图标资源。</p>
+<p>本次采用 Windows 资源更新 API，而没有手写完整第三个节：</p>
+<pre><code>
+HMODULE hSource = LoadLibraryExA(
+    sourcePath.c_str(), NULL,
+    LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+
+HANDLE hUpdate = BeginUpdateResourceA(destinationPath.c_str(), FALSE);
+
+// 枚举并复制：RT_GROUP_ICON(14)、RT_ICON(3)
+UpdateResourceA(hUpdate, type, name, language,
+                resourceData, resourceSize);
+
+EndUpdateResourceA(hUpdate, FALSE); // 提交更新
+</code></pre>
+<p>图标复制必须同时保留"类型 + 名称/整数 ID + 语言 + 数据"。只复制 <code>RT_GROUP_ICON</code> 没有真正图像；只复制 <code>RT_ICON</code> 又没有图标组告诉 Explorer 应使用哪些 ID 和尺寸。</p>
+<p>调用顺序：</p>
+<pre><code>
+BuildNewPe 生成两节外壳
+  → LoadLibraryEx 只读加载原 EXE 资源
+  → BeginUpdateResource 打开目标 EXE
+  → 复制 RT_GROUP_ICON
+  → 复制 RT_ICON
+  → EndUpdateResource 提交
+  → 资源目录和磁盘资源可被 Explorer 读取
+</code></pre>
+<p>若完全手写，等价于实现资源更新器中与本任务有关的核心工作：</p>
+<p>1. 建立/扩展资源节并计算 Raw/RVA 对齐。 2. 构造三级资源树：类型 → 名称/ID → 语言。 3. 写 <code>IMAGE_RESOURCE_DIRECTORY</code>、<code>IMAGE_RESOURCE_DIRECTORY_ENTRY</code>、<code>IMAGE_RESOURCE_DATA_ENTRY</code>。 4. 写图标组和图标字节。 5. 修正节数、<code>SizeOfImage</code>、资源数据目录 RVA/Size。</p>
+<p>资源结构中的偏移语义：</p>
+<p>| 字段 | 值的坐标系 | |---|---| | <code>IMAGE_RESOURCE_DIRECTORY_ENTRY.OffsetToDirectory</code> | 相对资源目录起点的偏移 | | <code>IMAGE_RESOURCE_DIRECTORY_ENTRY.OffsetToData</code> | 相对资源目录起点的偏移 | | <code>IMAGE_RESOURCE_DATA_ENTRY.OffsetToData</code> | 真正资源数据的 RVA |</p>
+<p>说明性示例（不是实测地址）：若资源节 RVA 为 <code>0x5000</code>，图标字节位于节内偏移 <code>0x300</code>：</p>
+<pre><code>
+dataEntry.OffsetToData = 0x5000 + 0x300; // RVA = 0x5300
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>"调用 <code>EndUpdateResourceA</code> 就等于手写第三节"是概念上的近似。API 内部实现并不承诺永远新建一个名为 <code>.rsrc</code> 的第三节，也可能重建或扩展已有资源布局。</li>
+<li>本次手写阶段仍是两个节。提交资源后的最终节数和节名应使用 PE 工具实测；用户只确认了图标显示成功，没有报告最终节表，"必定三个节"待确认。</li>
+<li>"找到资源节直接不压缩"是可行设计思路，但不能只把旧 <code>.rsrc</code> 原始字节原样拼到新文件；还要保证资源节 RVA、Raw Offset、资源目录 RVA/Size 和内部数据 RVA 全部一致或得到修正。</li>
+<li>清空所有数据目录可以简化外壳加载策略，但若希望 Explorer 读取图标，就必须让最终外壳的 <code>IMAGE_DIRECTORY_ENTRY_RESOURCE</code> 有效。</li>
+<li>图标已经写对但 Explorer 仍显示旧图标时，可能是系统图标缓存；本次实验通过更换输出文件验证更清晰。</li>
+</ul>
+<p>实验过程：初始现象是加壳后程序资源在运行时能用，但加密前软件的图标不显示；第一思路是让原资源节不参与压缩；最终实现在 Packer 端增加资源枚举和更新代码，不修改 <code>StubCode</code> 项目。关键修正是 <code>NumberOfRvaAndSizes</code> 保留 16 个目录槽位，并同时复制 <code>RT_GROUP_ICON</code>、<code>RT_ICON</code>。用户最终确认"可以了，显示图标了"，这是本次唯一明确的图标实验结果。</p>
+<h2>两组 Visual Studio 编译/链接命令的差异</h2>
+<p>两份配置都面向 x86 Release Stub，共同包含：</p>
+<pre><code>
+/GS- /W3 /Zi /Od /Oy- /Gd /MACHINE:X86
+/ENTRY:MainEntry /NODEFAULTLIB /SUBSYSTEM:CONSOLE
+/INCREMENTAL:NO /OPT:REF /OPT:ICF /SAFESEH /DEBUG
+</code></pre>
+<p>目标是使用自定义入口、避免默认 CRT 启动代码，并使反汇编得到的 Stub 边界和指令更容易控制。</p>
+<p>主要差异：</p>
+<p>| 项目 | 第一份 | 第二份 | 影响 | |---|---|---|---| | 全程序优化 | <code>/GL</code> | 无 <code>/GL</code> | 第一份可在链接时重排、内联或删除代码，机器码布局更难预测 | | 内建函数 | <code>/Oi</code> | 无 <code>/Oi</code> | 第一份可能把库式操作替换为编译器内建指令 | | C++ 异常 | <code>/EHsc</code> | 未出现 | 纯 C 风格 Stub 通常不依赖它 | | 字符集宏 | <code>_UNICODE</code>、<code>UNICODE</code> | <code>_MBCS</code> | 未显式写 A/W 后缀的 WinAPI 宏选择不同 | | ASLR | <code>/DYNAMICBASE</code> | <code>/DYNAMICBASE:NO</code> | 第一份允许随机基址；第二份关闭 | | 固定映像 | 无 <code>/FIXED</code> | <code>/FIXED</code> | 第二份要求首选基址，通常不依赖重定位 | | DEP 标志 | <code>/NXCOMPAT</code> | <code>/NXCOMPAT:NO</code> | 第一份声明兼容 DEP，第二份关闭该兼容标志 | | PDB 名 | <code>vc142.pdb</code> | <code>vc143.pdb</code> | 暗示工具集或工程迁移版本可能不同 |</p>
+<p>两份均 <code>/Od</code>，都关闭常规优化，方便课堂跟踪。第一份输出到 <code>E:\win32汇编\03\Release\StubCode.exe</code>，第二份输出到 <code>D:\CR08\...\Packer\Release\StubCode.exe</code>。</p>
+<p>若要尽量复现第二份机器码布局，应先统一：</p>
+<pre><code>
+Release | Win32/x86
+关闭 /GL
+关闭 /Oi
+_MBCS
+/DYNAMICBASE:NO
+/FIXED
+/ENTRY:MainEntry
+/NODEFAULTLIB
+</code></pre>
+<p>再从反汇编确认 <code>MainEntry</code> 到 <code>Entry</code> 及所需辅助函数的实际字节范围，而不是假定源码长度等于机器码长度。</p>
+<p>注意：</p>
+<ul>
+<li><code>/DYNAMICBASE:NO</code> 和 <code>/FIXED</code> 只是让装载地址更稳定，不能代替 PIC 设计。</li>
+<li><code>/NXCOMPAT:NO</code> 不是"让所有内存自动可执行"；页面是否可执行仍受节属性和 <code>VirtualProtect</code> 控制。</li>
+<li>第二份链接参数仍有 <code>/LTCG:incremental</code>，但编译阶段没有 <code>/GL</code>，不能简单认为它和第一份执行相同的全程序代码生成。</li>
+<li><code>/MD</code> 与 <code>/NODEFAULTLIB</code> 同时出现时，Stub 仍应避免依赖未显式链接的 CRT；课堂代码通过自写字符串比较和内存复制来减少此依赖。</li>
+<li>路径文本中出现 <code>*</code>；Windows 文件名不能包含星号，若星号是实际命令内容则路径无效，若只是复制时的分隔/脱敏符号则不用处理，当前属于待确认。</li>
+<li>本次没有用两组设置各自重新编译并做逐字节 diff，"哪些具体字节由哪个开关造成"仍待实验验证。</li>
+</ul>
+<h2>安全边界</h2>
+<p>壳代码被安全工具提示为敏感，并不表示学习者本人有恶意。检测关注的是能力组合：隐藏原始结构、动态取得 API、运行时解压、手动修复 IAT/重定位并转移控制流——这些技术既用于软件保护和 PE 教学，也可能被恶意加载器复用。安全判断通常看代码能力、操作对象、授权范围，以及是否涉及规避检测、持久化、注入等行为。</p>
+<ul>
+<li>只处理自己的程序、课堂样本或明确授权样本。</li>
+<li>保留原文件和实验日志，在隔离环境中测试。</li>
+<li>将重点放在 PE 格式、资源、装载器行为和防御分析。</li>
+<li>不扩展到免杀、绕过安全产品、未授权注入或传播。</li>
+</ul>
+<p>本次实际修改集中在自建 Packer 的 PE 资源/图标和文件布局，没有涉及外部目标、网络传播或持久化；最终功能验证是本地加壳文件能够显示原图标。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

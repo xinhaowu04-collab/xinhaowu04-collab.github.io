@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工具与伪指令 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">工具与伪指令</h1>
+<div class="meta"><span class="cat">16 位汇编</span></div>
+<article>
+<h1>工具与伪指令</h1>
+<h2>Debug 调试与 COM 文件</h2>
+<p>Debug.exe 是 DOS 系统自带的交互式调试工具，可用于查看和修改内存、寄存器状态，以及编写和调试简单的汇编程序。COM 文件是 DOS 下一种简单的可执行文件格式，<strong>无文件头</strong>，代码从偏移 <code>0100h</code> 开始加载。</p>
+<h3>16 位汇编常见寄存器</h3>
+<p>通用寄存器：</p>
+<pre><code>
+AX    CX    DX    BX
+SP    BP    SI    DI
+</code></pre>
+<p><strong>AX = 累加器，几乎所有算术运算的默认目的地</strong></p>
+<pre><code>
+MOV AX, 5       ; 被乘数放入 AX
+MOV BL, 10      ; 乘数放入 BL
+MUL BL          ; 结果在 AX（隐含）
+</code></pre>
+<p><strong>CX = 计数器，循环和移位次数的默认寄存器</strong></p>
+<pre><code>
+MOV CX, 10      ; 循环 10 次
+LOOP_LABEL:
+    ; 循环体
+    LOOP LOOP_LABEL  ; CX--，CX≠0 时跳转
+</code></pre>
+<p><strong>BP = 栈帧基址，函数调用时定位参数和局部变量</strong></p>
+<pre><code>
+PUSH BP         ; 保存调用者的 BP
+MOV BP, SP      ; BP = 当前栈顶，作为栈帧基址
+MOV AX, [BP+4]  ; 访问栈上的参数
+POP BP          ; 恢复调用者的 BP
+RET
+</code></pre>
+<p><code>PUSH BP; MOV BP, SP</code> 序列是函数入口的栈帧建立标志：后续 <code>[BP+4]</code>、<code>[BP+6]</code> 是访问函数参数，<code>[BP-2]</code>、<code>[BP-4]</code> 是局部变量。</p>
+<p>控制/状态寄存器：</p>
+<pre><code>
+IP      指令指针（Instruction Pointer）
+FLAGS   标志寄存器
+</code></pre>
+<p>段寄存器：</p>
+<pre><code>
+CS   代码段寄存器（Code Segment）
+DS   数据段寄存器（Data Segment）
+SS   栈段寄存器（Stack Segment）
+ES   附加段寄存器（Extra Segment）
+</code></pre>
+<h3>内存地址寻址能力</h3>
+<p>| 地址位数 | 支持的内存空间 | 地址范围 | |---------|---------------|---------| | 16位 | 64KB | 0x0000 ~ 0xFFFF | | 20位 | 1MB | 0x00000 ~ 0xFFFFF |</p>
+<p>8086 的寄存器是 16 位的，但物理地址是 20 位的，所以需要"段:偏移"的分段机制来访问完整的 1MB 空间。</p>
+<pre><code>
+物理地址 = 段地址 × 16（左移4位） + 偏移地址
+</code></pre>
+<pre><code>
+; 已知逻辑地址 CS:IP = 0DAB:0100
+; 物理地址 = 0DAB × 10h + 0100 = 0DBB0h
+; 注意不是 0DAB0100h！
+</code></pre>
+<ul>
+<li>一个物理地址可以对应多个逻辑地址（多对一映射）：<code>0000:0100</code> 和 <code>0010:0000</code> 都指向物理地址 <code>00100h</code></li>
+<li>段地址 × 16 在硬件上通过地址加法器左移 4 位实现，不是真乘法</li>
+</ul>
+<h3>程序的内存区域划分</h3>
+<p>| 区域 | 英文 | 对应段寄存器 | |------|------|------------| | 代码区 | Code Segment | CS | | 数据区 | Data Segment | DS | | 数据区（附加） | Extra Segment | ES | | 栈区 | Stack Segment | SS |</p>
+<p>每个段寄存器配合特定的通用寄存器，构成默认的寻址组合：</p>
+<pre><code>
+CS : IP        代码段 : 指令指针
+DS : BX / SI   数据段 : 基址/源索引
+SS : SP / BP   栈段   : 栈指针/基址指针
+ES : DI        附加段 : 目的索引
+</code></pre>
+<h3>Debug 启动与寄存器状态解读</h3>
+<pre><code>
+C:\&gt;debug
+</code></pre>
+<p>启动后 CPU 各寄存器被初始化为特定值，例如：</p>
+<pre><code>
+AX=0000  BX=0000  CX=0000  DX=0000  SP=FFEE  BP=0000  SI=0000  DI=0000
+DS=0DAB  ES=0DAB  SS=0DAB  CS=0DAB  IP=0100  NV UP EI PL NZ NA PO NC
+0DAB:0100 0000          ADD [BX+SI], AL
+</code></pre>
+<p>解读：</p>
+<ul>
+<li><strong>CS=DS=ES=SS=0DAB</strong>：四个段寄存器指向同一个段，这是 .com 文件（单段内存模型）的典型特征。代码、数据和栈全部挤在由 0DAB:0000 开始的最大 64KB 物理内存块中</li>
+<li><strong>IP=0100</strong>：.com 文件的强制入口点偏移为 <code>0100h</code>（前 256 字节是 PSP）</li>
+<li><strong>SP=FFEE</strong>：栈指针指向段尾附近，栈向低地址增长</li>
+</ul>
+<p>看 CS=DS=ES=SS 是否相等可以快速区分文件格式：相等是 .com 文件（单段模型），不等是 .exe 文件（多段模型）。</p>
+<p>注意：DS=0DAB 这个值不是固定的，取决于 DOS 加载 Debug.exe 时分配的内存位置。不同机器、不同 DOS 版本启动后的段地址不同，但 IP=0100、SP=FFEE、CS=DS=ES=SS 这些关系是固定的。</p>
+<h3>FLAGS 标志位硬件解码</h3>
+<p>Debug.exe 使用专用双字母缩写表示 FLAGS 状态：</p>
+<p>| 缩写 | 全称 | 对应硬件标志位 | 状态 | 逆向逻辑含义 | 反向缩写 | |------|------|--------------|------|------------|---------| | <strong>NV</strong> | No oVerflow | OF (溢出标志) | OF = 0 | 上一条有符号运算未发生溢出 | OV | | <strong>UP</strong> | UP (Direction) | DF (方向标志) | DF = 0 | 字符串拷贝方向为增量（正向） | DN | | <strong>EI</strong> | Enable Interrupt | IF (中断允许) | IF = 1 | 允许 CPU 响应外部硬件中断 | DI | | <strong>NG</strong> | NeGative | SF (符号标志) | SF = 1 | 结果为负数（最高位为 1） | PL | | <strong>NZ</strong> | Not Zero | ZF (零标志) | ZF = 0 | 运算结果不为零 | ZR | | <strong>NA</strong> | No Aux carry | AF (辅助进位) | AF = 0 | 未发生半字节进位 | AC | | <strong>PO</strong> | Parity Odd | PF (奇偶标志) | PF = 0 | 结果低 8 位中 1 的个数为奇数 | PE | | <strong>NC</strong> | No Carry | CF (进位标志) | CF = 0 | 未发生无符号进位/借位 | CY |</p>
+<p>例如 Debug 中看到 <code>NV UP EI PL NZ NA PO NC</code>，逐字解读：无溢出、正向、中断开、正数、非零、无辅助进位、奇校验、无进位——上一条运算结果为正数且非零，无异常。</p>
+<p>单步跟踪时重点看四个标志，覆盖 90% 的条件跳转判断：</p>
+<p>1. <strong>NG/PL</strong>（SF）——结果是正还是负 2. <strong>NZ/ZR</strong>（ZF）——结果是否为零 3. <strong>NV/OV</strong>（OF）——有符号是否溢出 4. <strong>NC/CY</strong>（CF）——无符号是否进位/借位</p>
+<p>注意：FLAGS 缩写是反直觉的。<code>NG</code> 表示结果为负（SF=1），<code>PL</code> 表示结果为正（SF=0）——NG = NeGative，PL = PLus，缩写不是首字母，需要对照表格记忆。</p>
+<h3>INT 20 汇编到源码逆向映射</h3>
+<pre><code>
+0DAB:0000 CD20          INT     20
+</code></pre>
+<p>| 层面 | 解析 | |------|------| | 机器码 | <code>CD 20</code> 是 <code>int 20h</code> 的机器码 | | C 语言映射 | 等价于 C 标准库中的 <code>exit(0)</code>，告诉内核"程序运行结束，回收内存" | | 历史背景 | 比 <code>int 21h, AH=4Ch</code> 更古老的程序退出方式 |</p>
+<h3>PSP（程序段前缀）</h3>
+<p>Q：.com 文件的强制入口点是 0100，为什么 IP 停在 0000？</p>
+<p>| 机制 | 说明 | |------|------| | <strong>PSP</strong> | DOS 在加载 .com 文件时，在 0000~00FF 的 256 字节中强制插入 PSP（Program Segment Prefix），存放命令行参数和环境变量指针 | | <strong>防弹设计</strong> | PSP 的第 0、1 字节被微软硬编码为 <code>CD 20</code> (int 20h) | | <strong>目的</strong> | 容错机制：若程序员忘记写退出指令，CPU 跑飞绕回 0000 时自动触发 int 20h 安全退出，不会导致整个 DOS 系统死机 |</p>
+<p>PSP 偏移量速查：</p>
+<pre><code>
+; PSP:0000  → CD 20 (int 20h) — 程序退出
+; PSP:0080  → 命令行参数字符串
+; PSP:000A  → 中断 22h 入口（程序结束地址）
+; PSP:000E  → 中断 23h 入口（Ctrl+C 处理）
+</code></pre>
+<p>在 Debug 中看到偏移量在 0000~00FF 范围内且内容为 <code>CD 20</code>，说明这是 PSP 区域，不是代码。PSP 的偏移 0080h 处存放命令行参数。</p>
+<p>注意：.com 文件入口必须是 0100h，不是 0000h。前 256 字节（0000~00FF）被 PSP 占用。如果误将入口点设为 0000h，CPU 会执行 PSP 中的 <code>CD 20</code>（int 20h），程序立即退出。</p>
+<h3>EU 与 BIU 整体框架</h3>
+<p>8086 在物理上分为两大部件：</p>
+<p>| 部件 | 说明 | |------|------| | <strong>EU</strong>（执行部件） | 负责译码、运算，不直接连外部总线 | | <strong>BIU</strong>（总线接口部件） | 负责形成地址、读写外部总线、预取指令 |</p>
+<p>| 部件 | 所属 | 作用 | |------|------|------| | 通用寄存器组 (AX/BX/CX/DX/SP/BP/SI/DI) | EU | 存放操作数 | | ALU | EU | 做加减乘除等运算 | | 标志寄存器 | EU | 保存运算结果状态（零标志、进位等） | | 段寄存器（CS/DS/SS/ES）+ IP | BIU | 存放地址信息（段基址、偏移），不存数据 | | 地址加法器 | BIU | 段地址 × 16 + 偏移地址 = 20 位物理地址 | | 指令队列缓冲器（6 字节） | BIU | 暂存预取来的指令字节，排队等 EU 取用 | | 输入/输出控制电路 | BIU | 管理与外部总线的实际读写 |</p>
+<p>两条 16 位内部总线的分工：</p>
+<ul>
+<li>上面那条线：段寄存器/IP → 地址加法器，只负责算地址，不传输指令或数据本身</li>
+<li>下面那条线：EU 内部总线，负责指令译码和操作数运算，连接寄存器组、ALU、指令队列出口</li>
+</ul>
+<p>BIU 会持续预取指令填充 6 字节队列，即使 EU 还没执行到。所以 Debug 单步时 <code>-u</code> 反汇编显示的指令可能比当前 IP 指向的更靠前——这是预取队列造成的"错觉"，实际执行顺序以 IP 为准。</p>
+<p>典型数据流向：</p>
+<p><strong>① 寄存器间运算（不访问内存）</strong>，如 <code>ADD AX, BX</code>：</p>
+<pre><code>
+AX、BX → 下面内部总线 → ALU 运算 → 结果回 AX，标志寄存器更新
+（不经过段寄存器和地址加法器）
+</code></pre>
+<p><strong>② 从内存读数据</strong>，如 <code>MOV AX, [1234H]</code>：</p>
+<pre><code>
+1. DS + 偏移 1234H → 地址加法器 → 算出 20 位物理地址（走上面的线）
+2. 物理地址 → 外部地址总线 → 内存读出数据
+   → 经输入/输出控制电路 → 外部数据总线
+   → 下面内部总线 → 送入 AX 或 ALU
+</code></pre>
+<p><strong>③ 写数据到内存</strong>，如 <code>MOV [1234H], AX</code>：</p>
+<pre><code>
+AX 的值（下面内部总线）+ DS 算出的地址（上面的线）
+→ 一起通过外部总线 → 写入内存对应地址
+</code></pre>
+<p>取指流程：</p>
+<pre><code>
+1. CS + IP → 地址加法器 → 算出指令所在物理地址
+2. 通过外部总线把指令字节取回
+   → 输入/输出控制电路 → 指令队列缓冲器排队
+3. 队列里的指令字节 → 下面内部总线 → 送入 EU 译码（不是送进 ALU 运算）
+4. 译码后若需要操作数，操作数才真正进 ALU 运算
+</code></pre>
+<h3>Debug 常用命令</h3>
+<p>| 命令 | 说明 | |------|------| | <code>-a</code> | 开始写汇编代码（Assemble） | | <code>-e</code> | 写入字符串/修改内存（Enter） | | <code>-n hello.com</code> | 设置文件名（Name） | | <code>-r cx</code> | 设置写入文件长度（Register） | | <code>-w</code> | 写入磁盘（Write） | | <code>-d</code> | 查看内存内容（Dump） | | <code>-u</code> | 反汇编（Unassemble） | | <code>-t</code> | 单步执行（Trace） | | <code>-g</code> | 运行到断点（Go） |</p>
+<h3>编写 hello.com 的步骤</h3>
+<pre><code>
+-a            ; 开始写代码
+</code></pre>
+<p>先把数据存到寄存器，然后中断显示字符串：</p>
+<pre><code>
+-e            ; 写入字符串
+-n hello.com  ; 设置文件名
+-r cx         ; 设置写入文件长度
+-w            ; 写入磁盘
+</code></pre>
+<h2>MZ 文件格式与 MASM</h2>
+<p>MZ（Mark Zbikowski，微软 MS-DOS 早期架构师的缩写）是 16 位 DOS 下的标准可执行文件格式。它引入了<strong>文件头</strong>和<strong>重定位表</strong>机制，允许操作系统将其动态加载到可用内存中，突破了 COM 文件单一段（64KB）的致命限制。MASM（Microsoft Macro Assembler）是用于编写 MZ 文件的汇编工具链。</p>
+<h3>为什么需要 MZ 格式</h3>
+<p>COM 文件无文件头，代码从 <code>0100h</code> 开始加载，CS=DS=SS=ES 指向同一个段，最大只能 64KB。8086 有 1MB 内存空间，COM 文件只能用 64KB，非常浪费。</p>
+<p>MZ 格式引入了<strong>分段信息</strong>和<strong>数据代码分离</strong>机制，允许程序使用多个段，突破 64KB 限制。</p>
+<p>文件格式的核心作用：</p>
+<pre><code>
+文件格式 = 告诉操作系统 CS:IP 的位置 + 分段信息
+但不会帮你设置 DS、ES——必须自己在代码中设置
+</code></pre>
+<h3>MZ 文件的物理结构与内存映射</h3>
+<pre><code>
+文件偏移 (File Offset)                 内存布局 (Memory Layout)
+0x0000 +-----------------------+       +-----------------------+
+       | IMAGE_DOS_HEADER      |       | PSP (程序段前缀, 256B) | 操作系统动态创建
+       | (固定长度, 现代为64B) |       +-----------------------+ &lt;-- 加载基址
+       +-----------------------+       |                       |
+e_lfarlc&gt;| 重定位表            | ===&gt;  |       代码段 (CS)     |
+       | (Relocation Table)    |       |                       |
+       +-----------------------+       +-----------------------+
+       | 头填充 (Padding)      |       |       数据段 (DS)     |
+e_cparhdr&gt;---------------------+       |                       |
+       |                       |       +-----------------------+
+       |   程序载荷 (Body)     | ===&gt;  |       未初始化数据区  |
+       |  (代码 + 初始数据)    |       |                       |
+       |                       |       +-----------------------+
+EOF    +-----------------------+       |       栈区 (SS:SP)    |
+                                       +-----------------------+
+</code></pre>
+<h3>加载核心步骤</h3>
+<p>1. <strong>校验签名</strong>：读取前 2 个字节，必须是 <code>0x5A4D</code>（ASCII 字符 <code>MZ</code>） 2. <strong>分配空间</strong>：读取 <code>e_minalloc</code> 和 <code>e_maxalloc</code>，向系统申请足够的内存 3. <strong>执行重定位</strong>：根据 <code>e_lfarlc</code> 定位到重定位表。遍历表中的指针，将操作系统分配的<strong>实际段基址</strong>加到程序代码中需要修正的地方 4. <strong>移交控制权</strong>：根据 <code>e_cs</code> 和 <code>e_ip</code> 设置代码入口，根据 <code>e_ss</code> 和 <code>e_sp</code> 初始化栈顶，开始执行</p>
+<h3>IMAGE_DOS_HEADER 结构体</h3>
+<pre><code>
+typedef struct _IMAGE_DOS_HEADER {
+    WORD   e_magic;                     // 0x00: 魔法数字 &#x27;MZ&#x27; (0x5A4D)
+    WORD   e_cblp;                      // 0x02: 文件最后页的字节数
+    WORD   e_cp;                        // 0x04: 文件页数 (每页 512 字节)
+    WORD   e_crlc;                      // 0x06: 重定位项数量
+    WORD   e_cparhdr;                   // 0x08: 头部大小 (以 16 字节的段为单位)
+    WORD   e_minalloc;                  // 0x0A: 所需最小附加段
+    WORD   e_maxalloc;                  // 0x0C: 所需最大附加段
+    WORD   e_ss;                        // 0x0E: 初始的 SS 寄存器值 (相对值)
+    WORD   e_sp;                        // 0x10: 初始的 SP 寄存器值
+    WORD   e_csum;                      // 0x12: 校验和
+    WORD   e_ip;                        // 0x14: 初始的 IP 寄存器值
+    WORD   e_cs;                        // 0x16: 初始的 CS 寄存器值 (相对值)
+    WORD   e_lfarlc;                    // 0x18: 重定位表在文件中的偏移地址
+    WORD   e_ovno;                      // 0x1A: 覆盖层编号
+    WORD   e_res[4];                    // 0x1C: 保留字
+    WORD   e_oemid;                     // 0x24: OEM 标识符
+    WORD   e_oeminfo;                   // 0x26: OEM 信息
+    WORD   e_res2[10];                  // 0x28: 保留字
+    LONG   e_lfanew;                    // 0x3C: 指向 PE 头的文件偏移
+} IMAGE_DOS_HEADER, *PIMAGE_DOS_HEADER;
+</code></pre>
+<p><strong>e_lfanew 是 MZ 头中最核心的逆向字段</strong>——通过 MZ 头定位 PE 头（现代逆向标准范式）：</p>
+<pre><code>
+PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)fileBuffer;
+if (pDosHeader-&gt;e_magic != IMAGE_DOS_SIGNATURE) return;
+LONG peHeaderOffset = pDosHeader-&gt;e_lfanew;  // 偏移 0x3C
+PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(fileBuffer + peHeaderOffset);
+</code></pre>
+<p>内存中出现 <code>4D 5A</code>（MZ 签名）说明找到了一个完整的可执行模块基址。脱壳和内存 Dump 时，MZ 签名是定位模块基址的关键信号。恶意代码中除了 <code>e_magic</code> 和 <code>e_lfanew</code>，中间 58 字节可能被篡改。</p>
+<h3>与 COM、PE 格式对比</h3>
+<p>| 对比维度 | COM 格式 | MZ 格式 | PE 格式 (现代 Windows) | |---------|---------|---------|----------------------| | 文件签名 | 无 (纯机器码) | <code>MZ</code> (0x5A4D) | <code>MZ</code> 头 + <code>PE\0\0</code> | | 体积限制 | 严格 <= 64KB | 受限于常规内存 (~640KB) | 几无限制 | | 段支持 | 单一段 (CS=DS=SS) | 多段独立 (CS/DS/SS 分离) | 平坦内存模型 | | 现代逆向价值 | 编写 Shellcode 理论 | 仅作为定位 PE 头的"跳板" | 核心分析对象 |</p>
+<h3>MASM 工具链</h3>
+<pre><code>
+ML.EXE      — 32 位汇编器（将 .asm → .obj）
+LINK.EXE    — 链接器（将 .obj → .exe）
+EDIT.EXE    — 文本编辑器
+</code></pre>
+<h3>手写 MZ 文件的完整步骤</h3>
+<pre><code>
+; 第一步：分段
+data segment
+    text  db &quot;hello word$&quot;  ; db = define byte，定义字符串
+    ; 汇编器提供标号（如 text）代替硬编码偏移量
+    db 512 dup(0AAH)        ; dup = duplicate，重复 512 个 0AAH
+    ; ? 表示未初始化（分配空间但不填值，内容不可预测），0 表示显式初始化为零
+    ; h 表示 16 进制，b 表示 2 进制，默认 10 进制
+data ends
+
+Stack segment STACK  ; 栈段，STACK 参数告诉汇编器这是栈段
+    ; 栈向下生长（向低地址），PUSH 时 SP 减小，POP 时 SP 增大
+Stack ends
+
+code segment
+    start:          ; 告诉 ML 从这里开始拷贝代码
+    ; 设置段寄存器
+    mov ax, data
+    mov ds, ax
+    mov es, ax
+    mov ax, stack
+    mov ss, ax
+
+    mov ah, 09h
+    mov dx, offset text   ; offset 告诉编译器计算出偏移量
+    ; lea dx, text        ; 第二种写法，直接取地址
+    int 21h               ; COM 会直接结束，但 MZ 要用中断
+
+    ; exit(0)
+    mov ax, 4c00h         ; MZ 文件标准退出方法
+    int 21h
+    ret
+end start           ; 告诉汇编器代码结束
+code ends
+</code></pre>
+<p>注意：以字母开头的十六进制数前必须加 0（如 <code>0AAH</code>），否则 <code>aah</code> 会被识别为标识符（变量名/标号）而非数值。</p>
+<p>编译链接（虚拟机 XP 中，已安装 MASM 并配置环境变量）：</p>
+<pre><code>
+ml /c hello.asm          ; 编译为 hello.obj（真机环境要加 coff）
+link hello.obj           ; 链接为 hello.exe
+</code></pre>
+<p>硬盘扇区为 512 字节，读一个扇区跟读 512 字节速度相同，所以段最好是 512 的倍数。MZ 文件头和数据段之间有大块填充空间。可以用 <code>align</code> 设置对齐值。</p>
+<p><strong>栈的设置</strong>：定义栈内容没意义，但栈大小有意义：</p>
+<pre><code>
+link /stack:512 hello.obj  ; 设置栈大小为 512 字节
+</code></pre>
+<p>不自己定义栈时，链接器会把栈自动放在数据段上面（栈向下生长，所以 DS 和 SS 可以指向同一个地址——数据从低地址往高地址用，栈从高地址往低地址用，两者背靠背共享同一段空间），文件会更小更省空间。</p>
+<h3>通过 MZ 头定位 PE 头（完整 C 代码）</h3>
+<pre><code>
+#include &lt;windows.h&gt;
+#include &lt;stdio.h&gt;
+
+void ParsePEFile(unsigned char* fileBuffer) {
+    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)fileBuffer;
+
+    if (pDosHeader-&gt;e_magic != IMAGE_DOS_SIGNATURE) {
+        printf(&quot;Error: 不是有效的 MZ/PE 文件！\n&quot;);
+        return;
+    }
+
+    LONG peHeaderOffset = pDosHeader-&gt;e_lfanew;
+    PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)(fileBuffer + peHeaderOffset);
+
+    if (pNtHeaders-&gt;Signature == IMAGE_NT_SIGNATURE) {
+        printf(&quot;成功找到 PE 头！偏移位置: 0x%X\n&quot;, peHeaderOffset);
+    }
+}
+</code></pre>
+<h2>伪指令专题</h2>
+<p>这几个不是孤立的，它们是一套——<strong>全都是围着 <code>MACRO</code> 转的</strong>。宏是 MASM 里唯一带"控制流"的伪指令机制，这几个就是宏的骨架。</p>
+<h3>先理解宏是什么</h3>
+<p>宏就是<strong>编译期的文本替换 + 简单编程</strong>。你定义一段代码模板，传参数进去，汇编器帮你展开成真实代码。和 C 的 <code>#define</code> 宏是一回事，语法不同而已。</p>
+<pre><code>
+MyMacro MACRO param1, param2
+    ; 这里写模板代码
+ENDM
+</code></pre>
+<p><code>MACRO</code> 开始定义，<code>ENDM</code> 结束定义。这俩是一对，就像 C 的 <code>{ }</code>。</p>
+<h3>六个关键字的角色</h3>
+<p>| 关键字 | 在宏里的角色 | 类比 | |--------|------------|------| | <code>MACRO</code> | 开头，声明宏名和参数 | <code>#define FUNC(x)</code> 的开头 | | <code>ENDM</code> | 结尾 | <code>}</code> 闭合 | | <code>LOCAL</code> | 声明宏内的局部标签 | 函数里的局部变量 | | <code>EXITM</code> | 中途提前退出宏 | <code>return</code> | | <code>GOTO</code> | 在宏内跳转 | <code>goto</code> | | <code>PURGE</code> | 删除已定义的宏 | 取消定义 |</p>
+<h3>MACRO + ENDM（定义宏）</h3>
+<pre><code>
+SaveRegs MACRO
+    push rax
+    push rcx
+    push rdx
+ENDM
+</code></pre>
+<p>之后写 <code>SaveRegs</code>，汇编器就替换成那三条 push。参数也行：</p>
+<pre><code>
+AddConst MACRO reg, val
+    add reg, val
+ENDM
+
+; 调用：AddConst rax, 5  →  展开成 add rax, 5
+</code></pre>
+<p>注意：宏在<strong>编译期</strong>展开，不是运行期调用。每次写一次宏名，就原地展开一份代码。写三次就展开三份——和函数调用不一样，函数只有一份代码。所以宏省了调用开销，但增大代码体积。</p>
+<h3>LOCAL（宏内局部标签）——最容易踩坑的</h3>
+<p>问题场景：宏里有标签，宏被调用多次，标签就会重复定义，编译报错。</p>
+<pre><code>
+; 这个宏有 bug
+AbsVal MACRO reg
+    cmp reg, 0
+    jge positive
+    neg reg
+positive:
+ENDM
+</code></pre>
+<p>调用两次 <code>AbsVal rax</code> / <code>AbsVal rbx</code>，展开后出现两个 <code>positive:</code> 标签——重复定义，报错。</p>
+<p><code>LOCAL</code> 解决这个：</p>
+<pre><code>
+AbsVal MACRO reg
+    LOCAL positive          ; ← 声明局部标签
+    cmp reg, 0
+    jge positive
+    neg reg
+positive:
+ENDM
+</code></pre>
+<p>汇编器每次展开时，会自动给 <code>positive</code> 生成唯一名字（比如 <code>??0000</code>、<code>??0001</code>），不冲突。</p>
+<p><strong>规则</strong>：宏里只要出现标签，一律用 <code>LOCAL</code> 声明。<code>LOCAL</code> 必须紧跟在 <code>MACRO</code> 之后、其他指令之前写。</p>
+<h3>EXITM（提前退出宏）</h3>
+<p>像 <code>return</code>，在宏展开过程中遇到 <code>EXITM</code> 就停止展开，后面的内容不要了。</p>
+<pre><code>
+SafeDiv MACRO a, b
+    IF b EQ 0               ; 如果除数是 0
+        EXITM               ; 不展开后续代码
+    ENDIF
+    mov rax, a
+    mov rcx, b
+    xor rdx, rdx
+    div rcx
+ENDM
+</code></pre>
+<p>常配合条件编译 <code>IF</code>/<code>ENDIF</code> 用，根据参数决定要不要展开整段代码。</p>
+<h3>GOTO（宏内跳转）</h3>
+<p>在宏内部跳到某个 <code>LOCAL</code> 标签。注意：<strong>这个跳转发生在编译期宏展开过程中，不是运行期的跳转</strong>。用途很少，主要是配合 <code>EXITM</code> 做宏内的流程控制，比如根据参数走不同的展开路径。</p>
+<pre><code>
+Choose MACRO n
+    LOCAL skip1, skip2
+    IF n EQ 1
+        GOTO skip1
+    ENDIF
+    ; n!=1 时展开的代码
+    EXITM
+skip1:
+    ; n==1 时展开的代码
+ENDM
+</code></pre>
+<p><code>GOTO</code> 在宏里属于冷门功能，多数人写宏一辈子都用不到它，<code>IF/ELSE/ENDIF</code> 加 <code>EXITM</code> 就够控制流程了。</p>
+<h3>PURGE（删除宏）</h3>
+<p>取消一个已定义的宏，之后不能再调用它。</p>
+<pre><code>
+SaveRegs MACRO
+    push rax
+ENDM
+
+SaveRegs            ; 能用
+
+PURGE SaveRegs      ; 删掉
+
+SaveRegs            ; 报错，未定义
+</code></pre>
+<p>场景很窄，主要用在：同一个宏名在不同阶段需要重新定义，或者防止宏被意外调用。日常几乎不用。</p>
+<h3>宏的一句话总结</h3>
+<ul>
+<li><code>MACRO</code>/<code>ENDM</code> 管定义的起止</li>
+<li><code>LOCAL</code> 管标签冲突（高频，必会）</li>
+<li><code>EXITM</code> 管提前终止展开</li>
+<li><code>GOTO</code> 管编译期流程跳转（冷门）</li>
+<li><code>PURGE</code> 管删除宏定义（冷门）</li>
+</ul>
+<p>实际写宏，<code>MACRO</code>/<code>ENDM</code>/<code>LOCAL</code> 三个是主力，后三个知道存在就行。</p>
+<h3>STRUCT + ENDS（结构体）—— 一对</h3>
+<p>就是 C 的 <code>struct</code>。<code>STRUCT</code> 开头，<code>ENDS</code> 结尾。</p>
+<pre><code>
+Point STRUCT
+    x   DWORD ?
+    y   DWORD ?
+Point ENDS
+</code></pre>
+<p>声明变量：</p>
+<pre><code>
+    p1 Point &lt;10, 20&gt;        ; 初始化 x=10, y=20
+    p2 Point &lt;&gt;              ; 默认值（0）
+</code></pre>
+<p>访问字段用 <code>.</code>：</p>
+<pre><code>
+    mov eax, p1.x            ; 取字段
+    mov p1.y, 99             ; 写字段
+</code></pre>
+<p>和 C 完全一样，字段在内存里顺序排列。<code>ENDS</code> 就是闭合用的，没别的意思。<strong>MASM 里 <code>STRUC</code> 和 <code>STRUCT</code> 是同一个东西</strong>（旧版写 <code>STRUC</code>，新版 <code>STRUCT</code>），闭合都用 <code>ENDS</code>。</p>
+<h3>UNION（联合体）</h3>
+<p>C 的 <code>union</code>，所有字段共享同一段内存，大小取最大那个。</p>
+<pre><code>
+Value UNION
+    b   BYTE ?
+    w   WORD ?
+    d   DWORD ?
+Value ENDS
+</code></pre>
+<p><code>Value</code> 大小是 4 字节（最大字段 d）。<code>b</code>/<code>w</code>/<code>d</code> 都从同一地址开始，改一个就影响全部。</p>
+<pre><code>
+    v Value &lt;&gt;
+    mov v.d, 0x12345678
+    mov al, v.b              ; al = 0x78，小端最低字节
+</code></pre>
+<p>用法和 C union 一模一样。</p>
+<h3>RECORD（位域）</h3>
+<p>C 里没有直接对应（C 的位域是 <code>struct</code> 里写 <code>:n</code>），MASM 单独给了个伪指令。用来<strong>把多个小字段塞进一个整数里</strong>。</p>
+<pre><code>
+; 把一个 BYTE 拆成三段
+Color RECORD
+    red   3:?,        ; 3 bits
+    green 3:?,        ; 3 bits
+    blue  2:?         ; 2 bits
+</code></pre>
+<p>初始化时按位填：</p>
+<pre><code>
+    c Color &lt;5, 2, 1&gt;         ; red=5, green=2, blue=1
+</code></pre>
+<p>MASM 会自动帮你做位拼接和掩码，访问字段时生成带掩码的 shift 指令。</p>
+<p><code>RECORD</code> 在实际写汇编时很少用，多数人直接手动 shift/and/or 处理位域更直观。属于"知道存在就行，用的时候再查"的东西。</p>
+<h3>TYPEDEF（类型别名）</h3>
+<p>就是 C 的 <code>typedef</code>。给已有类型起个新名字。</p>
+<pre><code>
+    LPFN TYPEDEF PTR DWORD      ; LPFN = 指向 DWORD 的指针
+    HANDLE TYPEDEF DWORD        ; HANDLE = DWORD 的别名
+</code></pre>
+<p>之后可以当类型用：</p>
+<pre><code>
+    h HANDLE ?
+    p LPFN ?
+</code></pre>
+<p>Win32 汇编里特别常见——Win32 API 的类型名（<code>HANDLE</code>、<code>LPVOID</code>、<code>LPCSTR</code>）在 C 里是 typedef，到了汇编就得用 <code>TYPEDEF</code> 重新定义一遍。</p>
+<h3>类型定义速记对照</h3>
+<p>| MASM | C 语言 | 用途 | |------|--------|------| | <code>STRUCT</code>/<code>ENDS</code> | <code>struct</code> | 定义结构体 | | <code>UNION</code> | <code>union</code> | 定义联合体 | | <code>RECORD</code> | 位域 | 位字段打包 | | <code>TYPEDEF</code> | <code>typedef</code> | 类型起别名 |</p>
+<p>核心就 <code>STRUCT</code>/<code>UNION</code>/<code>TYPEDEF</code> 三个，和 C 完全对应。<code>RECORD</code> 冷门，了解即可。</p>
+<h3>ASSUME</h3>
+<p><code>ASSUME</code> 是 MASM 伪指令，有点特殊——它<strong>不生成任何代码</strong>，纯粹是"告诉汇编器一声"：接下来，段寄存器 X 关联的是 Y 段/类型。汇编器知道了这个，才能帮你做字段偏移计算和类型检查。</p>
+<p>最经典的场景是配合段使用：</p>
+<pre><code>
+ASSUME DS:DATA        ; 告诉汇编器：DS 现在指向 DATA 段
+</code></pre>
+<p>之后你写 <code>mov eax, var</code>，汇编器就知道 <code>var</code> 在 DS 指向的段里，能算出正确偏移。</p>
+<p><strong>为什么感觉"没用"</strong>：在<strong>简化段模型</strong>（<code>.model flat</code> / <code>.data</code> / <code>.code</code>）下，MASM 自动帮你 <code>ASSUME</code> 好了，根本不用手写。现代 Win32 汇编几乎全是 flat 模式，所以 <code>ASSUME</code> 基本不出现。它真正活跃的地方是<strong>完整段定义</strong>（<code>SEGMENT</code>/<code>ENDS</code>）和老式 16 位 DOS 汇编，那里段寄存器要手动管，必须 <code>ASSUME</code> 告诉汇编器当前状态。</p>
+<p><strong>另一个常见用途：给寄存器套类型</strong>——让汇编器把某个寄存器当成结构体指针：</p>
+<pre><code>
+ASSUME ecx:PTR Point      ; 告诉汇编器：把 ecx 当 Point 结构体指针
+mov eax, [ecx].x          ; 现在能直接用 .x 访问字段
+mov [ecx].y, 99
+ASSUME ecx:NOTHING        ; 用完取消，别让汇编器继续误判
+</code></pre>
+<p>不写 <code>ASSUME</code> 的话，<code>[ecx].x</code> 会报错——汇编器不知道 ecx 指向什么类型，没法算 <code>.x</code> 的偏移。</p>
+<p>关键点：用完一定要 <code>ASSUME ecx:NOTHING</code> 取消，否则后面 ecx 被当成别的用途时汇编器会报类型错误。这是它唯一的实际用途。</p>
+<p><strong>关于结构体传参</strong>：局部变量可以直接访问结构体成员；全局变量和参数不可以，必须用 ASSUME。所以一般函数参数不喜欢传结构体，不如直接传指针。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

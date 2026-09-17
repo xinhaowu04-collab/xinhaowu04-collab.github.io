@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8086 寻址方式与数据传送指令 · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">8086 寻址方式与数据传送指令</h1>
+<div class="meta"><span class="cat">16 位汇编</span></div>
+<article>
+<h1>8086 寻址方式与数据传送指令</h1>
+<p>寻址方式是 CPU 如何找到操作数的方式。8086 共有 7 种寻址方式，从最快的寄存器寻址到最慢的相对基址变址寻址。数据传送指令是 8086 117 条指令中最基础的一组，用于在寄存器、内存和立即数之间搬运数据。</p>
+<h2>指令队列缓冲器与立即数高效的原因</h2>
+<p>8086 CPU 内部的 BIU（总线接口单元）维护一个 6 字节指令队列缓冲器：</p>
+<ul>
+<li>只要队列未满，BIU 就持续从内存预取指令字节填充队列</li>
+<li>EU（执行单元）从队列头部取指并执行，BIU 并行继续取指，形成流水线效果</li>
+<li><strong>立即数</strong>作为指令编码的一部分，跟随操作码一起被预取进队列，执行时<strong>无需额外访问内存</strong>——这正是立即数寻址高效的根本原因</li>
+</ul>
+<p>对比：内存寻址需要 EU 执行期间再次发起内存读取（8 + EA 个时钟周期），立即数寻址仅需 4 个时钟周期。</p>
+<h2>七种寻址方式</h2>
+<h3>1. 立即数寻址</h3>
+<pre><code>
+MOV AX, 1234H      ; 4 个时钟周期
+MOV CL, 2          ; 4 个时钟周期
+</code></pre>
+<ul>
+<li>操作数直接编码在指令码中，随指令预取进队列缓冲器</li>
+<li>最快的内存无关寻址方式（仅次于寄存器寻址）</li>
+<li>只能作为源操作数，不能作为目的操作数</li>
+</ul>
+<h3>2. 寄存器寻址</h3>
+<pre><code>
+MOV AX, BX         ; 2 个时钟周期
+</code></pre>
+<ul>
+<li>操作数在 CPU 内部寄存器中，无需访问内存总线</li>
+<li><strong>最快的寻址方式</strong></li>
+<li>技巧：用 <code>SUB BX, BX</code> 清零比 <code>MOV BX, 0</code> 既省编码字节（2B vs 3B），又省时钟周期（3 vs 4）</li>
+</ul>
+<h3>3. 直接寻址</h3>
+<pre><code>
+MOV AX, WORD PTR [1000H]   ; 总时钟 8+6 = 14
+</code></pre>
+<ul>
+<li>EA 就是指令中给出的 16 位位移量，无寄存器参与</li>
+<li>编译器和程序员通常用符号标号代替硬编码地址</li>
+</ul>
+<h3>4. 寄存器间接寻址</h3>
+<pre><code>
+MOV AX, [BX]    ; 8+5 = 13 个时钟周期
+MOV AX, [BP]    ; 8+5 = 13
+MOV AX, [SI]    ; 8+5 = 13
+MOV AX, [DI]    ; 8+5 = 13
+</code></pre>
+<ul>
+<li>只能使用四个寄存器：BX、BP、SI、DI</li>
+<li>默认段寄存器：BX/SI/DI → DS；BP → SS（BP 常用于访问堆栈帧）</li>
+<li><code>[BX]</code> 相当于 C 语言的 <code>*ptr</code>；BX 是循环变量且每次递增时，是在遍历数组</li>
+</ul>
+<h3>5. 寄存器相对寻址</h3>
+<pre><code>
+MOV AX, [BX + 10H]    ; 8+9 = 17 个时钟周期（d8）
+MOV AX, [SI + 200H]   ; 8+9 = 17 个时钟周期（d16）
+</code></pre>
+<ul>
+<li>EA = 寄存器 + 8位或16位位移量</li>
+<li>常用于访问结构体字段或数组元素（寄存器做基地址，位移做偏移）</li>
+</ul>
+<h3>6. 基址变址寻址</h3>
+<pre><code>
+MOV AX, [BX + SI]    ; 8+7 = 15 个时钟周期（优先组合）
+MOV AX, [BP + DI]    ; 8+7 = 15
+MOV AX, [BP + SI]    ; 8+8 = 16（次优组合）
+MOV AX, [BX + DI]    ; 8+8 = 16
+</code></pre>
+<ul>
+<li>EA = 基址寄存器（BX/BP）+ 变址寄存器（SI/DI）</li>
+<li>优先使用 BX+SI 或 BP+DI，可少用 1 个时钟周期</li>
+<li>适用于二维数组或跨段数组访问（一个寄存器做行基址，另一个做列索引）</li>
+</ul>
+<h3>7. 相对基址变址寻址</h3>
+<pre><code>
+MOV AX, [BX + SI + 10H]    ; 8+11 = 19 个时钟周期
+MOV AX, [BP + DI + 200H]   ; 8+11 = 19
+MOV AX, [BP + SI + 10H]    ; 8+12 = 20
+MOV AX, [BX + DI + 200H]   ; 8+12 = 20
+</code></pre>
+<ul>
+<li>EA = 基址 + 变址 + 位移量，三者相加</li>
+<li>最灵活但也最慢的内存寻址方式</li>
+<li>常见场景：结构体数组（BX = 数组基址，SI = 元素索引，d = 字段偏移）</li>
+</ul>
+<h2>EA 计算周期</h2>
+<p>访问内存需要计算有效地址（EA），物理地址 = 段寄存器 × 16 + EA。总时钟 = 8 + EA 计算时钟（额外的 8 个周期用于总线传输）。</p>
+<p>| EA 组成 | 可用寄存器组合 | EA 计算时钟 | |---------|--------------|------------| | 仅位移量 | — | 6 | | 仅基址或变址 | BX, BP, SI, DI | 5 | | 位移量 + 基址/变址 | BX+d, BP+d, SI+d, DI+d | 9 | | 基址 + 变址（优先组合） | BP+DI, BX+SI | 7 | | 基址 + 变址（次优组合） | BP+SI, BX+DI | 8 | | 位移量 + 基址 + 变址（优先） | BP+DI+d, BX+SI+d | 11 | | 位移量 + 基址 + 变址（次优） | BP+SI+d, BX+DI+d | 12 |</p>
+<p><strong>为什么 BP+DI / BX+SI 比 BP+SI / BX+DI 快 1 个周期？</strong></p>
+<p>8086 内部有两条 EA 加法路径：BX/BP 走一条，SI/DI 走另一条。BP+DI 和 BX+SI 恰好各走一条路径，可以并行计算；BP+SI 和 BX+DI 的两个寄存器共享同一条路径，需要串行，多花 1 个周期。</p>
+<h2>寻址方式性能排名（由快到慢）</h2>
+<p>| 排名 | 寻址方式 | 典型总时钟 | |------|---------|-----------| | 1 | 寄存器寻址 | 2 | | 2 | 立即数寻址 | 4 | | 3 | 寄存器间接寻址 | 13（8+5） | | 4 | 内存直接寻址 | 14（8+6） | | 5 | 基址变址寻址 | 15~16（8+7/8） | | 6 | 寄存器相对寻址 | 17（8+9） | | 7 | 相对基址变址寻址 | 19~20（8+11/12） |</p>
+<p>编程技巧：</p>
+<ul>
+<li>尽可能把热点数据放在寄存器中</li>
+<li>清零寄存器用 <code>SUB BX, BX</code>，批量清零多个寄存器比逐个 <code>MOV AX, 0</code> 更紧凑</li>
+<li>基址+变址组合优先 BX+SI 或 BP+DI，少用 1 个周期</li>
+</ul>
+<h2>操作数分类</h2>
+<p>| 角色 | 允许的寻址方式 | |------|--------------| | 源操作数 | 寄存器、内存、立即数 | | 目的操作数 | 寄存器、内存（<strong>不能是立即数</strong>） |</p>
+<h2>MOV 指令</h2>
+<h3>时钟周期表</h3>
+<p>| 操作数组合 | 时钟周期 | 总线传输次数 | 指令字节数 | 示例 | |-----------|---------|------------|----------|------| | memory ← accumulator | 10 | 1 | 3 | <code>MOV ARRAY[SI], AL</code> | | accumulator ← memory | 10 | 1 | 3 | <code>MOV AX, TEMP_RESULT</code> | | register ← register | 2 | — | 2 | <code>MOV AX, CX</code> | | register ← memory | 8+EA | 1 | 2~4 | <code>MOV BP, STACK_TOP</code> | | memory ← register | 9+EA | 1 | 2~4 | <code>MOV COUNT[DI], CX</code> | | register ← immediate | 4 | — | 2~3 | <code>MOV CL, 2</code> | | memory ← immediate | 10+EA | 1 | 3~6 | <code>MOV MASK[BX][SI], 2CH</code> | | seg-reg ← reg16 | 2 | — | 2 | <code>MOV ES, CX</code> | | seg-reg ← mem16 | 8+EA | 1 | 2~4 | <code>MOV DS, SEGMENT_BASE</code> | | reg16 ← seg-reg | 2 | — | 2 | <code>MOV BP, SS</code> | | memory ← seg-reg | 9+EA | 1 | 2~4 | <code>MOV [BX].SEG_SAVE, CS</code> |</p>
+<h3>MOV 的五条限制</h3>
+<p>1. 位宽必须一致 2. 不能内存 → 内存 3. 段寄存器不能直接赋立即数（必须先 MOV 到通用寄存器再转） 4. 段寄存器之间不能直接传送（<code>MOV DS, ES</code> 非法，需中转） 5. CS 不能作为目的操作数</p>
+<h2>XCHG — 交换</h2>
+<pre><code>
+XCHG AX, BX        ; 寄存器 ↔ 寄存器
+XCHG AX, [1000H]   ; 寄存器 ↔ 内存
+</code></pre>
+<ul>
+<li>CPU 内部使用<strong>临时寄存器</strong>完成三步交换，无需程序员显式中转</li>
+<li>不支持内存 ↔ 内存</li>
+<li>与累加器（AX/AL）交换时编码更短，快 1 个时钟周期（利用专用单字节操作码）</li>
+</ul>
+<p>常见于数据置换/重排（加密算法的数据置换、字节序转换）：</p>
+<pre><code>
+XCHG AL, AH        ; 交换高低字节（字节序转换）
+XCHG AX, BX        ; 交换寄存器值，无需临时变量
+</code></pre>
+<h2>XLAT — 查表转换</h2>
+<pre><code>
+; 前置：BX = 表基地址，AL = 表内索引
+XLAT               ; 无显式操作数，11 个时钟周期
+</code></pre>
+<p>执行效果：<code>AL ← DS:[BX + AL]</code></p>
+<ul>
+<li>隐含操作数：BX（表头）、AL（偏移），结果写回 AL</li>
+<li>典型应用：字符编码转换、查 sin/cos 近似表、七段码转换</li>
+<li>只能访问 DS 段（可通过段超越前缀修改为其他段，如 <code>ES: XLAT</code>）</li>
+<li>表最大 256 字节（AL 最大 0xFF）</li>
+</ul>
+<pre><code>
+; 将 ASCII 码通过查表转为七段码
+MOV BX, TABLE      ; BX = 七段码表基址
+MOV AL, &#x27;A&#x27;        ; AL = 要转换的字符
+XLAT               ; AL = 七段码表中 &#x27;A&#x27; 对应的值
+</code></pre>
+<h2>PUSH / POP</h2>
+<pre><code>
+PUSH AX         ; SP ← SP-2；[SS:SP] ← AX
+POP  BX         ; BX ← [SS:SP]；SP ← SP+2
+</code></pre>
+<ul>
+<li>8086 堆栈以<strong>字（16 位）</strong>为单位操作，SP 每次变化 ±2</li>
+<li>堆栈<strong>向低地址方向增长</strong>（PUSH 时 SP 先减再写，POP 时先读再加）</li>
+<li>可操作：通用寄存器、段寄存器（CS 可 PUSH 但<strong>不能 POP CS</strong>）、内存</li>
+</ul>
+<p>保存和恢复寄存器：</p>
+<pre><code>
+PUSH AX          ; 保存 AX 到栈
+PUSH BX          ; 保存 BX 到栈
+; ... 中间代码可能修改 AX、BX ...
+POP BX           ; 恢复 BX
+POP AX           ; 恢复 AX（后进先出，恢复顺序与压栈相反）
+</code></pre>
+<h2>LAHF / SAHF / PUSHF / POPF — 标志位传送</h2>
+<p>| 指令 | 方向 | 说明 | |------|------|------| | <code>LAHF</code> | FLAGS低8位 → AH | 读取 SF/ZF/AF/PF/CF | | <code>SAHF</code> | AH → FLAGS低8位 | 手动设置标志位 | | <code>PUSHF</code> | FLAGS → 栈 | 保存 16 位标志寄存器 | | <code>POPF</code> | 栈 → FLAGS | 恢复标志寄存器 |</p>
+<pre><code>
+; 在修改标志位之前保存状态
+PUSHF              ; 保存当前 FLAGS 到栈
+; ... 中间代码可能修改标志位 ...
+POPF               ; 恢复原始 FLAGS
+</code></pre>
+<p>注意：</p>
+<ul>
+<li>POPF 可以修改大多数标志位，但 <strong>IF 在某些保护模式权限级别下不可修改</strong>（实模式下可以；保护模式下 CPL 高于 IOPL 时修改 IF 会被忽略），TF 等也有限制</li>
+<li><code>LAHF</code> + <code>SAHF</code> 是更轻量的替代（只操作低 8 位，不访问内存）</li>
+<li>PUSHF/POPF 配对常见于中断处理程序或需要临时修改标志位但不影响调用者的代码</li>
+</ul>
+<h2>LEA — 加载有效地址</h2>
+<pre><code>
+LEA BX, [SI + 10H]   ; BX ← SI+10H（地址值本身，不是该地址的内容）
+</code></pre>
+<ul>
+<li>与 <code>MOV BX, OFFSET label</code> 语义相近，但 LEA 可用于含寄存器的动态地址</li>
+<li>常见用途：计算数组元素地址、初始化指针寄存器</li>
+<li>LEA 可以在不改变标志位的情况下做加法：</li>
+</ul>
+<pre><code>
+LEA AX, [BX + SI]    ; AX = BX + SI（不影响标志位）
+; 注意：8086 中基址只能是 BX/BP，变址只能是 SI/DI，CX 不能用于内存寻址
+</code></pre>
+<p>LEA 不一定是取地址——操作数不是地址时，它就是在做加法。</p>
+<h2>LDS / LES — 加载远指针</h2>
+<pre><code>
+LDS SI, [BX]    ; SI ← [BX]（偏移地址），DS ← [BX+2]（段地址）
+LES DI, [BX]    ; DI ← [BX]，ES ← [BX+2]
+</code></pre>
+<ul>
+<li>从内存中一次性加载 32 位远指针（16 位偏移 + 16 位段地址）</li>
+<li>LDS 将段地址存入 DS，LES 将段地址存入 ES</li>
+<li>用于切换数据段或访问跨段数据结构</li>
+</ul>
+<pre><code>
+LDS SI, FAR_PTR   ; SI = 偏移，DS = 段地址
+MOV AX, [SI]      ; 访问远指针指向的数据（此时 DS 已被修改）
+</code></pre>
+<p>注意：LDS 会修改 DS，影响后续所有数据访问。使用 LDS 后如果需要恢复原 DS，必须提前保存。32 位保护模式下 LDS/LES 被废弃，看到它们说明是 16 位代码。</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>
