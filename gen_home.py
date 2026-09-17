@@ -2,6 +2,7 @@
 """按修改时间重建首页知识库橱窗：最新更新的 4 篇笔记排最前。
 用法：python gen_home.py（在 gen_notes.py 之后运行）
 """
+import datetime
 import os
 import re
 
@@ -43,6 +44,16 @@ def main():
 
     idx = open(os.path.join(SITE, "index.html"), encoding="utf-8").read()
     new_idx = re.sub(r'<section id="notes">.*?</section>', lambda _: block, idx, count=1, flags=re.S)
+    # 年度统计：笔记总数 + 当前月份
+    total = len([f for f in os.listdir(NOTES) if f.endswith(".html")])
+    month = datetime.datetime.now().month
+    stat = '<div class="yearstat">2026 \u00b7 已写 <b>%d</b> 篇 \u00b7 更新于 %d 月</div>' % (total, month)
+    new_idx = re.sub(r'<div class="yearstat">.*?</div>', lambda _: stat, new_idx, count=1)
+    # 年度统计：笔记总数 + 当前月份
+    total = len([f for f in os.listdir(NOTES) if f.endswith(".html")])
+    month = datetime.datetime.now().month
+    stat = '<div class="yearstat">2026 · 已写 <b>%d</b> 篇 · 更新于 %d 月</div>' % (total, month)
+    new_idx = re.sub(r'<div class="yearstat">.*?</div>', lambda _: stat, new_idx, count=1)
     open(os.path.join(SITE, "index.html"), "w", encoding="utf-8").write(new_idx)
     for _, f, title, cat in top:
         print("  [%s] %s" % (cat, title))
