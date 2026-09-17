@@ -165,6 +165,25 @@ section { padding: 44px 0 10px; }
 
 footer { text-align: center; padding: 56px 0 42px; color: var(--dim); font-size: 13px; line-height: 2.1; }
 footer .paw { font-size: 16px; }
+/* 书单进度条 + 项目迷你卡 + 实战预告 + 年度统计 */
+.bookbar { display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:16px 20px; box-shadow:var(--shadow); text-decoration:none; color:var(--text); transition:all .25s; }
+.bookbar:hover { transform:translateY(-2px); border-color:rgba(240,143,183,.45); }
+.bookbar .t { font-size:15px; font-weight:600; white-space:nowrap; }
+.bookbar .bar { flex:1; height:8px; border-radius:99px; background:rgba(240,143,183,.15); overflow:hidden; }
+.bookbar .bar i { display:block; height:100%; width:10%; border-radius:99px; background:linear-gradient(90deg,var(--pink),var(--blue)); }
+.bookbar .n { font-family:Consolas,monospace; font-size:12px; color:var(--dim); white-space:nowrap; }
+.field-soon { display:block; text-decoration:none; color:var(--text); padding:13px 6px; border-bottom:1px solid var(--border); opacity:.6; transition:opacity .2s; }
+.field-soon:hover { opacity:1; }
+.field-soon .t { font-size:15px; font-weight:500; }
+.field-soon .m { display:block; margin-top:3px; color:var(--dim); font-size:12px; }
+.mini { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:620px) { .mini { grid-template-columns:1fr; } }
+.mini .card { padding:18px 20px; }
+.mini .card .st { font-size:11px; padding:2px 10px; border-radius:999px; margin-left:8px; }
+.mini .card .st.done { color:#3d8b5f; background:rgba(123,199,150,.14); }
+.mini .card .st.wip { color:var(--pink-deep); background:rgba(240,143,183,.12); }
+.yearstat { text-align:center; margin-top:40px; color:var(--dim); font-size:13px; font-family:Consolas,monospace; }
+.yearstat b { color:var(--pink-deep); font-size:16px; }
 * { cursor:none !important; }
 #cursor-ring { display:none !important; }
 #cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none;
@@ -195,35 +214,38 @@ footer .paw { font-size: 16px; }
   <div class="motto rv">「当第一层壳被撕开时，我们才刚刚开始理解这个程序。」</div>
 </section>
 
-<section id="now">
-  <div class="sec-h"><h2>现在</h2><span>/ now</span></div>
-  <div class="reading">
-    <div class="read-card">
-      <div class="k">当前在读</div>
-      <div class="v">软件调试 卷 2 · Windows 核心编程<br><a href="books.html" style="color:var(--pink-deep);font-size:13px;text-decoration:none">查看完整书单（10 本）→</a></div>
-    </div>
-    <div class="read-card">
-      <div class="k">正在折腾</div>
-      <div class="v">手写 <em>PE 解析器</em><br>结业前啃下 <em>WinAFL</em></div>
-    </div>
-    <div class="read-card">
-      <div class="k">这里有什么</div>
-      <div class="stats">
-        <div class="stat"><div class="n">10+</div><div class="l">笔记</div></div>
-        <div class="stat"><div class="n">6</div><div class="l">项目</div></div>
-        <div class="stat"><div class="n">3</div><div class="l">个月在逆向</div></div>
-      </div>
-    </div>
-  </div>
-</section>
-
 <section id="notes">
-  <div class="sec-h"><h2>最新笔记</h2><span>/ recent</span></div>
+  <div class="sec-h"><h2>笔记</h2><span>/ notes</span></div>
   <a class="recent" href="notes/c-re-01.html"><span class="num">01</span><span class="t">手动寻找 main 的三种课堂方法</span><span class="m">知识库 · C 逆向</span></a>
   <a class="recent" href="notes/c-re-10.html"><span class="num">02</span><span class="t">浮点与 SIMD</span><span class="m">知识库 · C 逆向</span></a>
   <a class="recent" href="notes/c-re-08.html"><span class="num">03</span><span class="t">病毒分析</span><span class="m">知识库 · C 逆向</span></a>
   <a class="recent" href="notes/c-re-06.html"><span class="num">04</span><span class="t">SWITCH</span><span class="m">知识库 · C 逆向</span></a>
   <a class="more-link" href="notes.html">查看全部笔记 →</a>
+</section>
+
+<section id="field">
+  <div class="sec-h"><h2>实战</h2><span>/ field</span></div>
+  <a class="field-soon" href="shizhan.html"><span class="t">从三款开源工具看 CodeBuddy 的认证体系：一次 OAuth 逆向实录</span><span class="m">写作中 · 逆向实录</span></a>
+  <a class="field-soon" href="shizhan.html"><span class="t">我亲手清掉了一个 VT 查杀率 1/61 的 RAT</span><span class="m">写作中 · 应急响应</span></a>
+  <a class="more-link" href="shizhan.html">实战文章 →</a>
+</section>
+
+<section id="proj">
+  <div class="sec-h"><h2>项目</h2><span>/ projects</span></div>
+  <div class="mini">
+    <div class="card"><h3>🐱 CodeBuddy 猫窝<span class="st done">已完成</span></h3><p>多账号自动任务管家：签到、猫猫旅行、连登兑换抽奖全自动。</p></div>
+    <div class="card"><h3>🧭 PE Inspector<span class="st wip">开发中</span></h3><p>手写 PE 解析器：区段/导入导出/重定位，熵值识别加壳。</p></div>
+  </div>
+  <a class="more-link" href="projects.html">全部项目 →</a>
+</section>
+
+<section id="books">
+  <div class="sec-h"><h2>书单</h2><span>/ books</span></div>
+  <a class="bookbar" href="books.html">
+    <span class="t">在读《0day 安全》</span>
+    <span class="bar"><i></i></span>
+    <span class="n">1/10</span>
+  </a>
 </section>
 
 <section id="daily">
@@ -233,6 +255,13 @@ footer .paw { font-size: 16px; }
   <a class="daily-prev" href="daily.html"><div class="w">2026-09-16 · 下午</div><div class="c">「猫窝」v2 发布：签到 + 猫猫旅行 + 连登兑换抽奖全自动。22 个号首跑零失败。</div></a>
   <a class="more-link" href="daily.html">全部日常 →</a>
 </section>
+
+<section id="letters">
+  <div class="sec-h"><h2>来信</h2><span>/ letters</span></div>
+  <a class="daily-prev" href="letters.html"><div class="c" style="text-align:center;color:var(--dim)">留言墙已开放，来留下你的印记 🌸</div></a>
+</section>
+
+<div class="yearstat">2026 · 已写 <b>11</b> 篇 · 更新于 9 月</div>
 
 <div class="hitokoto">
   <div id="hito-text">「……」</div>

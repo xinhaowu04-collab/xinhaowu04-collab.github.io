@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>0xL · 逆向练习生</title>
+<link>https://xinhaowu04-collab.github.io</link>
+<description>二进制世界的探险笔记</description>
+<language>zh-CN</language>
+<lastBuildDate>Thu, 17 Sep 2026 09:28:49 +0800</lastBuildDate>
+<item><title>手动寻找 main 的三种课堂方法</title><link>https://xinhaowu04-collab.github.io/notes/c-re-01.html</link></item>
+<item><title>除法的基本定义</title><link>https://xinhaowu04-collab.github.io/notes/c-re-02.html</link></item>
+<item><title>无符号除为非 2 的幂常量</title><link>https://xinhaowu04-collab.github.io/notes/c-re-03.html</link></item>
+<item><title>取模</title><link>https://xinhaowu04-collab.github.io/notes/c-re-04.html</link></item>
+<item><title>三目操作符</title><link>https://xinhaowu04-collab.github.io/notes/c-re-05.html</link></item>
+<item><title>SWITCH</title><link>https://xinhaowu04-collab.github.io/notes/c-re-06.html</link></item>
+<item><title>位操作</title><link>https://xinhaowu04-collab.github.io/notes/c-re-07.html</link></item>
+<item><title>病毒分析</title><link>https://xinhaowu04-collab.github.io/notes/c-re-08.html</link></item>
+<item><title>变量</title><link>https://xinhaowu04-collab.github.io/notes/c-re-09.html</link></item>
+<item><title>浮点与SIMD</title><link>https://xinhaowu04-collab.github.io/notes/c-re-10.html</link></item>
+<item><title>实战文章写作模板</title><link>https://xinhaowu04-collab.github.io/notes/tpl-实战写作模板.html</link></item>
+</channel>
+</rss>
