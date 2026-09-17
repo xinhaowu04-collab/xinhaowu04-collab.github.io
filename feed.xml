@@ -5,7 +5,7 @@
 <link>https://xinhaowu04-collab.github.io</link>
 <description>二进制世界的探险笔记</description>
 <language>zh-CN</language>
-<lastBuildDate>Thu, 17 Sep 2026 15:46:53 +0800</lastBuildDate>
+<lastBuildDate>Thu, 17 Sep 2026 16:05:07 +0800</lastBuildDate>
 <item><title>8086 基础与体系结构</title><link>https://xinhaowu04-collab.github.io/notes/asm16-01-基础与体系结构.html</link></item>
 <item><title>8086 寻址方式与数据传送指令</title><link>https://xinhaowu04-collab.github.io/notes/asm16-02-寻址与数据传送.html</link></item>
 <item><title>程序结构与系统</title><link>https://xinhaowu04-collab.github.io/notes/asm16-03-程序结构与系统.html</link></item>
@@ -41,7 +41,7 @@
 <item><title>调试器架构与命令实现</title><link>https://xinhaowu04-collab.github.io/notes/dbg-01-调试器架构与命令实现.html</link></item>
 <item><title>断点系统</title><link>https://xinhaowu04-collab.github.io/notes/dbg-02-断点系统.html</link></item>
 <item><title>调试事件循环与单步</title><link>https://xinhaowu04-collab.github.io/notes/dbg-03-调试事件循环与单步.html</link></item>
-<item><title>WanaCry1 样本分析作业（填空式）</title><link>https://xinhaowu04-collab.github.io/notes/fx-病毒分析公式化打法.html</link></item>
+<item><title>病毒分析公式化打法</title><link>https://xinhaowu04-collab.github.io/notes/fx-病毒分析公式化打法.html</link></item>
 <item><title>压缩壳实现</title><link>https://xinhaowu04-collab.github.io/notes/pack-01-压缩壳实现.html</link></item>
 <item><title>脱壳与 IAT 修复</title><link>https://xinhaowu04-collab.github.io/notes/pack-02-脱壳与IAT修复.html</link></item>
 <item><title>VMP 虚拟机分析</title><link>https://xinhaowu04-collab.github.io/notes/pack-03-VMP虚拟机分析.html</link></item>

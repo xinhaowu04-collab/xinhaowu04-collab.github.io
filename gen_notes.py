@@ -162,7 +162,11 @@ def main():
             continue
         md = open(os.path.join(src, fn), encoding="utf-8").read()
         num = fn[:-3]
-        title = get_title(md, "%s %s" % (cat, num))
+        # 纯数字文件名取正文首个标题；否则用文件名本身
+        if num.isdigit():
+            title = get_title(md, "%s %s" % (cat, num))
+        else:
+            title = num
         page = "%s-%s.html" % (slug, num)
         with open(os.path.join(outdir, page), "w", encoding="utf-8") as f:
             f.write(TEMPLATE.format(title=title, cat=cat, body=md_to_html(md)))
