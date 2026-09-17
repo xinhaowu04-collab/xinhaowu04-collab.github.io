@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WanaCry1 样本分析作业（填空式） · 0xL</title>
+<script>window.MathJax = { tex: { inlineMath: [['$','$']] } };</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"PingFang SC","Microsoft YaHei",sans-serif; line-height:1.9; }
+.wrap { max-width:760px; margin:0 auto; padding:28px 24px 80px; }
+a.back { color:var(--pink-deep); text-decoration:none; font-size:14px; }
+a.back:hover { text-decoration:underline; }
+h1.title { font-size:26px; margin:18px 0 6px; }
+.meta { color:var(--dim); font-size:13px; margin-bottom:28px; }
+.meta .cat { color:var(--pink-deep); background:rgba(240,143,183,.12); padding:2px 10px; border-radius:999px; }
+article { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:34px 36px; }
+article h1,article h2,article h3,article h4 { margin:1.4em 0 .6em; line-height:1.5; }
+article h1 { font-size:22px } article h2 { font-size:20px } article h3 { font-size:17px } article h4 { font-size:15px; color:var(--pink-deep) }
+article p { margin:.6em 0; }
+article ul,article ol { margin:.6em 0 .6em 1.6em; }
+article code { font-family:Consolas,monospace; font-size:.92em; background:rgba(240,143,183,.1); color:#c2377c; padding:1px 6px; border-radius:6px; }
+article pre { background:#2b2b36; color:#e8e8f0; border-radius:12px; padding:16px 18px; overflow-x:auto; margin:.8em 0; }
+article pre code { background:none; color:inherit; padding:0; }
+article blockquote { border-left:3px solid var(--pink); padding-left:14px; color:var(--dim); margin:.8em 0; }
+article img { max-width:100%; border-radius:12px; }
+article table { border-collapse:collapse; margin:.8em 0; width:100%; }
+article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
+article th { background:rgba(240,143,183,.08); }
+hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
+  background:url("../penguin.png") center/contain no-repeat;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="javascript:history.back()">← 返回</a>
+<h1 class="title">WanaCry1 样本分析作业（填空式）</h1>
+<div class="meta"><span class="cat">实战方法论</span></div>
+<article>
+<h1>WanaCry1 样本分析作业（填空式）</h1>
+<blockquote>用法：按阶段执行，每步做完把结果填进"记录"区。全部填完即报告初稿。</blockquote>
+<blockquote>纪律：不运行样本；每步达到"通过标准"再进下一步；卡住报"步骤号+现象"求提示。</blockquote>
+<hr>
+<h2>阶段 0｜建档（不开 IDA）</h2>
+<ul>
+<li>[ ] 0.1 算哈希</li>
+</ul>
+<ul>
+<li>[ ] 0.2 DIE：架构/子系统/编译器指纹/壳/熵</li>
+</ul>
+<ul>
+<li>[ ] 0.3 节表，标记异常节</li>
+</ul>
+<p><strong>通过标准</strong>：能说出"几位、GUI还是CUI、什么编译器、有没有壳、哪个节可疑"</p>
+<h3>记录</h3>
+<ul>
+<li>MD5：</li>
+</ul>
+<ul>
+<li>SHA256：</li>
+</ul>
+<ul>
+<li>格式/位数/子系统：</li>
+</ul>
+<ul>
+<li>DIE 编译器指纹：</li>
+</ul>
+<ul>
+<li>是否加壳 / 熵：</li>
+</ul>
+<ul>
+<li>节表（名称+大小）：</li>
+</ul>
+<ul>
+<li>可疑节及理由：</li>
+</ul>
+<ul>
+<li>时间戳与来头推测：</li>
+</ul>
+<hr>
+<h2>阶段 1｜字符串情报</h2>
+<ul>
+<li>[ ] 1.1 IDA 加载，Shift+F12</li>
+</ul>
+<ul>
+<li>[ ] 1.2 Ctrl+F 下钩：<code>@</code> <code>http</code> <code>.exe</code> <code>.bmp</code> <code>.txt</code> <code>.doc</code> <code>.zip</code> <code>cmd</code> <code>.dll</code> <code>Software\</code></li>
+</ul>
+<ul>
+<li>[ ] 1.3 命中分类：展示面 / 动作面</li>
+</ul>
+<ul>
+<li>[ ] 1.4 动作面字符串逐个 X，记录引用函数</li>
+</ul>
+<p><strong>通过标准</strong>：初步定性 + 拿到 1~2 个核心函数候选</p>
+<h3>记录</h3>
+<ul>
+<li>展示面字符串（地址+内容）：</li>
+</ul>
+<ul>
+<li>动作面字符串（地址+内容）：</li>
+</ul>
+<ul>
+<li>初步定性结论：</li>
+</ul>
+<ul>
+<li>核心函数候选（字符串 → X → 函数地址）：</li>
+</ul>
+<hr>
+<h2>阶段 2｜导入表推理</h2>
+<ul>
+<li>[ ] 2.1 Imports 按 DLL 分组通读</li>
+</ul>
+<ul>
+<li>[ ] 2.2 标行为类别</li>
+</ul>
+<ul>
+<li>[ ] 2.3 异常检测：该有的没有 → 记疑点</li>
+</ul>
+<p><strong>通过标准</strong>：行为假设清单 + 至少一个疑点</p>
+<h3>记录</h3>
+<ul>
+<li>导入表要点（按 DLL）：</li>
+</ul>
+<ul>
+<li>行为假设（它能干什么）：</li>
+</ul>
+<ul>
+<li>疑点（该有的没有）：</li>
+</ul>
+<ul>
+<li>由疑点产生的假设：</li>
+</ul>
+<hr>
+<h2>阶段 3｜主流程</h2>
+<ul>
+<li>[ ] 3.1 入口认 CRT 序列，定位 WinMain</li>
+</ul>
+<ul>
+<li>[ ] 3.2 从核心候选 X 向上爬，沿途改名</li>
+</ul>
+<ul>
+<li>[ ] 3.3 爬到驱动源</li>
+</ul>
+<ul>
+<li>[ ] 3.4 判触发方式（CreateThread/SetTimer/消息）</li>
+</ul>
+<p><strong>通过标准</strong>：画出"入口 → 触发点 → 行为函数"链 + 回答自动跑还是事件触发</p>
+<h3>记录</h3>
+<ul>
+<li>WinMain 位置及判据：</li>
+</ul>
+<ul>
+<li>调用链（自下而上，地址+函数名）：</li>
+</ul>
+<ul>
+<li>触发方式及证据：</li>
+</ul>
+<ul>
+<li>主流程链（图或文字）：</li>
+</ul>
+<hr>
+<h2>阶段 4｜算法解剖</h2>
+<ul>
+<li>[ ] 4.1 找 IO 锚点</li>
+</ul>
+<ul>
+<li>[ ] 4.2 还原数据变换</li>
+</ul>
+<ul>
+<li>[ ] 4.3 一句话算法 + 可逆性</li>
+</ul>
+<p><strong>通过标准</strong>：能写逆运算</p>
+<h3>记录</h3>
+<ul>
+<li>IO 锚点（读/写/改名在哪）：</li>
+</ul>
+<ul>
+<li>变换细节（读多少、改什么、怎么写回）：</li>
+</ul>
+<ul>
+<li>一句话算法：</li>
+</ul>
+<ul>
+<li>可逆性与依据：</li>
+</ul>
+<hr>
+<h2>阶段 5｜装甲识别（穿插进行）</h2>
+<p><strong>症状处方</strong>：F5 鬼画符→Tab；call 寄存器→找 mov reg,offset；jmp [地址]→双击看表；导入干净+字符串有API名→X 字符串找解析器；数据无 xref→想[基址+偏移]</p>
+<h3>记录</h3>
+<ul>
+<li>遇到的间接化层（类型+地址）：</li>
+</ul>
+<ul>
+<li>自定义约定证据：</li>
+</ul>
+<ul>
+<li>动态解析器（位置+四张表+流程）：</li>
+</ul>
+<ul>
+<li>踩过的坑（红鲱鱼/sig 误标等）：</li>
+</ul>
+<hr>
+<h2>阶段 6｜外围清点</h2>
+<p><strong>通过标准</strong>：行为清单完整</p>
+<h3>记录</h3>
+<ul>
+<li>注册表行为：</li>
+</ul>
+<ul>
+<li>网络行为：</li>
+</ul>
+<ul>
+<li>其他（勒索信/链接/定时器/剪贴板等）：</li>
+</ul>
+<hr>
+<h2>阶段 7｜成文</h2>
+<ul>
+<li>[ ] 档案 → 行为链 → 算法+证据 → 反分析清单 → IOC</li>
+</ul>
+<h3>最终结论（三段式）</h3>
+<p>1. 这是什么（家族/定性/与已知样本关系）：</p>
+<p>2. 它怎么干活（启动→遍历→筛选→加密→展示）：</p>
+<p>3. 核心算法与反分析技术：</p>
+</article>
+</div>
+<script>
+document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
+(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
+document.querySelectorAll('a').forEach(function (el) {
+  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
+  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
+});
+</script>
+</body>
+</html>

@@ -5,7 +5,7 @@
 <link>https://xinhaowu04-collab.github.io</link>
 <description>二进制世界的探险笔记</description>
 <language>zh-CN</language>
-<lastBuildDate>Thu, 17 Sep 2026 15:24:05 +0800</lastBuildDate>
+<lastBuildDate>Thu, 17 Sep 2026 15:46:53 +0800</lastBuildDate>
 <item><title>8086 基础与体系结构</title><link>https://xinhaowu04-collab.github.io/notes/asm16-01-基础与体系结构.html</link></item>
 <item><title>8086 寻址方式与数据传送指令</title><link>https://xinhaowu04-collab.github.io/notes/asm16-02-寻址与数据传送.html</link></item>
 <item><title>程序结构与系统</title><link>https://xinhaowu04-collab.github.io/notes/asm16-03-程序结构与系统.html</link></item>
@@ -14,8 +14,6 @@
 <item><title>8086 字符串操作与 I/O 指令</title><link>https://xinhaowu04-collab.github.io/notes/asm16-05-字符串与IO.html</link></item>
 <item><title>8086 控制指令与 FPU</title><link>https://xinhaowu04-collab.github.io/notes/asm16-06-控制与FPU.html</link></item>
 <item><title>8086 算术与位操作指令</title><link>https://xinhaowu04-collab.github.io/notes/asm16-07-算术与位操作.html</link></item>
-<item><title>16位汇编综合考卷 - 参考答案</title><link>https://xinhaowu04-collab.github.io/notes/asm16-考卷-答案.html</link></item>
-<item><title>16位汇编综合考卷</title><link>https://xinhaowu04-collab.github.io/notes/asm16-考卷.html</link></item>
 <item><title>环境与 MASM</title><link>https://xinhaowu04-collab.github.io/notes/asm32-01-环境与MASM.html</link></item>
 <item><title>寄存器与 EFLAGS</title><link>https://xinhaowu04-collab.github.io/notes/asm32-02-寄存器与EFLAGS.html</link></item>
 <item><title>保护模式与寻址</title><link>https://xinhaowu04-collab.github.io/notes/asm32-03-保护模式与寻址.html</link></item>
@@ -27,8 +25,6 @@
 <item><title>调试器与异常</title><link>https://xinhaowu04-collab.github.io/notes/asm32-09-调试器与异常.html</link></item>
 <item><title>逆向定位实战</title><link>https://xinhaowu04-collab.github.io/notes/asm32-10-逆向定位实战.html</link></item>
 <item><title>作业实战</title><link>https://xinhaowu04-collab.github.io/notes/asm32-11-作业实战.html</link></item>
-<item><title>32位汇编综合考卷 - 参考答案</title><link>https://xinhaowu04-collab.github.io/notes/asm32-考卷-答案.html</link></item>
-<item><title>32位汇编综合考卷</title><link>https://xinhaowu04-collab.github.io/notes/asm32-考卷.html</link></item>
 <item><title>手动寻找 main 的三种课堂方法</title><link>https://xinhaowu04-collab.github.io/notes/c-re-01.html</link></item>
 <item><title>除法的基本定义</title><link>https://xinhaowu04-collab.github.io/notes/c-re-02.html</link></item>
 <item><title>无符号除为非 2 的幂常量</title><link>https://xinhaowu04-collab.github.io/notes/c-re-03.html</link></item>
@@ -45,8 +41,7 @@
 <item><title>调试器架构与命令实现</title><link>https://xinhaowu04-collab.github.io/notes/dbg-01-调试器架构与命令实现.html</link></item>
 <item><title>断点系统</title><link>https://xinhaowu04-collab.github.io/notes/dbg-02-断点系统.html</link></item>
 <item><title>调试事件循环与单步</title><link>https://xinhaowu04-collab.github.io/notes/dbg-03-调试事件循环与单步.html</link></item>
-<item><title>调试器原理与实现综合考卷 - 参考答案</title><link>https://xinhaowu04-collab.github.io/notes/dbg-考卷-答案.html</link></item>
-<item><title>调试器原理与实现综合考卷</title><link>https://xinhaowu04-collab.github.io/notes/dbg-考卷.html</link></item>
+<item><title>WanaCry1 样本分析作业（填空式）</title><link>https://xinhaowu04-collab.github.io/notes/fx-病毒分析公式化打法.html</link></item>
 <item><title>压缩壳实现</title><link>https://xinhaowu04-collab.github.io/notes/pack-01-压缩壳实现.html</link></item>
 <item><title>脱壳与 IAT 修复</title><link>https://xinhaowu04-collab.github.io/notes/pack-02-脱壳与IAT修复.html</link></item>
 <item><title>VMP 虚拟机分析</title><link>https://xinhaowu04-collab.github.io/notes/pack-03-VMP虚拟机分析.html</link></item>
@@ -64,8 +59,6 @@
 <item><title>最小 PE 逐字节解析</title><link>https://xinhaowu04-collab.github.io/notes/pe-10-最小PE逐字节解析.html</link></item>
 <item><title>扩展数据目录</title><link>https://xinhaowu04-collab.github.io/notes/pe-11-扩展数据目录.html</link></item>
 <item><title>资源与 TLS</title><link>https://xinhaowu04-collab.github.io/notes/pe-12-资源与TLS.html</link></item>
-<item><title>PE文件格式综合考卷 - 参考答案</title><link>https://xinhaowu04-collab.github.io/notes/pe-考卷-答案.html</link></item>
-<item><title>PE文件格式综合考卷</title><link>https://xinhaowu04-collab.github.io/notes/pe-考卷.html</link></item>
 <item><title>实战文章写作模板</title><link>https://xinhaowu04-collab.github.io/notes/tpl-实战写作模板.html</link></item>
 </channel>
 </rss>
