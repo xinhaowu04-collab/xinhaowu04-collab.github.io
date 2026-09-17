@@ -184,16 +184,6 @@ footer .paw { font-size: 16px; }
 .mini .card .st.wip { color:var(--pink-deep); background:rgba(240,143,183,.12); }
 .yearstat { text-align:center; margin-top:40px; color:var(--dim); font-size:13px; font-family:Consolas,monospace; }
 .yearstat b { color:var(--pink-deep); font-size:16px; }
-* { cursor:none !important; }
-#cursor-ring { display:none !important; }
-#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none;
-  background:url("penguin.png") center/contain no-repeat;
-  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
-  animation:penguin-wob 2.2s ease-in-out infinite; }
-#cursor-dot svg { display:none; }
-#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
-@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
-@media (hover:none) { #cursor-dot,#cursor-ring { display:none } body { cursor:auto } }
 </style>
 </head>
 <body>
@@ -203,7 +193,7 @@ footer .paw { font-size: 16px; }
 <nav>
   <div class="nav-avatar"><img src="avatar.png" alt="头像">0xL</div>
   <div class="links">
-    <a href="#" class="on">首页</a><a href="notes.html">知识库</a><a href="shizhan.html">实战</a><a href="projects.html">项目</a><a href="daily.html">日常</a><a href="books.html">书单</a>
+    <a href="#" class="on">首页</a><a href="notes.html">知识库</a><a href="shizhan.html">实战</a><a href="projects.html">项目</a><a href="daily.html">日常</a><a href="books.html">书单</a><a href="letters.html">留言</a>
   </div>
 </nav>
 
@@ -307,18 +297,6 @@ for (var i = 0; i < 26; i++) petals.push({
   }
   requestAnimationFrame(loop);
 })();
-</script>
-<div id="cursor-ring"></div>
-<div id="cursor-dot"></div>
-<script>
-var dot=document.getElementById('cursor-dot'),ring=document.getElementById('cursor-ring');
-var mx=-100,my=-100,rx=-100,ry=-100;
-document.addEventListener('mousemove',function(e){mx=e.clientX;my=e.clientY;});
-(function loop(){rx+=(mx-rx)*0.14;ry+=(my-ry)*0.14;
-dot.style.left=mx+'px';dot.style.top=my+'px';ring.style.left=rx+'px';ring.style.top=ry+'px';requestAnimationFrame(loop);})();
-document.querySelectorAll('a,button,summary,input').forEach(function(el){
-el.addEventListener('mouseenter',function(){dot.classList.add('hov');});
-el.addEventListener('mouseleave',function(){dot.classList.remove('hov');});});
 </script>
 </body>
 </html>

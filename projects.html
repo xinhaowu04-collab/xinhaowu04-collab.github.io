@@ -35,16 +35,6 @@ h1.page { font-size:26px; margin:42px 0 8px; }
 .proj .tech span { font-family:Consolas,monospace; font-size:11px; color:var(--dim);
   border:1px solid var(--border); padding:3px 10px; border-radius:999px; }
 footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13px; }
-* { cursor:none !important; }
-#cursor-ring { display:none !important; }
-#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none;
-  background:url("penguin.png") center/contain no-repeat;
-  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
-  animation:penguin-wob 2.2s ease-in-out infinite; }
-#cursor-dot svg { display:none; }
-#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
-@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
-@media (hover:none) { #cursor-dot,#cursor-ring { display:none } body { cursor:auto } }
 </style>
 </head>
 <body>
@@ -95,16 +85,5 @@ footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13p
 
 <footer>© 2026 0xL · Stay curious, stay reverse.</footer>
 </div>
-<div id="cursor-ring"></div><div id="cursor-dot"></div>
-<script>
-var dot=document.getElementById('cursor-dot'),ring=document.getElementById('cursor-ring');
-var mx=-100,my=-100,rx=-100,ry=-100;
-document.addEventListener('mousemove',function(e){mx=e.clientX;my=e.clientY;});
-(function loop(){rx+=(mx-rx)*0.16;ry+=(my-ry)*0.16;
-dot.style.left=mx+'px';dot.style.top=my+'px';ring.style.left=rx+'px';ring.style.top=ry+'px';requestAnimationFrame(loop);})();
-document.querySelectorAll('a,button,summary,input').forEach(function(el){
-el.addEventListener('mouseenter',function(){dot.classList.add('hov');});
-el.addEventListener('mouseleave',function(){dot.classList.remove('hov');});});
-</script>
 </body>
 </html>

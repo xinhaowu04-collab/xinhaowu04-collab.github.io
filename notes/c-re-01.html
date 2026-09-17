@@ -30,18 +30,11 @@ article table { border-collapse:collapse; margin:.8em 0; width:100%; }
 article th,article td { border:1px solid var(--border); padding:8px 12px; font-size:14px; }
 article th { background:rgba(240,143,183,.08); }
 hr { border:none; border-top:1px solid var(--border); margin:1.4em 0; }
-* { cursor:none !important; }
-#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none; transform:translate(-50%,-60%);
   background:url("../penguin.png") center/contain no-repeat;
   filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
-  animation:penguin-wob 2.2s ease-in-out infinite; }
-#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
-@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
-@media (hover:none) { #cursor-dot { display:none } body { cursor:auto } }
 </style>
 </head>
 <body>
-<div id="cursor-dot"></div>
 <div class="wrap">
 <a class="back" href="javascript:history.back()">← 返回</a>
 <h1 class="title">手动寻找 main 的三种课堂方法</h1>
@@ -475,7 +468,6 @@ argc * argc
 </article>
 </div>
 <script>
-var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
 document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
 (function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
 document.querySelectorAll('a').forEach(function (el) {

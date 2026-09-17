@@ -39,20 +39,9 @@ h1.page { font-size:26px; margin:42px 0 8px; }
 .st.todo { color:var(--dim); background:rgba(156,150,163,.08); border:1px solid rgba(156,150,163,.25); }
 .st.free { color:#3d8b5f; background:rgba(123,199,150,.14); border:1px solid rgba(123,199,150,.4); }
 footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13px; }
-* { cursor:none !important; }
-#cursor-ring { display:none !important; }
-#cursor-dot { position:fixed; z-index:9999; width:30px; height:30px; pointer-events:none;
-  background:url("penguin.png") center/contain no-repeat;
-  filter:drop-shadow(0 2px 3px rgba(0,0,0,.15));
-  animation:penguin-wob 2.2s ease-in-out infinite; }
-#cursor-dot.hov { animation:penguin-wob .45s ease-in-out infinite; }
-@keyframes penguin-wob { 0%,100% { transform:translate(-50%,-60%) rotate(-8deg) } 50% { transform:translate(-50%,-60%) rotate(8deg) } }
-@media (hover:none) { #cursor-dot,#cursor-ring { display:none } body { cursor:auto } }
 </style>
 </head>
 <body>
-<div id="cursor-ring"></div>
-<div id="cursor-dot"></div>
 <div class="wrap">
 <nav>
   <div class="nav-avatar"><img src="avatar.png" alt="头像">0xL</div>
@@ -90,14 +79,5 @@ footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13p
 
 <footer>© 2026 0xL · Stay curious, stay reverse.</footer>
 </div>
-<script>
-var dot = document.getElementById('cursor-dot'), mx = -100, my = -100;
-document.addEventListener('mousemove', function (e) { mx = e.clientX; my = e.clientY; });
-(function loop() { dot.style.left = mx + 'px'; dot.style.top = my + 'px'; requestAnimationFrame(loop); })();
-document.querySelectorAll('a').forEach(function (el) {
-  el.addEventListener('mouseenter', function () { dot.classList.add('hov'); });
-  el.addEventListener('mouseleave', function () { dot.classList.remove('hov'); });
-});
-</script>
 </body>
 </html>
