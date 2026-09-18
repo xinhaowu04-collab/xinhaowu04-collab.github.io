@@ -47,7 +47,7 @@ footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13p
 </div>
 <script>
 function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-fetch('daily.md').then(function (r) { return r.text(); }).then(function (md) {
+fetch('daily.md?v=' + Date.now()).then(function (r) { return r.text(); }).then(function (md) {
   var blocks = md.split(/^## /m).slice(1);
   var html = '';
   blocks.forEach(function (b) {

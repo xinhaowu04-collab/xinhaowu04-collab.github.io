@@ -297,7 +297,7 @@ for (var i = 0; i < 26; i++) petals.push({
 })();
 </script>
 <script>
-fetch('daily.md').then(function (r) { return r.text(); }).then(function (md) {
+fetch('daily.md?v=' + Date.now()).then(function (r) { return r.text(); }).then(function (md) {
   function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
   var blocks = md.split(/^## /m).slice(1, 4);
   var html = '';
@@ -311,7 +311,7 @@ fetch('daily.md').then(function (r) { return r.text(); }).then(function (md) {
 });
 </script>
 <script>
-fetch('daily.md').then(function (r) { return r.text(); }).then(function (md) {
+fetch('daily.md?v=' + Date.now()).then(function (r) { return r.text(); }).then(function (md) {
   function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
   var blocks = md.split(/^## /m).slice(1, 4);
   var html = '';
