@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>写日常 · 0xL</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css">
+<style>
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:"LXGW WenKai","PingFang SC","Microsoft YaHei",sans-serif; }
+.wrap { max-width:600px; margin:0 auto; padding:40px 24px 80px; }
+h1 { font-size:24px; margin-bottom:6px; }
+.sub { color:var(--dim); font-size:13px; margin-bottom:26px; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow); padding:24px; }
+label { display:block; font-size:13px; color:var(--dim); margin:16px 0 6px; }
+label:first-child { margin-top:0; }
+input, select, textarea {
+  width:100%; font-family:inherit; font-size:15px; color:var(--text);
+  background:var(--bg); border:1px solid var(--border); border-radius:12px;
+  padding:11px 14px; outline:none; transition:border-color .2s;
+}
+input:focus, select:focus, textarea:focus { border-color:rgba(240,143,183,.55); }
+textarea { min-height:130px; resize:vertical; line-height:1.8; }
+.row { display:flex; gap:14px; }
+.row > div { flex:1; }
+button.pub {
+  width:100%; margin-top:22px; padding:13px; border:none; border-radius:999px;
+  font-family:inherit; font-size:16px; font-weight:700; color:#fff;
+  background:linear-gradient(120deg, var(--pink), var(--pink-deep));
+  box-shadow:0 8px 22px rgba(229,106,160,.35); cursor:pointer; transition:all .2s;
+}
+button.pub:hover { transform:translateY(-2px); box-shadow:0 12px 28px rgba(229,106,160,.45); }
+button.pub:disabled { opacity:.55; transform:none; cursor:wait; }
+.msg { margin-top:14px; font-size:14px; text-align:center; min-height:20px; }
+.msg.ok { color:#3d8b5f; }
+.msg.err { color:#d34f4f; }
+.msg a { color:var(--pink-deep); }
+.token-box { display:none; }
+.hint { font-size:12px; color:var(--dim); line-height:1.8; margin-top:8px; }
+.hint a { color:var(--pink-deep); }
+.back { display:inline-block; margin-bottom:18px; color:var(--pink-deep); text-decoration:none; font-size:14px; }
+.back:hover { text-decoration:underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="daily.html">← 返回日常</a>
+<h1>写日常</h1>
+<div class="sub">写完点发布，一分钟后全世界可见。</div>
+
+<div class="card token-box" id="tokenBox">
+  <label>首次使用：填入 GitHub 访问令牌（只存在你自己浏览器里）</label>
+  <input type="password" id="tokenInput" placeholder="github_pat_... 或 ghp_...">
+  <div class="hint">
+    没有令牌？<a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">点这里创建</a>：
+    名字随便起，Repository access 选 Only select repositories → <b>xinhaowu04-collab.github.io</b>，
+    Permissions → Contents 选 <b>Read and write</b>，生成后粘贴到这里。只需设置这一次。
+  </div>
+  <button class="pub" id="saveToken">保存令牌</button>
+</div>
+
+<div class="card" id="formBox" style="display:none">
+  <div class="row">
+    <div>
+      <label>日期</label>
+      <input type="date" id="fDate">
+    </div>
+    <div>
+      <label>时段</label>
+      <select id="fSlot">
+        <option>早</option><option>上午</option><option>中午</option>
+        <option selected>下午</option><option>傍晚</option><option>晚</option><option>深夜</option>
+      </select>
+    </div>
+  </div>
+  <label>内容</label>
+  <textarea id="fBody" placeholder="今天做了什么、想了什么……"></textarea>
+  <button class="pub" id="pubBtn">发布</button>
+  <div class="msg" id="msg"></div>
+</div>
+</div>
+
+<script>
+var REPO = 'xinhaowu04-collab/xinhaowu04-collab.github.io';
+var FILE = 'daily.md';
+var token = localStorage.getItem('gh_pat') || '';
+
+var $ = function (id) { return document.getElementById(id); };
+$('fDate').value = new Date().toISOString().slice(0, 10);
+
+function showForm() {
+  $('tokenBox').style.display = 'none';
+  $('formBox').style.display = 'block';
+}
+if (token) showForm(); else $('tokenBox').style.display = 'block';
+
+$('saveToken').onclick = function () {
+  var t = $('tokenInput').value.trim();
+  if (!t) return;
+  localStorage.setItem('gh_pat', t);
+  token = t;
+  showForm();
+};
+
+function b64encode(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+function b64decode(b64) {
+  return decodeURIComponent(escape(atob(b64.replace(/\n/g, ''))));
+}
+
+$('pubBtn').onclick = async function () {
+  var date = $('fDate').value, slot = $('fSlot').value, body = $('fBody').value.trim();
+  var msg = $('msg');
+  if (!date || !body) { msg.className = 'msg err'; msg.textContent = '日期和内容都要填'; return; }
+  var btn = $('pubBtn');
+  btn.disabled = true; btn.textContent = '发布中…';
+  msg.className = 'msg'; msg.textContent = '';
+  try {
+    var r = await fetch('https://api.github.com/repos/' + REPO + '/contents/' + FILE, {
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' }
+    });
+    if (r.status === 401) { localStorage.removeItem('gh_pat'); location.reload(); return; }
+    var data = await r.json();
+    var old = b64decode(data.content);
+    var entry = '## ' + date + ' · ' + slot + '\n' + body + '\n\n';
+    var lines = old.split('\n');
+    var idx = lines.findIndex(function (l) { return l.startsWith('## '); });
+    if (idx === -1) idx = lines.length;
+    var next = lines.slice(0, idx).join('\n').replace(/\s*$/, '\n\n') + entry + lines.slice(idx).join('\n').replace(/^\n+/, '');
+    var put = await fetch('https://api.github.com/repos/' + REPO + '/contents/' + FILE, {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'daily: ' + date + ' ' + slot,
+        content: b64encode(next),
+        sha: data.sha
+      })
+    });
+    if (!put.ok) throw new Error('提交失败：' + put.status);
+    msg.className = 'msg ok';
+    msg.innerHTML = '发布成功！约 1 分钟后可见 → <a href="daily.html">查看日常页</a>';
+    $('fBody').value = '';
+  } catch (e) {
+    msg.className = 'msg err';
+    msg.textContent = e.message || '出错了，重试一下';
+  }
+  btn.disabled = false; btn.textContent = '发布';
+};
+</script>
+</body>
+</html>
