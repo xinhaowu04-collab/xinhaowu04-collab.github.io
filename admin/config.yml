@@ -2,7 +2,6 @@ backend:
   name: github
   repo: xinhaowu04-collab/xinhaowu04-collab.github.io
   branch: main
-  # OAuth 认证服务地址（Cloudflare Worker 部署后填入）
   base_url: https://sveltia-cms-auth.xinhaowu04.workers.dev
 
 site_url: https://0xl.top
@@ -19,8 +18,7 @@ collections:
       - name: daily-md
         label: 日常记录（daily.md）
         file: daily.md
-        format: frontmatter
-        frontmatter_delimiter: ""
+        format: raw
         fields:
           - name: body
             label: 内容（Markdown 格式，新条目以 ## 日期 · 时段 开头，加在最上面）
@@ -29,13 +27,12 @@ collections:
 
   - name: books
     label: 书单
-    description: 修改书单页状态
+    description: 修改书单页状态（高级用户，直接编辑 HTML）
     files:
       - name: books-html
-        label: 书单页（books.html，高级用户）
+        label: 书单页（books.html）
         file: books.html
-        format: frontmatter
-        frontmatter_delimiter: ""
+        format: raw
         fields:
           - name: body
             label: HTML 内容
