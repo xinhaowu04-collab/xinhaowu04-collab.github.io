@@ -240,9 +240,7 @@ footer .paw { font-size: 16px; }
 
 <section id="daily">
   <div class="sec-h"><h2>日常</h2><span>/ daily</span></div>
-  <a class="daily-prev" href="daily.html"><div class="w">2026-09-16 · 晚</div><div class="c">个人站上线雏形。选了樱花主题，把 C 逆向 10 篇笔记搬了上来。折腾一天，值了。</div></a>
-  <a class="daily-prev" href="daily.html"><div class="w">2026-09-16 · 傍晚</div><div class="c">桌面上多了个"网云通讯客户端"，查了下是 RAT，而且我还运行过……亲手完成了一次完整应急响应。</div></a>
-  <a class="daily-prev" href="daily.html"><div class="w">2026-09-16 · 下午</div><div class="c">「猫窝」v2 发布：签到 + 猫猫旅行 + 连登兑换抽奖全自动。22 个号首跑零失败。</div></a>
+  <span id="daily-prev"></span>
   <a class="more-link" href="daily.html">全部日常 →</a>
 </section>
 
@@ -297,6 +295,35 @@ for (var i = 0; i < 26; i++) petals.push({
   }
   requestAnimationFrame(loop);
 })();
+</script>
+<script>
+fetch('daily.md').then(function (r) { return r.text(); }).then(function (md) {
+  function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+  var blocks = md.split(/^## /m).slice(1, 4);
+  var html = '';
+  blocks.forEach(function (b) {
+    var nl = b.indexOf('\n');
+    var when = b.slice(0, nl).trim(), what = b.slice(nl).trim();
+    if (!when || !what) return;
+    html += '<a class="daily-prev" href="daily.html"><div class="w">' + esc(when) + '</div><div class="c">' + esc(what) + '</div></a>';
+  });
+  document.getElementById('daily-prev').innerHTML = html;
+});
+</script>
+<script>
+fetch('daily.md').then(function (r) { return r.text(); }).then(function (md) {
+  function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+  var blocks = md.split(/^## /m).slice(1, 4);
+  var html = '';
+  blocks.forEach(function (b) {
+    var nl = b.indexOf('
+');
+    var when = b.slice(0, nl).trim(), what = b.slice(nl).trim();
+    if (!when || !what) return;
+    html += '<a class="daily-prev" href="daily.html"><div class="w">' + esc(when) + '</div><div class="c">' + esc(what) + '</div></a>';
+  });
+  document.getElementById('daily-prev').innerHTML = html;
+});
 </script>
 </body>
 </html>
