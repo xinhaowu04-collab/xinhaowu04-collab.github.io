@@ -1,0 +1,43 @@
+backend:
+  name: github
+  repo: xinhaowu04-collab/xinhaowu04-collab.github.io
+  branch: main
+  # OAuth 认证服务地址（Cloudflare Worker 部署后填入）
+  base_url: https://sveltia-auth.WORKER_SUBDOMAIN.workers.dev
+
+site_url: https://0xl.top
+locale: zh
+
+media_folder: assets
+public_folder: /assets
+
+collections:
+  - name: daily
+    label: 日常
+    description: 随手记录，直接编辑 daily.md，保存即上线
+    files:
+      - name: daily-md
+        label: 日常记录（daily.md）
+        file: daily.md
+        format: frontmatter
+        frontmatter_delimiter: ""
+        fields:
+          - name: body
+            label: 内容（Markdown 格式，新条目以 ## 日期 · 时段 开头，加在最上面）
+            widget: markdown
+            minimal: true
+
+  - name: books
+    label: 书单
+    description: 修改书单页状态
+    files:
+      - name: books-html
+        label: 书单页（books.html，高级用户）
+        file: books.html
+        format: frontmatter
+        frontmatter_delimiter: ""
+        fields:
+          - name: body
+            label: HTML 内容
+            widget: code
+            default_language: html
