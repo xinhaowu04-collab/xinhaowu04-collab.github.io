@@ -3,7 +3,7 @@ backend:
   repo: xinhaowu04-collab/xinhaowu04-collab.github.io
   branch: main
   # OAuth 认证服务地址（Cloudflare Worker 部署后填入）
-  base_url: https://sveltia-auth.WORKER_SUBDOMAIN.workers.dev
+  base_url: https://sveltia-cms-auth.xinhaowu04.workers.dev
 
 site_url: https://0xl.top
 locale: zh
