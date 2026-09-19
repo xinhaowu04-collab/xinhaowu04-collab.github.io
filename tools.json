@@ -1,0 +1,10 @@
+{
+  "posts": [
+    {
+      "title": "PowerDesigner 的安装与破解",
+      "cat": "逆向工具",
+      "tag": "汉化+补丁",
+      "body": "Sybase PowerDesigner 16.5，老牌建模工具，含汉化与补丁。\n\n## 下载\n\n- 链接：https://pan.baidu.com/s/1aTxihHpNlYepT9ilqMbHzg\n- 提取码：`rktk`\n\n| 文件 | 大小 | 说明 |\n|---|---|---|\n| PowerDesigner165.zip | 614 MB | 安装包本体 |\n| PowerDesigner16.5汉化文件.zip | 32 MB | 汉化包 |\n| PowerDesigner165_破解文件.zip | 785 KB | 补丁 |\n\n## 安装教程\n\n一路 Next，到选择许可类型时注意：选择 **Trial**（试用），装完再破解。\n\n## 破解步骤\n\n（待补充：安装完成后用破解文件替换对应文件，详见压缩包内说明。）\n\n## 汉化步骤\n\n（待补充：解压汉化文件覆盖安装目录，汉化包内已有步骤说明。）\n\n## 备注\n\n- 核心作用：数据库建模、ER 图。"
+    }
+  ]
+}

@@ -6,22 +6,22 @@
 <title>书单 · 0xL</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css">
 <style>
-:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --green:#7bc796; --shadow:0 6px 24px rgba(229,106,160,.08); }
+:root { --bg:#fdfbf9; --card:#fff; --border:#f0e8e4; --text:#3a3a44; --dim:#9c96a3; --pink:#f08fb7; --pink-deep:#e56aa0; --shadow:0 6px 24px rgba(229,106,160,.08); }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--bg); color:var(--text); font-family:"LXGW WenKai","PingFang SC","Microsoft YaHei",sans-serif; }
 .wrap { max-width:760px; margin:0 auto; padding:0 24px; }
-nav { position:sticky; top:14px; z-index:100; max-width:640px; margin:14px auto 0;
+nav { position:sticky; top:14px; z-index:100; max-width:700px; margin:14px auto 0;
   background:rgba(255,255,255,.75); backdrop-filter:blur(14px);
   border:1px solid var(--border); border-radius:999px; box-shadow:var(--shadow);
   display:flex; align-items:center; justify-content:space-between; padding:8px 10px 8px 14px; }
 .nav-avatar { display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; }
 .nav-avatar img { width:34px; height:34px; border-radius:50%; object-fit:cover; border:2px solid rgba(240,143,183,.4); filter:brightness(1.3); }
-nav .links a { color:var(--dim); text-decoration:none; font-size:14px; padding:8px 12px; border-radius:999px; transition:all .2s; }
+nav .links a { color:var(--dim); text-decoration:none; font-size:14px; padding:8px 11px; border-radius:999px; transition:all .2s; }
 nav .links a:hover { color:var(--pink-deep); background:rgba(240,143,183,.1); }
 nav .links a.on { color:var(--pink-deep); background:rgba(240,143,183,.12); }
 h1.page { font-size:26px; margin:42px 0 8px; }
-.sub { color:var(--dim); font-size:14px; margin-bottom:30px; }
-.stage { margin-bottom:30px; }
+.sub { color:var(--dim); font-size:14px; margin-bottom:26px; }
+.stage { margin-bottom:28px; }
 .stage-h { display:flex; align-items:baseline; gap:10px; margin-bottom:14px; }
 .stage-h .no { font-family:Consolas,monospace; font-size:13px; color:var(--pink-deep); font-weight:700; }
 .stage-h h2 { font-size:17px; }
@@ -38,6 +38,7 @@ h1.page { font-size:26px; margin:42px 0 8px; }
 .st.reading { color:var(--pink-deep); background:rgba(240,143,183,.12); border:1px solid rgba(240,143,183,.4); }
 .st.todo { color:var(--dim); background:rgba(156,150,163,.08); border:1px solid rgba(156,150,163,.25); }
 .st.free { color:#3d8b5f; background:rgba(123,199,150,.14); border:1px solid rgba(123,199,150,.4); }
+.st.done { color:#3d8b5f; background:rgba(123,199,150,.14); border:1px solid rgba(123,199,150,.4); }
 footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13px; }
 </style>
 </head>
@@ -49,35 +50,49 @@ footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13p
 </nav>
 
 <h1 class="page">书单</h1>
-<div class="sub">通往二进制漏洞研究的十本书，按推荐顺序排好了。</div>
-
-<div class="stage">
-  <div class="stage-h"><span class="no">壹</span><h2>漏洞分析入门</h2><span class="hint">建立感觉：漏洞长什么样、怎么被利用</span></div>
-  <div class="book"><div><div class="t">《0day 安全：软件漏洞分析技术（第 2 版）》</div><div class="a">王清 · 国内漏洞启蒙经典</div></div><span class="st todo">待读</span></div>
-  <div class="book"><div><div class="t">《漏洞战争：软件漏洞分析精要》</div><div class="a">林桠泉 · 真实 CVE 复盘</div></div><span class="st todo">待读</span></div>
-  <div class="book"><div><div class="t">《捉虫日记》</div><div class="a">A Bug Hunter's Diary · 猎人的一天</div></div><span class="st todo">待读</span></div>
-</div>
-
-<div class="stage">
-  <div class="stage-h"><span class="no">贰</span><h2>攻防视野</h2><span class="hint">从攻击者视角理解体系</span></div>
-  <div class="book"><div><div class="t">《灰帽黑客（第 5 版）》</div><div class="a">渗透测试方法大全</div></div><span class="st todo">待读</span></div>
-  <div class="book"><div><div class="t">《A Guide to Kernel Exploitation》</div><div class="a">内核利用 · 长期深化方向</div></div><span class="st todo">待读</span></div>
-</div>
-
-<div class="stage">
-  <div class="stage-h"><span class="no">叁</span><h2>内功心法</h2><span class="hint">平台与底层功底，读慢不怕</span></div>
-  <div class="book"><div><div class="t">《二进制分析实战》</div><div class="a">Practical Binary Analysis</div></div><span class="st todo">待读</span></div>
-  <div class="book"><div><div class="t">《Windows Internals（第 7 版）》</div><div class="a">Windows 内核圣经</div></div><span class="st todo">待读</span></div>
-  <div class="book"><div><div class="t">《Windows 核心编程》</div><div class="a">Win32 系统编程根基</div></div><span class="st reading">在读</span></div>
-  <div class="book"><div><div class="t">《软件调试（第 2 版）卷 2》</div><div class="a">张银奎 · 调试器使用之道</div></div><span class="st reading">在读</span></div>
-</div>
-
-<div class="stage">
-  <div class="stage-h"><span class="no">肆</span><h2>工程实战</h2><span class="hint">结业前的主线任务</span></div>
-  <div class="book"><div><div class="t"><a href="https://www.fuzzingbook.org" target="_blank" rel="noopener">《The Fuzzing Book》↗</a></div><div class="a">fuzzingbook.org · 免费在线，配代码可跑</div></div><span class="st free">免费在线</span></div>
-</div>
-
+<div class="sub">通往二进制漏洞研究的路，按推荐顺序排好了。</div>
+<div id="stages"></div>
 <footer>© 2026 0xL · Stay curious, stay reverse.</footer>
 </div>
+<script>
+var STATUS = { reading: '在读', todo: '待读', free: '免费在线', done: '已读' };
+fetch('books.json?v=' + Date.now()).then(function (r) { return r.json(); }).then(function (data) {
+  var html = '';
+  data.stages.forEach(function (st, si) {
+    var books = data.books.filter(function (b) { return b.stage === si; });
+    if (!books.length) return;
+    html += '<div class="stage"><div class="stage-h"><span class="no">' + st.no + '</span><h2></h2><span class="hint"></span></div></div>';
+    var stage = document.createElement('div');
+    stage.className = 'stage';
+    var h = document.createElement('div');
+    h.className = 'stage-h';
+    var no = document.createElement('span'); no.className = 'no'; no.textContent = st.no;
+    var h2 = document.createElement('h2'); h2.textContent = st.name;
+    var hint = document.createElement('span'); hint.className = 'hint'; hint.textContent = st.hint;
+    h.appendChild(no); h.appendChild(h2); h.appendChild(hint);
+    stage.appendChild(h);
+    books.forEach(function (b) {
+      var div = document.createElement('div');
+      div.className = 'book';
+      var info = document.createElement('div');
+      var t = document.createElement('div'); t.className = 't';
+      if (b.link) {
+        var a = document.createElement('a'); a.href = b.link; a.target = '_blank'; a.rel = 'noopener'; a.textContent = '《' + b.title + '》↗';
+        t.appendChild(a);
+      } else {
+        t.textContent = '《' + b.title + '》';
+      }
+      var au = document.createElement('div'); au.className = 'a'; au.textContent = b.author;
+      info.appendChild(t); info.appendChild(au);
+      var st2 = document.createElement('span');
+      st2.className = 'st ' + b.status;
+      st2.textContent = STATUS[b.status] || b.status;
+      div.appendChild(info); div.appendChild(st2);
+      stage.appendChild(div);
+    });
+    document.getElementById('stages').appendChild(stage);
+  });
+});
+</script>
 </body>
 </html>
