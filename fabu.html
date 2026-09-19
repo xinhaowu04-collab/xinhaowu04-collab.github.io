@@ -103,6 +103,7 @@ textarea.drag { border-color:var(--pink-deep); background:rgba(240,143,183,.06);
       <div style="text-align:center;margin-top:10px;display:none" id="kCancelBox"><button class="btn btn-ghost" id="kCancel">取消编辑</button></div>
     </div>
     <div class="list-h">全部笔记（<span id="kCnt">0</span>）</div>
+    <input id="kFilter" placeholder="🔍 按标题搜索…" style="margin-bottom:10px">
     <div id="kList" class="loading">加载中…</div>
   </div>
   <div class="pane" id="p-books">
@@ -134,6 +135,9 @@ textarea.drag { border-color:var(--pink-deep); background:rgba(240,143,183,.06);
       <div class="drop-tip">💡 拖 .md/.txt 进来 = 导入正文；拖图片进来 = 上传并插入图片</div>
       <button class="btn btn-pub" id="sSave">保存</button>
       <div style="text-align:center;margin-top:10px;display:none" id="sCancelBox"><button class="btn btn-ghost" id="sCancel">取消编辑</button></div>
+      <div id="sKB" style="display:none;margin-top:12px;padding:10px 14px;background:#fdf2f8;border:1px solid #f9a8d4;border-radius:10px;font-size:13px">
+        该帖正文托管在知识库，这里只能改这行链接 → <button class="btn btn-ghost" id="sKBJump" type="button">直接编辑知识库正文</button>
+      </div>
     </div>
     <div class="list-h">全部实战帖（<span id="sCnt">0</span>）</div>
     <div id="sList" class="loading">加载中…</div>
@@ -279,24 +283,28 @@ document.querySelectorAll('.tab').forEach(function (t) {
 });
 
 /* ─── 通用 CRUD 工厂（帖子类：title/cat/tag/body） ─── */
-function makePostStore(prefix, file, key, viewUrl) {
-  var S = { sha: '', posts: [], edit: -1 };
+function makePostStore(prefix, file, key, viewUrl, onEdit) {
+  var S = { sha: '', posts: [], edit: -1, filter: '' };
   var F = function (id) { return $(prefix + id); };
+  function startEdit(i) {
+    var p = S.posts[i];
+    S.edit = i;
+    F('Title').value = p.title; F('Cat').value = p.cat || ''; F('Tag').value = p.tag || ''; F('Body').value = p.body;
+    F('FormTitle').textContent = '编辑帖子'; F('Save').textContent = '保存修改'; F('CancelBox').style.display = 'block';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (onEdit) onEdit(p);
+  }
   function render() {
     F('Cnt').textContent = S.posts.length;
     F('List').innerHTML = '';
     S.posts.forEach(function (p, i) {
+      if (S.filter && p.title.indexOf(S.filter) === -1) return;
       var div = document.createElement('div'); div.className = 'entry';
       div.innerHTML = '<div class="k"></div><div class="v"></div><div class="ops"></div>';
       div.querySelector('.k').textContent = (p.cat || '') + (p.tag ? ' · ' + p.tag : '');
       div.querySelector('.v').textContent = p.title;
       var be = document.createElement('button'); be.className = 'btn btn-ghost'; be.textContent = '编辑';
-      be.onclick = function () {
-        S.edit = i;
-        F('Title').value = p.title; F('Cat').value = p.cat || ''; F('Tag').value = p.tag || ''; F('Body').value = p.body;
-        F('FormTitle').textContent = '编辑帖子'; F('Save').textContent = '保存修改'; F('CancelBox').style.display = 'block';
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      };
+      be.onclick = function () { startEdit(i); };
       var bd = document.createElement('button'); bd.className = 'btn btn-ghost btn-danger'; bd.textContent = '删除';
       bd.onclick = async function () {
         if (!confirm('删除「' + p.title + '」？')) return;
@@ -309,6 +317,7 @@ function makePostStore(prefix, file, key, viewUrl) {
   function cancel() {
     S.edit = -1; F('Title').value = ''; F('Body').value = '';
     F('FormTitle').textContent = '新增帖子'; F('Save').textContent = '保存'; F('CancelBox').style.display = 'none';
+    if (onEdit) onEdit(null);
   }
   async function load() {
     var g = await ghGet(file); S.sha = g.sha;
@@ -336,10 +345,32 @@ function makePostStore(prefix, file, key, viewUrl) {
       S.posts[S.edit] = p; commit(key + ': 编辑 ' + p.title);
     }
   };
-  return { load: load };
+  var flt = F('Filter');
+  if (flt) flt.oninput = function () { S.filter = flt.value.trim(); render(); };
+  return {
+    load: load,
+    editSlug: function (slug) {
+      for (var i = 0; i < S.posts.length; i++) {
+        if (S.posts[i].slug === slug) { startEdit(i); return true; }
+      }
+      return false;
+    }
+  };
 }
 
-var storeS = makePostStore('s', 'shizhan.json', 'shizhan', 'shizhan.html');
+var storeS = makePostStore('s', 'shizhan.json', 'shizhan', 'shizhan.html', function (p) {
+  var box = $('sKB');
+  var m = p && p.body && p.body.match(/notes\.html#([^\s)]+)/);
+  if (m) {
+    box.style.display = 'block';
+    $('sKBJump').onclick = function () {
+      document.querySelector('.tab[data-p="lib"]').click();
+      if (!storeK.editSlug(decodeURIComponent(m[1]))) err('知识库里没找到 slug 为「' + m[1] + '」的笔记');
+    };
+  } else {
+    box.style.display = 'none';
+  }
+});
 var storeT = makePostStore('t', 'tools.json', 'tools', 'tools.html');
 var storeK = makePostStore('k', 'notes.json', 'notes', 'notes.html');
 
