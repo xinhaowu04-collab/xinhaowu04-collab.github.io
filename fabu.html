@@ -205,6 +205,18 @@ async function ghPut(file, sha, text, cmsg) {
   if (!r.ok) throw new Error('提交失败：' + r.status);
   return (await r.json()).content.sha;
 }
+/* 二进制文件（图片）上传：内容已是 base64，不能再走 ghPut 的文本编码 */
+async function ghPutB64(file, sha, b64, cmsg) {
+  var body = { message: cmsg, content: b64 };
+  if (sha) body.sha = sha;
+  var r = await fetch('https://api.github.com/repos/' + REPO + '/contents/' + file, {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error('提交失败：' + r.status);
+  return (await r.json()).content.sha;
+}
 
 /* ─── 拖拽：md 导入 + 图片上传 ─── */
 function attachDrop(ta) {
@@ -223,7 +235,7 @@ function attachDrop(ta) {
       var bytes = new Uint8Array(buf), bin = '';
       for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
       try {
-        await ghPut(path, null, b64decode(btoa(bin)), 'asset: ' + f.name);
+        await ghPutB64(path, null, btoa(bin), 'asset: ' + f.name);
         imgMap[f.name] = path;
       } catch (e2) { err('图片上传失败：' + f.name); }
     }
