@@ -66,6 +66,8 @@ textarea.drag { border-color:var(--pink-deep); background:rgba(240,143,183,.06);
 <div id="mainBox" style="display:none">
   <div class="tabs">
     <div class="tab on" data-p="daily">日常</div>
+    <div class="tab" data-p="lib">知识库</div>
+    <div class="tab" data-p="lib">知识库</div>
     <div class="tab" data-p="books">书单</div>
     <div class="tab" data-p="shizhan">实战</div>
     <div class="tab" data-p="projects">项目</div>
@@ -86,6 +88,40 @@ textarea.drag { border-color:var(--pink-deep); background:rgba(240,143,183,.06);
     </div>
     <div class="list-h">全部日常（<span id="dCnt">0</span>）</div>
     <div id="dList" class="loading">加载中…</div>
+  </div>
+
+
+  <div class="pane" id="p-lib">
+    <div class="card">
+      <div id="kFormTitle" style="font-weight:700;margin-bottom:4px">新增笔记</div>
+      <label>标题</label><input id="kTitle" placeholder="取模的三种优化形式">
+      <label>分类</label><input id="kCat" placeholder="C 逆向" list="kCatList"><datalist id="kCatList"><option>C 逆向</option><option>PE 结构</option><option>32 位汇编</option><option>16 位汇编</option><option>调试器</option><option>壳与脱壳</option><option>C++ 逆向</option></datalist>
+      <label style="display:none">标签</label><input id="kTag" style="display:none">
+      <label>正文（Markdown，可连图片一起拖进来）</label>
+      <textarea id="kBody" class="big" placeholder="# 标题&#10;&#10;正文……图片和 md 一起拖进来会自动上传并改好引用"></textarea>
+      <div class="drop-tip">💡 拖 .md + 图片（可多选一起拖）= 导入正文并自动上传图片、改写引用</div>
+      <button class="btn btn-pub" id="kSave">保存</button>
+      <div style="text-align:center;margin-top:10px;display:none" id="kCancelBox"><button class="btn btn-ghost" id="kCancel">取消编辑</button></div>
+    </div>
+    <div class="list-h">全部笔记（<span id="kCnt">0</span>）</div>
+    <div id="kList" class="loading">加载中…</div>
+  </div>
+
+
+  <div class="pane" id="p-lib">
+    <div class="card">
+      <div id="kFormTitle" style="font-weight:700;margin-bottom:4px">新增笔记</div>
+      <label>标题</label><input id="kTitle" placeholder="取模的三种优化形式">
+      <label>分类</label><input id="kCat" placeholder="C 逆向" list="kCatList"><datalist id="kCatList"><option>C 逆向</option><option>PE 结构</option><option>32 位汇编</option><option>16 位汇编</option><option>调试器</option><option>壳与脱壳</option><option>C++ 逆向</option></datalist>
+      <label style="display:none">标签</label><input id="kTag" style="display:none">
+      <label>正文（Markdown，可连图片一起拖进来）</label>
+      <textarea id="kBody" class="big" placeholder="# 标题&#10;&#10;正文……图片和 md 一起拖进来会自动上传并改好引用"></textarea>
+      <div class="drop-tip">💡 拖 .md + 图片（可多选一起拖）= 导入正文并自动上传图片、改写引用</div>
+      <button class="btn btn-pub" id="kSave">保存</button>
+      <div style="text-align:center;margin-top:10px;display:none" id="kCancelBox"><button class="btn btn-ghost" id="kCancel">取消编辑</button></div>
+    </div>
+    <div class="list-h">全部笔记（<span id="kCnt">0</span>）</div>
+    <div id="kList" class="loading">加载中…</div>
   </div>
 
   <div class="pane" id="p-books">
@@ -196,269 +232,47 @@ function attachDrop(ta) {
   ta.addEventListener('drop', async function (e) {
     e.preventDefault(); ta.classList.remove('drag');
     var files = Array.from(e.dataTransfer.files);
+    if (!files.length) return;
+    // 第一遍：上传所有图片，建立 文件名→路径 映射
+    var imgMap = {};
     for (var f of files) {
-      if (/\.(md|markdown|txt)$/i.test(f.name)) {
-        ta.value = await f.text();
-        ok('已导入 ' + f.name);
-      } else if (/^image\//.test(f.type)) {
-        var path = 'assets/img-' + Date.now() + '-' + f.name.replace(/[^\w.\-]/g, '_');
-        var buf = await f.arrayBuffer();
-        var bytes = new Uint8Array(buf), bin = '';
-        for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-        try {
-          await ghPut(path, null, b64decode(btoa(bin)), 'asset: ' + f.name);
-          ta.value += (ta.value && !ta.value.endsWith('\n') ? '\n' : '') + '![' + f.name + '](' + path + ')\n';
-          ok('图片已上传并插入：' + f.name);
-        } catch (e2) { err('图片上传失败：' + e2.message); }
-      }
+      if (!/^image\//.test(f.type)) continue;
+      var path = 'assets/img-' + Date.now() + '-' + f.name.replace(/[^\w.\-一-龥]/g, '_');
+      var buf = await f.arrayBuffer();
+      var bytes = new Uint8Array(buf), bin = '';
+      for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      try {
+        await ghPut(path, null, b64decode(btoa(bin)), 'asset: ' + f.name);
+        imgMap[f.name] = path;
+      } catch (e2) { err('图片上传失败：' + f.name); }
+    }
+    // 第二遍：处理 md/txt（改写图片引用）
+    for (var f2 of files) {
+      if (!/\.(md|markdown|txt)$/i.test(f2.name)) continue;
+      var text = await f2.text();
+      Object.keys(imgMap).forEach(function (name) {
+        var p = imgMap[name];
+        var escName = name.replace(/[.*+?^${}()|[\]\]/g, '\$&');
+        // Obsidian 内链 ![[name]]
+        text = text.replace(new RegExp('!\[\[(?:[^\]|]*\/)?' + escName + '(?:\|[^\]]*)?\]\]', 'g'), '![](' + p + ')');
+        // 标准引用 ![](xxx/name) 或 ![](name)
+        text = text.replace(new RegExp('(!\[[^\]]*\]\()[^)]*?' + escName + '(\))', 'g'), '$1' + p + '$2');
+      });
+      ta.value = text;
+    }
+    // 只拖了图片没拖 md：直接插入图片链接
+    if (!files.some(function (f3) { return /\.(md|markdown|txt)$/i.test(f3.name); })) {
+      Object.keys(imgMap).forEach(function (name) {
+        ta.value += (ta.value && !ta.value.endsWith('
+') ? '
+' : '') + '![' + name + '](' + imgMap[name] + ')
+';
+      });
+    }
+    var ni = Object.keys(imgMap).length;
+    if (ni || files.some(function (f4) { return /\.(md|markdown|txt)$/i.test(f4.name); })) {
+      ok('导入完成' + (ni ? '（含 ' + ni + ' 张图片已上传）' : ''));
     }
   });
 }
-['dBody', 'sBody', 'tBody', 'jDesc'].forEach(function (id) { attachDrop($(id)); });
 
-/* ─── 标签切换 ─── */
-document.querySelectorAll('.tab').forEach(function (t) {
-  t.onclick = function () {
-    document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('on'); });
-    document.querySelectorAll('.pane').forEach(function (x) { x.classList.remove('on'); });
-    t.classList.add('on');
-    $('p-' + t.dataset.p).classList.add('on');
-    $('msg').textContent = '';
-  };
-});
-
-/* ─── 通用 CRUD 工厂（帖子类：title/cat/tag/body） ─── */
-function makePostStore(prefix, file, key, viewUrl) {
-  var S = { sha: '', posts: [], edit: -1 };
-  var F = function (id) { return $(prefix + id); };
-  function render() {
-    F('Cnt').textContent = S.posts.length;
-    F('List').innerHTML = '';
-    S.posts.forEach(function (p, i) {
-      var div = document.createElement('div'); div.className = 'entry';
-      div.innerHTML = '<div class="k"></div><div class="v"></div><div class="ops"></div>';
-      div.querySelector('.k').textContent = (p.cat || '') + (p.tag ? ' · ' + p.tag : '');
-      div.querySelector('.v').textContent = p.title;
-      var be = document.createElement('button'); be.className = 'btn btn-ghost'; be.textContent = '编辑';
-      be.onclick = function () {
-        S.edit = i;
-        F('Title').value = p.title; F('Cat').value = p.cat || ''; F('Tag').value = p.tag || ''; F('Body').value = p.body;
-        F('FormTitle').textContent = '编辑帖子'; F('Save').textContent = '保存修改'; F('CancelBox').style.display = 'block';
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      };
-      var bd = document.createElement('button'); bd.className = 'btn btn-ghost btn-danger'; bd.textContent = '删除';
-      bd.onclick = async function () {
-        if (!confirm('删除「' + p.title + '」？')) return;
-        S.posts.splice(i, 1); await commit(key + ': 删除 ' + p.title);
-      };
-      div.querySelector('.ops').appendChild(be); div.querySelector('.ops').appendChild(bd);
-      F('List').appendChild(div);
-    });
-  }
-  function cancel() {
-    S.edit = -1; F('Title').value = ''; F('Body').value = '';
-    F('FormTitle').textContent = '新增帖子'; F('Save').textContent = '保存'; F('CancelBox').style.display = 'none';
-  }
-  async function load() {
-    var g = await ghGet(file); S.sha = g.sha;
-    S.posts = JSON.parse(g.text).posts;
-    render();
-  }
-  async function commit(cmsg) {
-    try {
-      S.sha = await ghPut(file, S.sha, JSON.stringify({ posts: S.posts }, null, 2), cmsg);
-      ok('已保存！约 1 分钟后可见 → <a href="' + viewUrl + '">查看页面</a>');
-      cancel(); render();
-    } catch (e) { err(e.message); load(); }
-  }
-  F('Cancel').onclick = cancel;
-  F('Save').onclick = function () {
-    var p = { title: F('Title').value.trim(), cat: F('Cat').value.trim() || '未分类', tag: F('Tag').value.trim(), body: F('Body').value.trim() };
-    if (!p.title || !p.body) { err('标题和正文必填'); return; }
-    if (S.edit === -1) { S.posts.unshift(p); commit(key + ': 新增 ' + p.title); }
-    else { S.posts[S.edit] = p; commit(key + ': 编辑 ' + p.title); }
-  };
-  return { load: load };
-}
-
-var storeS = makePostStore('s', 'shizhan.json', 'shizhan', 'shizhan.html');
-var storeT = makePostStore('t', 'tools.json', 'tools', 'tools.html');
-
-/* ─── 日常 ─── */
-var D = { sha: '', header: '', entries: [], edit: -1 };
-$('dDate').value = new Date().toISOString().slice(0, 10);
-function dRender() {
-  $('dCnt').textContent = D.entries.length;
-  $('dList').innerHTML = '';
-  if (!D.entries.length) { $('dList').innerHTML = '<div class="loading">还没有日常</div>'; return; }
-  D.entries.forEach(function (e, i) {
-    var div = document.createElement('div'); div.className = 'entry';
-    div.innerHTML = '<div class="k"></div><div class="v"></div><div class="ops"></div>';
-    div.querySelector('.k').textContent = e.date + ' · ' + e.slot;
-    div.querySelector('.v').textContent = e.body;
-    var be = document.createElement('button'); be.className = 'btn btn-ghost'; be.textContent = '编辑';
-    be.onclick = function () {
-      D.edit = i; $('dDate').value = e.date; $('dSlot').value = e.slot || '下午'; $('dBody').value = e.body;
-      $('dFormTitle').textContent = '编辑日常'; $('dSave').textContent = '保存修改'; $('dCancelBox').style.display = 'block';
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-    var bd = document.createElement('button'); bd.className = 'btn btn-ghost btn-danger'; bd.textContent = '删除';
-    bd.onclick = async function () {
-      if (!confirm('删除这条「' + e.date + '」的日常？')) return;
-      D.entries.splice(i, 1); await dCommit('daily: 删除一条');
-    };
-    div.querySelector('.ops').appendChild(be); div.querySelector('.ops').appendChild(bd);
-    $('dList').appendChild(div);
-  });
-}
-function dSerialize() {
-  var out = D.header.replace(/\s*$/, '') + '\n\n';
-  D.entries.forEach(function (e) { out += '## ' + e.date + ' · ' + e.slot + '\n' + e.body + '\n\n'; });
-  return out;
-}
-async function dLoad() {
-  var g = await ghGet('daily.md'); D.sha = g.sha;
-  var parts = g.text.split(/^## /m);
-  D.header = parts[0];
-  D.entries = parts.slice(1).map(function (b) {
-    var nl = b.indexOf('\n'), when = b.slice(0, nl).trim(), body = b.slice(nl).trim();
-    var m = when.match(/^(\d{4}-\d{2}-\d{2})\s*·\s*(.*)$/);
-    return { date: m ? m[1] : when, slot: m ? m[2] : '', body: body };
-  });
-  dRender();
-}
-async function dCommit(cmsg) {
-  try {
-    D.sha = await ghPut('daily.md', D.sha, dSerialize(), cmsg);
-    ok('已保存！约 1 分钟后可见 → <a href="daily.html">查看日常页</a>');
-    dCancel(); dRender();
-  } catch (e) { err(e.message); dLoad(); }
-}
-function dCancel() {
-  D.edit = -1; $('dBody').value = '';
-  $('dFormTitle').textContent = '新增日常'; $('dSave').textContent = '发布'; $('dCancelBox').style.display = 'none';
-}
-$('dCancel').onclick = dCancel;
-$('dSave').onclick = function () {
-  var date = $('dDate').value, slot = $('dSlot').value, body = $('dBody').value.trim();
-  if (!date || !body) { err('日期和内容都要填'); return; }
-  if (D.edit === -1) { D.entries.unshift({ date: date, slot: slot, body: body }); dCommit('daily: 新增 ' + date); }
-  else { D.entries[D.edit] = { date: date, slot: slot, body: body }; dCommit('daily: 编辑 ' + date); }
-};
-
-/* ─── 书单 ─── */
-var B = { sha: '', books: [], edit: -1 };
-var B_STATUS = { reading: '在读', todo: '待读', free: '免费在线', done: '已读' };
-function bRender() {
-  $('bCnt').textContent = B.books.length;
-  $('bList').innerHTML = '';
-  B.books.forEach(function (b, i) {
-    var div = document.createElement('div'); div.className = 'entry';
-    div.innerHTML = '<div class="k"></div><div class="v"></div><div class="ops"></div>';
-    div.querySelector('.k').textContent = B_STATUS[b.status] || b.status;
-    div.querySelector('.v').textContent = '《' + b.title + '》 ' + (b.author || '');
-    var be = document.createElement('button'); be.className = 'btn btn-ghost'; be.textContent = '编辑';
-    be.onclick = function () {
-      B.edit = i; $('bTitle').value = b.title; $('bStatus').value = b.status;
-      $('bAuthor').value = b.author || ''; $('bLink').value = b.link || '';
-      $('bFormTitle').textContent = '编辑书籍'; $('bSave').textContent = '保存修改'; $('bCancelBox').style.display = 'block';
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-    var bd = document.createElement('button'); bd.className = 'btn btn-ghost btn-danger'; bd.textContent = '删除';
-    bd.onclick = async function () {
-      if (!confirm('删除《' + b.title + '》？')) return;
-      B.books.splice(i, 1); await bCommit('books: 删除 ' + b.title);
-    };
-    div.querySelector('.ops').appendChild(be); div.querySelector('.ops').appendChild(bd);
-    $('bList').appendChild(div);
-  });
-}
-async function bLoad() {
-  var g = await ghGet('books.json'); B.sha = g.sha;
-  B.books = JSON.parse(g.text).books;
-  bRender();
-}
-async function bCommit(cmsg) {
-  try {
-    B.sha = await ghPut('books.json', B.sha, JSON.stringify({ books: B.books }, null, 2), cmsg);
-    ok('已保存！约 1 分钟后可见 → <a href="books.html">查看书单页</a>');
-    bCancel(); bRender();
-  } catch (e) { err(e.message); bLoad(); }
-}
-function bCancel() {
-  B.edit = -1; $('bTitle').value = ''; $('bAuthor').value = ''; $('bLink').value = '';
-  $('bFormTitle').textContent = '新增书籍'; $('bSave').textContent = '保存'; $('bCancelBox').style.display = 'none';
-}
-$('bCancel').onclick = bCancel;
-$('bSave').onclick = function () {
-  var b = { title: $('bTitle').value.trim(), status: $('bStatus').value, author: $('bAuthor').value.trim(), link: $('bLink').value.trim() };
-  if (!b.title) { err('书名必填'); return; }
-  if (B.edit === -1) { B.books.unshift(b); bCommit('books: 新增 ' + b.title); }
-  else { B.books[B.edit] = b; bCommit('books: 编辑 ' + b.title); }
-};
-
-/* ─── 项目 ─── */
-var J = { sha: '', projects: [], edit: -1 };
-function jRender() {
-  $('jCnt').textContent = J.projects.length;
-  $('jList').innerHTML = '';
-  J.projects.forEach(function (p, i) {
-    var div = document.createElement('div'); div.className = 'entry';
-    div.innerHTML = '<div class="k"></div><div class="v"></div><div class="ops"></div>';
-    div.querySelector('.k').textContent = (p.icon || '') + ' ' + p.status;
-    div.querySelector('.v').textContent = p.name + ' — ' + (p.desc || '');
-    var be = document.createElement('button'); be.className = 'btn btn-ghost'; be.textContent = '编辑';
-    be.onclick = function () {
-      J.edit = i; $('jIcon').value = p.icon || ''; $('jStatus').value = p.status; $('jName').value = p.name; $('jDesc').value = p.desc || '';
-      $('jFormTitle').textContent = '编辑项目'; $('jSave').textContent = '保存修改'; $('jCancelBox').style.display = 'block';
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-    var bd = document.createElement('button'); bd.className = 'btn btn-ghost btn-danger'; bd.textContent = '删除';
-    bd.onclick = async function () {
-      if (!confirm('删除项目「' + p.name + '」？')) return;
-      J.projects.splice(i, 1); await jCommit('projects: 删除 ' + p.name);
-    };
-    div.querySelector('.ops').appendChild(be); div.querySelector('.ops').appendChild(bd);
-    $('jList').appendChild(div);
-  });
-}
-async function jLoad() {
-  var g = await ghGet('projects.json'); J.sha = g.sha;
-  J.projects = JSON.parse(g.text).projects;
-  jRender();
-}
-async function jCommit(cmsg) {
-  try {
-    J.sha = await ghPut('projects.json', J.sha, JSON.stringify({ projects: J.projects }, null, 2), cmsg);
-    ok('已保存！约 1 分钟后可见 → <a href="projects.html">查看项目页</a>');
-    jCancel(); jRender();
-  } catch (e) { err(e.message); jLoad(); }
-}
-function jCancel() {
-  J.edit = -1; $('jIcon').value = ''; $('jName').value = ''; $('jDesc').value = '';
-  $('jFormTitle').textContent = '新增项目'; $('jSave').textContent = '保存'; $('jCancelBox').style.display = 'none';
-}
-$('jCancel').onclick = jCancel;
-$('jSave').onclick = function () {
-  var p = { icon: $('jIcon').value.trim() || '📦', status: $('jStatus').value, name: $('jName').value.trim(), desc: $('jDesc').value.trim() };
-  if (!p.name) { err('项目名必填'); return; }
-  if (J.edit === -1) { J.projects.unshift(p); jCommit('projects: 新增 ' + p.name); }
-  else { J.projects[J.edit] = p; jCommit('projects: 编辑 ' + p.name); }
-};
-
-/* ─── 启动 ─── */
-if (token) boot(); else $('tokenBox').style.display = 'block';
-$('saveToken').onclick = function () {
-  var t = $('tokenInput').value.trim();
-  if (!t) return;
-  localStorage.setItem('gh_pat', t); token = t; boot();
-};
-async function boot() {
-  $('tokenBox').style.display = 'none';
-  $('mainBox').style.display = 'block';
-  try { await Promise.all([dLoad(), bLoad(), jLoad(), storeS.load(), storeT.load()]); }
-  catch (e) { err('加载失败：' + e.message); }
-}
-</script>
-</body>
-</html>

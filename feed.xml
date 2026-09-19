@@ -2,63 +2,62 @@
 <rss version="2.0">
 <channel>
 <title>0xL · 逆向练习生</title>
-<link>https://xinhaowu04-collab.github.io</link>
+<link>https://0xl.top</link>
 <description>二进制世界的探险笔记</description>
 <language>zh-CN</language>
-<lastBuildDate>Thu, 17 Sep 2026 16:05:07 +0800</lastBuildDate>
-<item><title>8086 基础与体系结构</title><link>https://xinhaowu04-collab.github.io/notes/asm16-01-基础与体系结构.html</link></item>
-<item><title>8086 寻址方式与数据传送指令</title><link>https://xinhaowu04-collab.github.io/notes/asm16-02-寻址与数据传送.html</link></item>
-<item><title>程序结构与系统</title><link>https://xinhaowu04-collab.github.io/notes/asm16-03-程序结构与系统.html</link></item>
-<item><title>工具与伪指令</title><link>https://xinhaowu04-collab.github.io/notes/asm16-04-工具与伪指令.html</link></item>
-<item><title>8086 算术与位操作指令</title><link>https://xinhaowu04-collab.github.io/notes/asm16-04-算术与位操作.html</link></item>
-<item><title>8086 字符串操作与 I/O 指令</title><link>https://xinhaowu04-collab.github.io/notes/asm16-05-字符串与IO.html</link></item>
-<item><title>8086 控制指令与 FPU</title><link>https://xinhaowu04-collab.github.io/notes/asm16-06-控制与FPU.html</link></item>
-<item><title>8086 算术与位操作指令</title><link>https://xinhaowu04-collab.github.io/notes/asm16-07-算术与位操作.html</link></item>
-<item><title>环境与 MASM</title><link>https://xinhaowu04-collab.github.io/notes/asm32-01-环境与MASM.html</link></item>
-<item><title>寄存器与 EFLAGS</title><link>https://xinhaowu04-collab.github.io/notes/asm32-02-寄存器与EFLAGS.html</link></item>
-<item><title>保护模式与寻址</title><link>https://xinhaowu04-collab.github.io/notes/asm32-03-保护模式与寻址.html</link></item>
-<item><title>调用约定</title><link>https://xinhaowu04-collab.github.io/notes/asm32-04-调用约定.html</link></item>
-<item><title>指令集速查</title><link>https://xinhaowu04-collab.github.io/notes/asm32-05-指令集速查.html</link></item>
-<item><title>Shellcode：内存与位置无关代码</title><link>https://xinhaowu04-collab.github.io/notes/asm32-06-Shellcode-内存与PIC.html</link></item>
-<item><title>Shellcode：PEB 链与导出表解析</title><link>https://xinhaowu04-collab.github.io/notes/asm32-07-Shellcode-PEB与导出表.html</link></item>
-<item><title>C 与汇编混合编程</title><link>https://xinhaowu04-collab.github.io/notes/asm32-08-混合编程.html</link></item>
-<item><title>调试器与异常</title><link>https://xinhaowu04-collab.github.io/notes/asm32-09-调试器与异常.html</link></item>
-<item><title>逆向定位实战</title><link>https://xinhaowu04-collab.github.io/notes/asm32-10-逆向定位实战.html</link></item>
-<item><title>作业实战</title><link>https://xinhaowu04-collab.github.io/notes/asm32-11-作业实战.html</link></item>
-<item><title>手动寻找 main 的三种课堂方法</title><link>https://xinhaowu04-collab.github.io/notes/c-re-01.html</link></item>
-<item><title>除法的基本定义</title><link>https://xinhaowu04-collab.github.io/notes/c-re-02.html</link></item>
-<item><title>无符号除为非 2 的幂常量</title><link>https://xinhaowu04-collab.github.io/notes/c-re-03.html</link></item>
-<item><title>取模</title><link>https://xinhaowu04-collab.github.io/notes/c-re-04.html</link></item>
-<item><title>三目操作符</title><link>https://xinhaowu04-collab.github.io/notes/c-re-05.html</link></item>
-<item><title>SWITCH</title><link>https://xinhaowu04-collab.github.io/notes/c-re-06.html</link></item>
-<item><title>位操作</title><link>https://xinhaowu04-collab.github.io/notes/c-re-07.html</link></item>
-<item><title>病毒分析</title><link>https://xinhaowu04-collab.github.io/notes/c-re-08.html</link></item>
-<item><title>变量</title><link>https://xinhaowu04-collab.github.io/notes/c-re-09.html</link></item>
-<item><title>浮点与SIMD</title><link>https://xinhaowu04-collab.github.io/notes/c-re-10.html</link></item>
-<item><title>类与构造析构识别</title><link>https://xinhaowu04-collab.github.io/notes/cpp-re-01-类与构造析构识别.html</link></item>
-<item><title>对象传递与虚函数</title><link>https://xinhaowu04-collab.github.io/notes/cpp-re-02-对象传递与虚函数.html</link></item>
-<item><title>重载静态成员与继承</title><link>https://xinhaowu04-collab.github.io/notes/cpp-re-03-重载静态成员与继承.html</link></item>
-<item><title>调试器架构与命令实现</title><link>https://xinhaowu04-collab.github.io/notes/dbg-01-调试器架构与命令实现.html</link></item>
-<item><title>断点系统</title><link>https://xinhaowu04-collab.github.io/notes/dbg-02-断点系统.html</link></item>
-<item><title>调试事件循环与单步</title><link>https://xinhaowu04-collab.github.io/notes/dbg-03-调试事件循环与单步.html</link></item>
-<item><title>病毒分析公式化打法</title><link>https://xinhaowu04-collab.github.io/notes/fx-病毒分析公式化打法.html</link></item>
-<item><title>压缩壳实现</title><link>https://xinhaowu04-collab.github.io/notes/pack-01-压缩壳实现.html</link></item>
-<item><title>脱壳与 IAT 修复</title><link>https://xinhaowu04-collab.github.io/notes/pack-02-脱壳与IAT修复.html</link></item>
-<item><title>VMP 虚拟机分析</title><link>https://xinhaowu04-collab.github.io/notes/pack-03-VMP虚拟机分析.html</link></item>
-<item><title>VMP 混淆与反调试对抗</title><link>https://xinhaowu04-collab.github.io/notes/pack-04-VMP混淆与反调试对抗.html</link></item>
-<item><title>Frida 动态插装</title><link>https://xinhaowu04-collab.github.io/notes/pack-05-Frida动态插装.html</link></item>
-<item><title>PE 文件格式与畸形 PE</title><link>https://xinhaowu04-collab.github.io/notes/pe-01-PE格式与畸形PE.html</link></item>
-<item><title>可选头与节表</title><link>https://xinhaowu04-collab.github.io/notes/pe-02-可选头与节表.html</link></item>
-<item><title>内存映射与地址转换</title><link>https://xinhaowu04-collab.github.io/notes/pe-03-内存映射与地址转换.html</link></item>
-<item><title>节修改与代码注入</title><link>https://xinhaowu04-collab.github.io/notes/pe-04-节修改与代码注入.html</link></item>
-<item><title>导入表与 IAT</title><link>https://xinhaowu04-collab.github.io/notes/pe-05-导入表与IAT.html</link></item>
-<item><title>导出表与函数转发</title><link>https://xinhaowu04-collab.github.io/notes/pe-06-导出表与转发.html</link></item>
-<item><title>Qt PE32 解析器项目</title><link>https://xinhaowu04-collab.github.io/notes/pe-07-Qt解析器项目.html</link></item>
-<item><title>Dump 与手动装载</title><link>https://xinhaowu04-collab.github.io/notes/pe-08-Dump与手动装载.html</link></item>
-<item><title>手工 Loader 实战</title><link>https://xinhaowu04-collab.github.io/notes/pe-09-手工Loader实战.html</link></item>
-<item><title>最小 PE 逐字节解析</title><link>https://xinhaowu04-collab.github.io/notes/pe-10-最小PE逐字节解析.html</link></item>
-<item><title>扩展数据目录</title><link>https://xinhaowu04-collab.github.io/notes/pe-11-扩展数据目录.html</link></item>
-<item><title>资源与 TLS</title><link>https://xinhaowu04-collab.github.io/notes/pe-12-资源与TLS.html</link></item>
-<item><title>实战文章写作模板</title><link>https://xinhaowu04-collab.github.io/notes/tpl-实战写作模板.html</link></item>
+<lastBuildDate>Sat, 19 Sep 2026 10:49:27 +0800</lastBuildDate>
+<item><title>01-程序入口与库识别</title><link>https://0xl.top/notes.html#c-re-01-程序入口与库识别</link></item>
+<item><title>02-乘除与取模优化</title><link>https://0xl.top/notes.html#c-re-02-乘除与取模优化</link></item>
+<item><title>03-控制流识别</title><link>https://0xl.top/notes.html#c-re-03-控制流识别</link></item>
+<item><title>04-其他优化识别</title><link>https://0xl.top/notes.html#c-re-04-其他优化识别</link></item>
+<item><title>05-变量与数据结构</title><link>https://0xl.top/notes.html#c-re-05-变量与数据结构</link></item>
+<item><title>06-浮点与SIMD</title><link>https://0xl.top/notes.html#c-re-06-浮点与SIMD</link></item>
+<item><title>07-病毒分析</title><link>https://0xl.top/notes.html#c-re-07-病毒分析</link></item>
+<item><title>01-PE格式与畸形PE</title><link>https://0xl.top/notes.html#pe-01-PE格式与畸形PE</link></item>
+<item><title>02-可选头与节表</title><link>https://0xl.top/notes.html#pe-02-可选头与节表</link></item>
+<item><title>03-内存映射与地址转换</title><link>https://0xl.top/notes.html#pe-03-内存映射与地址转换</link></item>
+<item><title>04-节修改与代码注入</title><link>https://0xl.top/notes.html#pe-04-节修改与代码注入</link></item>
+<item><title>05-导入表与IAT</title><link>https://0xl.top/notes.html#pe-05-导入表与IAT</link></item>
+<item><title>06-导出表与转发</title><link>https://0xl.top/notes.html#pe-06-导出表与转发</link></item>
+<item><title>07-Qt解析器项目</title><link>https://0xl.top/notes.html#pe-07-Qt解析器项目</link></item>
+<item><title>08-Dump与手动装载</title><link>https://0xl.top/notes.html#pe-08-Dump与手动装载</link></item>
+<item><title>09-手工Loader实战</title><link>https://0xl.top/notes.html#pe-09-手工Loader实战</link></item>
+<item><title>10-最小PE逐字节解析</title><link>https://0xl.top/notes.html#pe-10-最小PE逐字节解析</link></item>
+<item><title>11-扩展数据目录</title><link>https://0xl.top/notes.html#pe-11-扩展数据目录</link></item>
+<item><title>12-资源与TLS</title><link>https://0xl.top/notes.html#pe-12-资源与TLS</link></item>
+<item><title>01-环境与MASM</title><link>https://0xl.top/notes.html#asm32-01-环境与MASM</link></item>
+<item><title>02-寄存器与EFLAGS</title><link>https://0xl.top/notes.html#asm32-02-寄存器与EFLAGS</link></item>
+<item><title>03-保护模式与寻址</title><link>https://0xl.top/notes.html#asm32-03-保护模式与寻址</link></item>
+<item><title>04-调用约定</title><link>https://0xl.top/notes.html#asm32-04-调用约定</link></item>
+<item><title>05-指令集速查</title><link>https://0xl.top/notes.html#asm32-05-指令集速查</link></item>
+<item><title>06-Shellcode-内存与PIC</title><link>https://0xl.top/notes.html#asm32-06-Shellcode-内存与PIC</link></item>
+<item><title>07-Shellcode-PEB与导出表</title><link>https://0xl.top/notes.html#asm32-07-Shellcode-PEB与导出表</link></item>
+<item><title>08-混合编程</title><link>https://0xl.top/notes.html#asm32-08-混合编程</link></item>
+<item><title>09-调试器与异常</title><link>https://0xl.top/notes.html#asm32-09-调试器与异常</link></item>
+<item><title>10-逆向定位实战</title><link>https://0xl.top/notes.html#asm32-10-逆向定位实战</link></item>
+<item><title>11-作业实战</title><link>https://0xl.top/notes.html#asm32-11-作业实战</link></item>
+<item><title>01-基础与体系结构</title><link>https://0xl.top/notes.html#asm16-01-基础与体系结构</link></item>
+<item><title>02-寻址与数据传送</title><link>https://0xl.top/notes.html#asm16-02-寻址与数据传送</link></item>
+<item><title>03-程序结构与系统</title><link>https://0xl.top/notes.html#asm16-03-程序结构与系统</link></item>
+<item><title>04-工具与伪指令</title><link>https://0xl.top/notes.html#asm16-04-工具与伪指令</link></item>
+<item><title>04-算术与位操作</title><link>https://0xl.top/notes.html#asm16-04-算术与位操作</link></item>
+<item><title>05-字符串与IO</title><link>https://0xl.top/notes.html#asm16-05-字符串与IO</link></item>
+<item><title>06-控制与FPU</title><link>https://0xl.top/notes.html#asm16-06-控制与FPU</link></item>
+<item><title>07-算术与位操作</title><link>https://0xl.top/notes.html#asm16-07-算术与位操作</link></item>
+<item><title>01-调试器架构与命令实现</title><link>https://0xl.top/notes.html#dbg-01-调试器架构与命令实现</link></item>
+<item><title>02-断点系统</title><link>https://0xl.top/notes.html#dbg-02-断点系统</link></item>
+<item><title>03-调试事件循环与单步</title><link>https://0xl.top/notes.html#dbg-03-调试事件循环与单步</link></item>
+<item><title>01-压缩壳实现</title><link>https://0xl.top/notes.html#pack-01-压缩壳实现</link></item>
+<item><title>02-脱壳与IAT修复</title><link>https://0xl.top/notes.html#pack-02-脱壳与IAT修复</link></item>
+<item><title>03-VMP虚拟机分析</title><link>https://0xl.top/notes.html#pack-03-VMP虚拟机分析</link></item>
+<item><title>04-VMP混淆与反调试对抗</title><link>https://0xl.top/notes.html#pack-04-VMP混淆与反调试对抗</link></item>
+<item><title>05-Frida动态插装</title><link>https://0xl.top/notes.html#pack-05-Frida动态插装</link></item>
+<item><title>01-类与构造析构识别</title><link>https://0xl.top/notes.html#cpp-re-01-类与构造析构识别</link></item>
+<item><title>02-对象传递与虚函数</title><link>https://0xl.top/notes.html#cpp-re-02-对象传递与虚函数</link></item>
+<item><title>03-重载静态成员与继承</title><link>https://0xl.top/notes.html#cpp-re-03-重载静态成员与继承</link></item>
+<item><title>多重继承：</title><link>https://0xl.top/notes.html#cpp-re-04</link></item>
+<item><title>多重继承：</title><link>https://0xl.top/notes.html#cpp-re-05</link></item>
+<item><title>实战文章写作模板</title><link>https://0xl.top/notes.html#tpl-实战写作模板</link></item>
+<item><title>WanaCry1 样本分析作业（填空式）</title><link>https://0xl.top/notes.html#fx-病毒分析公式化打法</link></item>
 </channel>
 </rss>
