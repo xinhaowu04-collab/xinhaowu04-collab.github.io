@@ -133,11 +133,11 @@ textarea.drag { border-color:var(--pink-deep); background:rgba(240,143,183,.06);
       <label>正文（Markdown，可拖入 .md 文件或图片）</label>
       <textarea id="sBody" class="big" placeholder="## 背景&#10;……"></textarea>
       <div class="drop-tip">💡 拖 .md/.txt 进来 = 导入正文；拖图片进来 = 上传并插入图片</div>
+      <div id="sKB" style="display:none;margin:0 0 12px;padding:10px 14px;background:#fdf2f8;border:1px solid #f9a8d4;border-radius:10px;font-size:13px">
+        ⚠️ 该帖正文托管在知识库，这里只能改这行链接 → <button class="btn btn-ghost" id="sKBJump" type="button">直接编辑知识库正文</button>
+      </div>
       <button class="btn btn-pub" id="sSave">保存</button>
       <div style="text-align:center;margin-top:10px;display:none" id="sCancelBox"><button class="btn btn-ghost" id="sCancel">取消编辑</button></div>
-      <div id="sKB" style="display:none;margin-top:12px;padding:10px 14px;background:#fdf2f8;border:1px solid #f9a8d4;border-radius:10px;font-size:13px">
-        该帖正文托管在知识库，这里只能改这行链接 → <button class="btn btn-ghost" id="sKBJump" type="button">直接编辑知识库正文</button>
-      </div>
     </div>
     <div class="list-h">全部实战帖（<span id="sCnt">0</span>）</div>
     <div id="sList" class="loading">加载中…</div>
