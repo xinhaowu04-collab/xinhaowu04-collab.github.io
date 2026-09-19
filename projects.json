@@ -1,0 +1,40 @@
+{
+  "projects": [
+    {
+      "icon": "🐱",
+      "name": "CodeBuddy 猫窝",
+      "desc": "多账号自动任务管家：签到、猫猫旅行、连登兑换抽奖全自动，PyInstaller 单文件分发。",
+      "status": "已完成"
+    },
+    {
+      "icon": "🔐",
+      "name": "workbuddy2api-pool",
+      "desc": "多账号轮询 API 网关：22 个号的 accessToken 池化、踢下线自动重登、令牌哈希脱敏存储。",
+      "status": "已完成"
+    },
+    {
+      "icon": "🧹",
+      "name": "RAT 应急响应工具包",
+      "desc": "一次真实入侵的清理产物：启动项清除脚本 + 排查清单。",
+      "status": "已完成"
+    },
+    {
+      "icon": "🧭",
+      "name": "PE Inspector",
+      "desc": "手写 PE 解析器：区段/导入导出/重定位/资源，熵值识别加壳。",
+      "status": "开发中"
+    },
+    {
+      "icon": "🔌",
+      "name": "WorkBuddy OAuth 插件",
+      "desc": "把 workbuddy2api 的账号登录/刷新流程搬进 WorkBuddy 插件体系。",
+      "status": "开发中"
+    },
+    {
+      "icon": "🐛",
+      "name": "WinAFL 上手",
+      "desc": "结业前主线任务：跑通第一个闭源目标 Fuzz。",
+      "status": "规划中"
+    }
+  ]
+}

@@ -21,11 +21,6 @@ nav .links a:hover { color:var(--pink-deep); background:rgba(240,143,183,.1); }
 nav .links a.on { color:var(--pink-deep); background:rgba(240,143,183,.12); }
 h1.page { font-size:26px; margin:42px 0 8px; }
 .sub { color:var(--dim); font-size:14px; margin-bottom:26px; }
-.stage { margin-bottom:28px; }
-.stage-h { display:flex; align-items:baseline; gap:10px; margin-bottom:14px; }
-.stage-h .no { font-family:Consolas,monospace; font-size:13px; color:var(--pink-deep); font-weight:700; }
-.stage-h h2 { font-size:17px; }
-.stage-h .hint { color:var(--dim); font-size:12px; }
 .book { display:flex; align-items:center; gap:14px;
   background:var(--card); border:1px solid var(--border); border-radius:14px;
   padding:14px 18px; margin-bottom:10px; box-shadow:var(--shadow); transition:all .25s; }
@@ -37,8 +32,7 @@ h1.page { font-size:26px; margin:42px 0 8px; }
 .book .st { margin-left:auto; font-size:11px; padding:3px 11px; border-radius:999px; white-space:nowrap; }
 .st.reading { color:var(--pink-deep); background:rgba(240,143,183,.12); border:1px solid rgba(240,143,183,.4); }
 .st.todo { color:var(--dim); background:rgba(156,150,163,.08); border:1px solid rgba(156,150,163,.25); }
-.st.free { color:#3d8b5f; background:rgba(123,199,150,.14); border:1px solid rgba(123,199,150,.4); }
-.st.done { color:#3d8b5f; background:rgba(123,199,150,.14); border:1px solid rgba(123,199,150,.4); }
+.st.free, .st.done { color:#3d8b5f; background:rgba(123,199,150,.14); border:1px solid rgba(123,199,150,.4); }
 footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13px; }
 </style>
 </head>
@@ -50,47 +44,27 @@ footer { text-align:center; padding:44px 0 36px; color:var(--dim); font-size:13p
 </nav>
 
 <h1 class="page">书单</h1>
-<div class="sub">通往二进制漏洞研究的路，按推荐顺序排好了。</div>
-<div id="stages"></div>
+<div class="sub">通往二进制漏洞研究的路。</div>
+<div id="list"></div>
 <footer>© 2026 0xL · Stay curious, stay reverse.</footer>
 </div>
 <script>
 var STATUS = { reading: '在读', todo: '待读', free: '免费在线', done: '已读' };
-fetch('books.json?v=' + Date.now()).then(function (r) { return r.json(); }).then(function (data) {
-  var html = '';
-  data.stages.forEach(function (st, si) {
-    var books = data.books.filter(function (b) { return b.stage === si; });
-    if (!books.length) return;
-    html += '<div class="stage"><div class="stage-h"><span class="no">' + st.no + '</span><h2></h2><span class="hint"></span></div></div>';
-    var stage = document.createElement('div');
-    stage.className = 'stage';
-    var h = document.createElement('div');
-    h.className = 'stage-h';
-    var no = document.createElement('span'); no.className = 'no'; no.textContent = st.no;
-    var h2 = document.createElement('h2'); h2.textContent = st.name;
-    var hint = document.createElement('span'); hint.className = 'hint'; hint.textContent = st.hint;
-    h.appendChild(no); h.appendChild(h2); h.appendChild(hint);
-    stage.appendChild(h);
-    books.forEach(function (b) {
-      var div = document.createElement('div');
-      div.className = 'book';
-      var info = document.createElement('div');
-      var t = document.createElement('div'); t.className = 't';
-      if (b.link) {
-        var a = document.createElement('a'); a.href = b.link; a.target = '_blank'; a.rel = 'noopener'; a.textContent = '《' + b.title + '》↗';
-        t.appendChild(a);
-      } else {
-        t.textContent = '《' + b.title + '》';
-      }
-      var au = document.createElement('div'); au.className = 'a'; au.textContent = b.author;
-      info.appendChild(t); info.appendChild(au);
-      var st2 = document.createElement('span');
-      st2.className = 'st ' + b.status;
-      st2.textContent = STATUS[b.status] || b.status;
-      div.appendChild(info); div.appendChild(st2);
-      stage.appendChild(div);
-    });
-    document.getElementById('stages').appendChild(stage);
+fetch('books.json?v=' + Date.now()).then(function (r) { return r.json(); }).then(function (d) {
+  var box = document.getElementById('list');
+  d.books.forEach(function (b) {
+    var div = document.createElement('div'); div.className = 'book';
+    var info = document.createElement('div');
+    var t = document.createElement('div'); t.className = 't';
+    if (b.link) {
+      var a = document.createElement('a'); a.href = b.link; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = '《' + b.title + '》↗'; t.appendChild(a);
+    } else { t.textContent = '《' + b.title + '》'; }
+    var au = document.createElement('div'); au.className = 'a'; au.textContent = b.author || '';
+    info.appendChild(t); info.appendChild(au);
+    var st = document.createElement('span'); st.className = 'st ' + b.status; st.textContent = STATUS[b.status] || b.status;
+    div.appendChild(info); div.appendChild(st);
+    box.appendChild(div);
   });
 });
 </script>

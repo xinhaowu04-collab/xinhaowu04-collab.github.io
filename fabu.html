@@ -35,8 +35,8 @@ textarea.big { min-height:200px; font-size:13.5px; font-family:Consolas,"LXGW We
 .hint a { color:var(--pink-deep); }
 .back { display:inline-block; margin-bottom:16px; color:var(--pink-deep); text-decoration:none; font-size:14px; }
 .back:hover { text-decoration:underline; }
-.tabs { display:flex; gap:8px; margin-bottom:18px; }
-.tab { flex:1; text-align:center; padding:10px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--dim); font-size:14px; font-weight:600; cursor:pointer; transition:all .2s; }
+.tabs { display:flex; gap:6px; margin-bottom:18px; flex-wrap:wrap; }
+.tab { flex:1; min-width:80px; text-align:center; padding:10px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--dim); font-size:14px; font-weight:600; cursor:pointer; transition:all .2s; }
 .tab.on { color:var(--pink-deep); background:rgba(240,143,183,.12); border-color:rgba(240,143,183,.45); }
 .pane { display:none; } .pane.on { display:block; }
 .list-h { font-size:16px; font-weight:700; margin:24px 0 10px; display:flex; align-items:center; gap:10px; }
@@ -46,13 +46,15 @@ textarea.big { min-height:200px; font-size:13.5px; font-family:Consolas,"LXGW We
 .entry .v { font-size:14px; line-height:1.7; margin:5px 0 9px; white-space:pre-wrap; word-break:break-all; }
 .entry .ops { display:flex; gap:8px; }
 .loading { text-align:center; color:var(--dim); padding:26px; font-size:14px; }
+.drop-tip { font-size:11px; color:var(--dim); margin-top:6px; }
+textarea.drag { border-color:var(--pink-deep); background:rgba(240,143,183,.06); }
 </style>
 </head>
 <body>
 <div class="wrap">
 <a class="back" href="index.html">← 返回网站</a>
 <h1>后台管理</h1>
-<div class="sub">日常 / 书单 / 工具，保存后约 1 分钟全站生效。</div>
+<div class="sub">保存后约 1 分钟全站生效。正文框支持拖入 .md 文件导入、拖入图片自动上传。</div>
 
 <div class="card" id="tokenBox" style="display:none">
   <label>首次使用：填入 GitHub 访问令牌（只存在你自己浏览器里）</label>
@@ -65,10 +67,11 @@ textarea.big { min-height:200px; font-size:13.5px; font-family:Consolas,"LXGW We
   <div class="tabs">
     <div class="tab on" data-p="daily">日常</div>
     <div class="tab" data-p="books">书单</div>
+    <div class="tab" data-p="shizhan">实战</div>
+    <div class="tab" data-p="projects">项目</div>
     <div class="tab" data-p="tools">工具</div>
   </div>
 
-  <!-- ═══ 日常 ═══ -->
   <div class="pane on" id="p-daily">
     <div class="card">
       <div id="dFormTitle" style="font-weight:700;margin-bottom:4px">新增日常</div>
@@ -85,16 +88,14 @@ textarea.big { min-height:200px; font-size:13.5px; font-family:Consolas,"LXGW We
     <div id="dList" class="loading">加载中…</div>
   </div>
 
-  <!-- ═══ 书单 ═══ -->
   <div class="pane" id="p-books">
     <div class="card">
       <div id="bFormTitle" style="font-weight:700;margin-bottom:4px">新增书籍</div>
       <label>书名</label><input id="bTitle" placeholder="不含书名号">
       <div class="row">
-        <div><label>阶段</label><select id="bStage"></select></div>
         <div><label>状态</label><select id="bStatus"><option value="todo">待读</option><option value="reading">在读</option><option value="done">已读</option><option value="free">免费在线</option></select></div>
+        <div><label>作者/备注</label><input id="bAuthor" placeholder="王清 · 国内漏洞启蒙经典"></div>
       </div>
-      <label>作者/备注</label><input id="bAuthor" placeholder="王清 · 国内漏洞启蒙经典">
       <label>链接（可选，免费资源填）</label><input id="bLink" placeholder="https://…">
       <button class="btn btn-pub" id="bSave">保存</button>
       <div style="text-align:center;margin-top:10px;display:none" id="bCancelBox"><button class="btn btn-ghost" id="bCancel">取消编辑</button></div>
@@ -103,7 +104,40 @@ textarea.big { min-height:200px; font-size:13.5px; font-family:Consolas,"LXGW We
     <div id="bList" class="loading">加载中…</div>
   </div>
 
-  <!-- ═══ 工具 ═══ -->
+  <div class="pane" id="p-shizhan">
+    <div class="card">
+      <div id="sFormTitle" style="font-weight:700;margin-bottom:4px">新增实战帖</div>
+      <label>标题</label><input id="sTitle" placeholder="我亲手清掉了一个 RAT">
+      <div class="row">
+        <div><label>分类</label><input id="sCat" placeholder="逆向实录" list="sCatList"><datalist id="sCatList"><option>逆向实录</option><option>应急响应</option><option>方法论</option></datalist></div>
+        <div><label>标签</label><input id="sTag" placeholder="已发布 / 写作中"></div>
+      </div>
+      <label>正文（Markdown，可拖入 .md 文件或图片）</label>
+      <textarea id="sBody" class="big" placeholder="## 背景&#10;……"></textarea>
+      <div class="drop-tip">💡 拖 .md/.txt 进来 = 导入正文；拖图片进来 = 上传并插入图片</div>
+      <button class="btn btn-pub" id="sSave">保存</button>
+      <div style="text-align:center;margin-top:10px;display:none" id="sCancelBox"><button class="btn btn-ghost" id="sCancel">取消编辑</button></div>
+    </div>
+    <div class="list-h">全部实战帖（<span id="sCnt">0</span>）</div>
+    <div id="sList" class="loading">加载中…</div>
+  </div>
+
+  <div class="pane" id="p-projects">
+    <div class="card">
+      <div id="jFormTitle" style="font-weight:700;margin-bottom:4px">新增项目</div>
+      <div class="row">
+        <div><label>图标（emoji）</label><input id="jIcon" placeholder="🧭"></div>
+        <div><label>状态</label><select id="jStatus"><option>已完成</option><option>开发中</option><option>规划中</option><option>已归档</option></select></div>
+      </div>
+      <label>名称</label><input id="jName" placeholder="PE Inspector">
+      <label>简介</label><textarea id="jDesc" placeholder="一句话说清它是什么、做到哪了"></textarea>
+      <button class="btn btn-pub" id="jSave">保存</button>
+      <div style="text-align:center;margin-top:10px;display:none" id="jCancelBox"><button class="btn btn-ghost" id="jCancel">取消编辑</button></div>
+    </div>
+    <div class="list-h">全部项目（<span id="jCnt">0</span>）</div>
+    <div id="jList" class="loading">加载中…</div>
+  </div>
+
   <div class="pane" id="p-tools">
     <div class="card">
       <div id="tFormTitle" style="font-weight:700;margin-bottom:4px">新增工具帖</div>
@@ -113,7 +147,8 @@ textarea.big { min-height:200px; font-size:13.5px; font-family:Consolas,"LXGW We
         <div><label>标签</label><input id="tTag" placeholder="汉化+补丁（可空）"></div>
       </div>
       <label>正文（Markdown：网盘链接、提取码、步骤……）</label>
-      <textarea id="tBody" class="big" placeholder="## 下载&#10;- 链接：https://pan.baidu.com/…&#10;- 提取码：xxxx&#10;&#10;## 安装步骤&#10;……"></textarea>
+      <textarea id="tBody" class="big" placeholder="## 下载&#10;- 链接：https://pan.baidu.com/…&#10;- 提取码：xxxx"></textarea>
+      <div class="drop-tip">💡 拖 .md/.txt 进来 = 导入正文；拖图片进来 = 上传并插入图片</div>
       <button class="btn btn-pub" id="tSave">保存</button>
       <div style="text-align:center;margin-top:10px;display:none" id="tCancelBox"><button class="btn btn-ghost" id="tCancel">取消编辑</button></div>
     </div>
@@ -131,7 +166,6 @@ var token = localStorage.getItem('gh_pat') || '';
 var $ = function (id) { return document.getElementById(id); };
 function b64e(s) { return btoa(unescape(encodeURIComponent(s))); }
 function b64d(b) { return decodeURIComponent(escape(atob(b.replace(/\n/g, '')))); }
-function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function ok(t) { $('msg').className = 'msg ok'; $('msg').innerHTML = t; }
 function err(t) { $('msg').className = 'msg err'; $('msg').textContent = t; }
 
@@ -144,16 +178,45 @@ async function ghGet(file) {
   return { sha: d.sha, text: b64d(d.content) };
 }
 async function ghPut(file, sha, text, cmsg) {
+  var body = { message: cmsg, content: b64e(text) };
+  if (sha) body.sha = sha;
   var r = await fetch('https://api.github.com/repos/' + REPO + '/contents/' + file, {
     method: 'PUT',
     headers: { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: cmsg, content: b64e(text), sha: sha })
+    body: JSON.stringify(body)
   });
   if (!r.ok) throw new Error('提交失败：' + r.status);
   return (await r.json()).content.sha;
 }
 
-/* ═══════ 通用标签切换 ═══════ */
+/* ─── 拖拽：md 导入 + 图片上传 ─── */
+function attachDrop(ta) {
+  ta.addEventListener('dragover', function (e) { e.preventDefault(); ta.classList.add('drag'); });
+  ta.addEventListener('dragleave', function () { ta.classList.remove('drag'); });
+  ta.addEventListener('drop', async function (e) {
+    e.preventDefault(); ta.classList.remove('drag');
+    var files = Array.from(e.dataTransfer.files);
+    for (var f of files) {
+      if (/\.(md|markdown|txt)$/i.test(f.name)) {
+        ta.value = await f.text();
+        ok('已导入 ' + f.name);
+      } else if (/^image\//.test(f.type)) {
+        var path = 'assets/img-' + Date.now() + '-' + f.name.replace(/[^\w.\-]/g, '_');
+        var buf = await f.arrayBuffer();
+        var bytes = new Uint8Array(buf), bin = '';
+        for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        try {
+          await ghPut(path, null, b64decode(btoa(bin)), 'asset: ' + f.name);
+          ta.value += (ta.value && !ta.value.endsWith('\n') ? '\n' : '') + '![' + f.name + '](' + path + ')\n';
+          ok('图片已上传并插入：' + f.name);
+        } catch (e2) { err('图片上传失败：' + e2.message); }
+      }
+    }
+  });
+}
+['dBody', 'sBody', 'tBody', 'jDesc'].forEach(function (id) { attachDrop($(id)); });
+
+/* ─── 标签切换 ─── */
 document.querySelectorAll('.tab').forEach(function (t) {
   t.onclick = function () {
     document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('on'); });
@@ -164,7 +227,64 @@ document.querySelectorAll('.tab').forEach(function (t) {
   };
 });
 
-/* ═══════ 日常 ═══════ */
+/* ─── 通用 CRUD 工厂（帖子类：title/cat/tag/body） ─── */
+function makePostStore(prefix, file, key, viewUrl) {
+  var S = { sha: '', posts: [], edit: -1 };
+  var F = function (id) { return $(prefix + id); };
+  function render() {
+    F('Cnt').textContent = S.posts.length;
+    F('List').innerHTML = '';
+    S.posts.forEach(function (p, i) {
+      var div = document.createElement('div'); div.className = 'entry';
+      div.innerHTML = '<div class="k"></div><div class="v"></div><div class="ops"></div>';
+      div.querySelector('.k').textContent = (p.cat || '') + (p.tag ? ' · ' + p.tag : '');
+      div.querySelector('.v').textContent = p.title;
+      var be = document.createElement('button'); be.className = 'btn btn-ghost'; be.textContent = '编辑';
+      be.onclick = function () {
+        S.edit = i;
+        F('Title').value = p.title; F('Cat').value = p.cat || ''; F('Tag').value = p.tag || ''; F('Body').value = p.body;
+        F('FormTitle').textContent = '编辑帖子'; F('Save').textContent = '保存修改'; F('CancelBox').style.display = 'block';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+      var bd = document.createElement('button'); bd.className = 'btn btn-ghost btn-danger'; bd.textContent = '删除';
+      bd.onclick = async function () {
+        if (!confirm('删除「' + p.title + '」？')) return;
+        S.posts.splice(i, 1); await commit(key + ': 删除 ' + p.title);
+      };
+      div.querySelector('.ops').appendChild(be); div.querySelector('.ops').appendChild(bd);
+      F('List').appendChild(div);
+    });
+  }
+  function cancel() {
+    S.edit = -1; F('Title').value = ''; F('Body').value = '';
+    F('FormTitle').textContent = '新增帖子'; F('Save').textContent = '保存'; F('CancelBox').style.display = 'none';
+  }
+  async function load() {
+    var g = await ghGet(file); S.sha = g.sha;
+    S.posts = JSON.parse(g.text).posts;
+    render();
+  }
+  async function commit(cmsg) {
+    try {
+      S.sha = await ghPut(file, S.sha, JSON.stringify({ posts: S.posts }, null, 2), cmsg);
+      ok('已保存！约 1 分钟后可见 → <a href="' + viewUrl + '">查看页面</a>');
+      cancel(); render();
+    } catch (e) { err(e.message); load(); }
+  }
+  F('Cancel').onclick = cancel;
+  F('Save').onclick = function () {
+    var p = { title: F('Title').value.trim(), cat: F('Cat').value.trim() || '未分类', tag: F('Tag').value.trim(), body: F('Body').value.trim() };
+    if (!p.title || !p.body) { err('标题和正文必填'); return; }
+    if (S.edit === -1) { S.posts.unshift(p); commit(key + ': 新增 ' + p.title); }
+    else { S.posts[S.edit] = p; commit(key + ': 编辑 ' + p.title); }
+  };
+  return { load: load };
+}
+
+var storeS = makePostStore('s', 'shizhan.json', 'shizhan', 'shizhan.html');
+var storeT = makePostStore('t', 'tools.json', 'tools', 'tools.html');
+
+/* ─── 日常 ─── */
 var D = { sha: '', header: '', entries: [], edit: -1 };
 $('dDate').value = new Date().toISOString().slice(0, 10);
 function dRender() {
@@ -226,8 +346,8 @@ $('dSave').onclick = function () {
   else { D.entries[D.edit] = { date: date, slot: slot, body: body }; dCommit('daily: 编辑 ' + date); }
 };
 
-/* ═══════ 书单 ═══════ */
-var B = { sha: '', stages: [], books: [], edit: -1 };
+/* ─── 书单 ─── */
+var B = { sha: '', books: [], edit: -1 };
 var B_STATUS = { reading: '在读', todo: '待读', free: '免费在线', done: '已读' };
 function bRender() {
   $('bCnt').textContent = B.books.length;
@@ -235,12 +355,11 @@ function bRender() {
   B.books.forEach(function (b, i) {
     var div = document.createElement('div'); div.className = 'entry';
     div.innerHTML = '<div class="k"></div><div class="v"></div><div class="ops"></div>';
-    var st = B.stages[b.stage] || {};
-    div.querySelector('.k').textContent = (st.name || '') + ' · ' + (B_STATUS[b.status] || b.status);
+    div.querySelector('.k').textContent = B_STATUS[b.status] || b.status;
     div.querySelector('.v').textContent = '《' + b.title + '》 ' + (b.author || '');
     var be = document.createElement('button'); be.className = 'btn btn-ghost'; be.textContent = '编辑';
     be.onclick = function () {
-      B.edit = i; $('bTitle').value = b.title; $('bStage').value = b.stage; $('bStatus').value = b.status;
+      B.edit = i; $('bTitle').value = b.title; $('bStatus').value = b.status;
       $('bAuthor').value = b.author || ''; $('bLink').value = b.link || '';
       $('bFormTitle').textContent = '编辑书籍'; $('bSave').textContent = '保存修改'; $('bCancelBox').style.display = 'block';
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -256,14 +375,12 @@ function bRender() {
 }
 async function bLoad() {
   var g = await ghGet('books.json'); B.sha = g.sha;
-  var d = JSON.parse(g.text);
-  B.stages = d.stages; B.books = d.books;
-  $('bStage').innerHTML = B.stages.map(function (s, i) { return '<option value="' + i + '">' + s.no + ' ' + s.name + '</option>'; }).join('');
+  B.books = JSON.parse(g.text).books;
   bRender();
 }
 async function bCommit(cmsg) {
   try {
-    B.sha = await ghPut('books.json', B.sha, JSON.stringify({ stages: B.stages, books: B.books }, null, 2), cmsg);
+    B.sha = await ghPut('books.json', B.sha, JSON.stringify({ books: B.books }, null, 2), cmsg);
     ok('已保存！约 1 分钟后可见 → <a href="books.html">查看书单页</a>');
     bCancel(); bRender();
   } catch (e) { err(e.message); bLoad(); }
@@ -274,68 +391,62 @@ function bCancel() {
 }
 $('bCancel').onclick = bCancel;
 $('bSave').onclick = function () {
-  var b = {
-    title: $('bTitle').value.trim(), stage: parseInt($('bStage').value, 10),
-    status: $('bStatus').value, author: $('bAuthor').value.trim(), link: $('bLink').value.trim()
-  };
+  var b = { title: $('bTitle').value.trim(), status: $('bStatus').value, author: $('bAuthor').value.trim(), link: $('bLink').value.trim() };
   if (!b.title) { err('书名必填'); return; }
   if (B.edit === -1) { B.books.unshift(b); bCommit('books: 新增 ' + b.title); }
   else { B.books[B.edit] = b; bCommit('books: 编辑 ' + b.title); }
 };
 
-/* ═══════ 工具 ═══════ */
-var T = { sha: '', posts: [], edit: -1 };
-function tRender() {
-  $('tCnt').textContent = T.posts.length;
-  $('tList').innerHTML = '';
-  T.posts.forEach(function (p, i) {
+/* ─── 项目 ─── */
+var J = { sha: '', projects: [], edit: -1 };
+function jRender() {
+  $('jCnt').textContent = J.projects.length;
+  $('jList').innerHTML = '';
+  J.projects.forEach(function (p, i) {
     var div = document.createElement('div'); div.className = 'entry';
     div.innerHTML = '<div class="k"></div><div class="v"></div><div class="ops"></div>';
-    div.querySelector('.k').textContent = p.cat + (p.tag ? ' · ' + p.tag : '');
-    div.querySelector('.v').textContent = p.title;
+    div.querySelector('.k').textContent = (p.icon || '') + ' ' + p.status;
+    div.querySelector('.v').textContent = p.name + ' — ' + (p.desc || '');
     var be = document.createElement('button'); be.className = 'btn btn-ghost'; be.textContent = '编辑';
     be.onclick = function () {
-      T.edit = i; $('tTitle').value = p.title; $('tCat').value = p.cat; $('tTag').value = p.tag || ''; $('tBody').value = p.body;
-      $('tFormTitle').textContent = '编辑工具帖'; $('tSave').textContent = '保存修改'; $('tCancelBox').style.display = 'block';
+      J.edit = i; $('jIcon').value = p.icon || ''; $('jStatus').value = p.status; $('jName').value = p.name; $('jDesc').value = p.desc || '';
+      $('jFormTitle').textContent = '编辑项目'; $('jSave').textContent = '保存修改'; $('jCancelBox').style.display = 'block';
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     var bd = document.createElement('button'); bd.className = 'btn btn-ghost btn-danger'; bd.textContent = '删除';
     bd.onclick = async function () {
-      if (!confirm('删除「' + p.title + '」？')) return;
-      T.posts.splice(i, 1); await tCommit('tools: 删除 ' + p.title);
+      if (!confirm('删除项目「' + p.name + '」？')) return;
+      J.projects.splice(i, 1); await jCommit('projects: 删除 ' + p.name);
     };
     div.querySelector('.ops').appendChild(be); div.querySelector('.ops').appendChild(bd);
-    $('tList').appendChild(div);
+    $('jList').appendChild(div);
   });
 }
-async function tLoad() {
-  var g = await ghGet('tools.json'); T.sha = g.sha;
-  T.posts = JSON.parse(g.text).posts;
-  tRender();
+async function jLoad() {
+  var g = await ghGet('projects.json'); J.sha = g.sha;
+  J.projects = JSON.parse(g.text).projects;
+  jRender();
 }
-async function tCommit(cmsg) {
+async function jCommit(cmsg) {
   try {
-    T.sha = await ghPut('tools.json', T.sha, JSON.stringify({ posts: T.posts }, null, 2), cmsg);
-    ok('已保存！约 1 分钟后可见 → <a href="tools.html">查看工具页</a>');
-    tCancel(); tRender();
-  } catch (e) { err(e.message); tLoad(); }
+    J.sha = await ghPut('projects.json', J.sha, JSON.stringify({ projects: J.projects }, null, 2), cmsg);
+    ok('已保存！约 1 分钟后可见 → <a href="projects.html">查看项目页</a>');
+    jCancel(); jRender();
+  } catch (e) { err(e.message); jLoad(); }
 }
-function tCancel() {
-  T.edit = -1; $('tTitle').value = ''; $('tBody').value = '';
-  $('tFormTitle').textContent = '新增工具帖'; $('tSave').textContent = '保存'; $('tCancelBox').style.display = 'none';
+function jCancel() {
+  J.edit = -1; $('jIcon').value = ''; $('jName').value = ''; $('jDesc').value = '';
+  $('jFormTitle').textContent = '新增项目'; $('jSave').textContent = '保存'; $('jCancelBox').style.display = 'none';
 }
-$('tCancel').onclick = tCancel;
-$('tSave').onclick = function () {
-  var p = {
-    title: $('tTitle').value.trim(), cat: $('tCat').value.trim() || '未分类',
-    tag: $('tTag').value.trim(), body: $('tBody').value.trim()
-  };
-  if (!p.title || !p.body) { err('标题和正文必填'); return; }
-  if (T.edit === -1) { T.posts.unshift(p); tCommit('tools: 新增 ' + p.title); }
-  else { T.posts[T.edit] = p; tCommit('tools: 编辑 ' + p.title); }
+$('jCancel').onclick = jCancel;
+$('jSave').onclick = function () {
+  var p = { icon: $('jIcon').value.trim() || '📦', status: $('jStatus').value, name: $('jName').value.trim(), desc: $('jDesc').value.trim() };
+  if (!p.name) { err('项目名必填'); return; }
+  if (J.edit === -1) { J.projects.unshift(p); jCommit('projects: 新增 ' + p.name); }
+  else { J.projects[J.edit] = p; jCommit('projects: 编辑 ' + p.name); }
 };
 
-/* ═══════ 启动 ═══════ */
+/* ─── 启动 ─── */
 if (token) boot(); else $('tokenBox').style.display = 'block';
 $('saveToken').onclick = function () {
   var t = $('tokenInput').value.trim();
@@ -345,7 +456,7 @@ $('saveToken').onclick = function () {
 async function boot() {
   $('tokenBox').style.display = 'none';
   $('mainBox').style.display = 'block';
-  try { await Promise.all([dLoad(), bLoad(), tLoad()]); }
+  try { await Promise.all([dLoad(), bLoad(), jLoad(), storeS.load(), storeT.load()]); }
   catch (e) { err('加载失败：' + e.message); }
 }
 </script>

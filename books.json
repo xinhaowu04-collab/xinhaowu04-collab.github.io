@@ -1,20 +1,64 @@
 {
-  "stages": [
-    { "no": "壹", "name": "漏洞分析入门", "hint": "建立感觉：漏洞长什么样、怎么被利用" },
-    { "no": "贰", "name": "攻防视野", "hint": "从攻击者视角理解体系" },
-    { "no": "叁", "name": "内功心法", "hint": "平台与底层功底，读慢不怕" },
-    { "no": "肆", "name": "工程实战", "hint": "结业前的主线任务" }
-  ],
   "books": [
-    { "stage": 0, "title": "0day 安全：软件漏洞分析技术（第 2 版）", "author": "王清 · 国内漏洞启蒙经典", "status": "reading", "link": "" },
-    { "stage": 0, "title": "漏洞战争：软件漏洞分析精要", "author": "林桠泉 · 真实 CVE 复盘", "status": "todo", "link": "" },
-    { "stage": 0, "title": "捉虫日记", "author": "A Bug Hunter's Diary · 猎人的一天", "status": "todo", "link": "" },
-    { "stage": 1, "title": "灰帽黑客（第 5 版）", "author": "渗透测试方法大全", "status": "todo", "link": "" },
-    { "stage": 1, "title": "A Guide to Kernel Exploitation", "author": "内核利用 · 长期深化方向", "status": "todo", "link": "" },
-    { "stage": 2, "title": "二进制分析实战", "author": "Practical Binary Analysis", "status": "todo", "link": "" },
-    { "stage": 2, "title": "Windows Internals（第 7 版）", "author": "Windows 内核圣经", "status": "todo", "link": "" },
-    { "stage": 2, "title": "Windows 核心编程", "author": "Win32 系统编程根基", "status": "todo", "link": "" },
-    { "stage": 2, "title": "软件调试（第 2 版）卷 2", "author": "张银奎 · 调试器使用之道", "status": "todo", "link": "" },
-    { "stage": 3, "title": "The Fuzzing Book", "author": "fuzzingbook.org · 免费在线，配代码可跑", "status": "free", "link": "https://www.fuzzingbook.org" }
+    {
+      "title": "0day 安全：软件漏洞分析技术（第 2 版）",
+      "author": "王清 · 国内漏洞启蒙经典",
+      "status": "reading",
+      "link": ""
+    },
+    {
+      "title": "漏洞战争：软件漏洞分析精要",
+      "author": "林桠泉 · 真实 CVE 复盘",
+      "status": "todo",
+      "link": ""
+    },
+    {
+      "title": "捉虫日记",
+      "author": "A Bug Hunter's Diary · 猎人的一天",
+      "status": "todo",
+      "link": ""
+    },
+    {
+      "title": "灰帽黑客（第 5 版）",
+      "author": "渗透测试方法大全",
+      "status": "todo",
+      "link": ""
+    },
+    {
+      "title": "A Guide to Kernel Exploitation",
+      "author": "内核利用 · 长期深化方向",
+      "status": "todo",
+      "link": ""
+    },
+    {
+      "title": "二进制分析实战",
+      "author": "Practical Binary Analysis",
+      "status": "todo",
+      "link": ""
+    },
+    {
+      "title": "Windows Internals（第 7 版）",
+      "author": "Windows 内核圣经",
+      "status": "todo",
+      "link": ""
+    },
+    {
+      "title": "Windows 核心编程",
+      "author": "Win32 系统编程根基",
+      "status": "todo",
+      "link": ""
+    },
+    {
+      "title": "软件调试（第 2 版）卷 2",
+      "author": "张银奎 · 调试器使用之道",
+      "status": "todo",
+      "link": ""
+    },
+    {
+      "title": "The Fuzzing Book",
+      "author": "fuzzingbook.org · 免费在线，配代码可跑",
+      "status": "free",
+      "link": "https://www.fuzzingbook.org"
+    }
   ]
 }
