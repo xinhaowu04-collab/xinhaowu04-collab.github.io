@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /fabu.html
+Disallow: /notes/
+Allow: /
+
+Sitemap: https://0xl.top/feed.xml
